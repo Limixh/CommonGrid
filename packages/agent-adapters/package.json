@@ -1,5 +1,5 @@
 {
   "name": "@commongrid/agent-adapters", "version": "0.1.0", "private": true,
-  "type": "module", "exports": { ".": "./src/index.ts" },
+  "type": "module", "exports": { ".": "./src/index.ts", "./testing/functional-test-models": "./testing/functional-test-models.ts" },
   "dependencies": { "@commongrid/task-schema": "0.1.0" }
 }

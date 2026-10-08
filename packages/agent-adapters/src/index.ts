@@ -4,6 +4,9 @@ export { parseClaudeLine, parseCodexAppServerLine } from "./provider-events.ts";
 export { buildArtifactBundle, artifactLimits, safeArtifactPath, inspectArtifactText } from "./artifact-bundle.ts";
 export type { ArtifactBinding, ArtifactFile, ArtifactScanner } from "./artifact-bundle.ts";
 
+export { normalizeCodexQuota, sanitizeQuotaObservation } from "./quota-observation.ts";
+export type { QuotaWindow, QuotaObservation } from "./quota-observation.ts";
+
 export interface AgentEvent {
   type: "session" | "started" | "message" | "completed" | "error" | "unknown";
   text?: string;
