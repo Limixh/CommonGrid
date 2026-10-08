@@ -31,7 +31,7 @@ Dağıtık katılımın çözüm oranını veya çözüm süresini iyileştirmes
 ### 2.1 v1.0 Kapsamında
 Hedef, MVP'nin ötesinde tamamlanmış bir v1.0 ürünüdür. Aşağıdaki kapsam geliştirme boyunca korunur; ara sürümler, teknik denemeler ve alfa/beta aşamaları bu ürüne ulaşmak için doğrulama adımlarıdır. Test sonuçları mimariyi, uygulama sırasını ve takvimi güncelleyebilir. Kapsam değişirse gerekçesi ve yeni kabul kriterleri bu belgeye ve uygulama yol haritasına birlikte işlenir.
 
-2026-10-08 uygulama kaydı: PostgreSQL kalıcı sonuç/checkpoint/inceleme/tek kazanan temeli ADR 0009 ile eklendi. ADR 0010 CommonGrid GitHub/Google hesabını, oturumdan yetkilendirilen DB API'sini ve kişisel katkı ekranını bağlar; CLI abonelik girişi ayrı kalır. Gerçek OAuth uygulama/staging kabulü, native paket auth dönüşü, artifact doğrulayıcısı, puan/merge ve görev çalışma alanı entegrasyonu bekler. Bu kayıt aşağıdaki v1 kapsamını daraltmaz veya uçtan uca kabulün yerine geçmez; yeni görev başlatma kapısı kapalıdır.
+Uygulama durumu ve kabul kanıtları [geliştirme rehberinde](docs/DEVELOPMENT.md) ve [GO listesinde](docs/GO_GATE.md) izlenir. Bu belge bitmiş v1 ürününün gereksinimlerini tanımlar.
 
 - Windows, macOS ve Linux masaüstü uygulaması
 - Bulut ajan desteği: Claude Code, Codex CLI
@@ -836,15 +836,9 @@ SWE-ReX F0 runtime/yönlendirme adayıdır; resmi CLI araçları ve kimlik sın�
 
 ## 18. Açık Sorular
 
+Kesinleşen mimari tercihler: koordinatör Go; bileşen seçimleri [OPEN_SOURCE_SELECTION.md](docs/OPEN_SOURCE_SELECTION.md) içinde. Deneme sonuçları ve tarihli uygulama kayıtları [geliştirme tarihçesinde](docs/DEVELOPMENT_HISTORY.md) ve ADR'lerde tutulur.
+
 - [ ] Ürün adı ve marka
-- [x] Koordinatör dili: Go seçildi (2026-10-08, ADR 0001).
-- [x] Açık kaynak bileşen tercihleri kabul edildi (2026-10-08); `docs/OPEN_SOURCE_SELECTION.md`.
-- [x] Temporal F0 Windows recovery/retry denemesi (2026-10-08, ADR 0002; fixture-only)
-- [x] Windows Docker Linux/WSL2 task-tools fixture sınırı: 12 kontrol ve owned cleanup (2026-10-08, ADR 0004; tam CLI/auth kapısı değil)
-- [x] İki resmi CLI ile dar task-tool fixture yönlendirmesi: 20 kontrol; ayrı native Windows Claude.ai/ChatGPT araçsız bağlantısı (2026-10-08, ADR 0005; gerçek sandbox görev/auth yenileme kabulü değil)
-- [x] Private managed-session/cache/stdio egress adayı: 16 canary/ağ/budget/restart kontrolü; bağımsız verifier 8 kontrol. İki resmi izole login ve Claude/Codex gerçek AI adaylarında 32'şer örnek + geçerli diff; Codex dar profil fixture'ı 10 kontrol, resmi refresh isteği ve iki izole logout geçti (2026-10-08, ADR 0006; geniş F0 güvenlik/Claude doğal yenileme kabulü bekliyor)
-- [x] F0 sentetik adversarial/control/lifecycle/artifact paketi: yeni profillerde görev dosya/process/fd/env/socket/ptrace ve kaynak sınırı testleri; broker/relay admission ve cleanup; tek dosyalı artifact politikası ile gerçek Git apply/hash roundtrip (2026-10-08, ADR 0007; genel scanner/importer, tüm provider yolları ve gerçek auth kabulünün yerine geçmez)
-- [x] Development kaynak paketi/upload/immutable registry-vault/Trivy/verification bridge temeli (2026-10-08, ADR 0011; genel Lean/yazılım harness'i, production S3/scanner sandbox ve soft context kabulü ayrı; v1 kapsamı korunur)
 - [ ] Temporal staging işletim/maliyet ve production outbox kabulü (§7.5)
 - [ ] SWE-ReX/resmi CLI araç yönlendirmesi ve gVisor/Kata benchmark kararı
 - [ ] İlk lansman projeleri hangileri olacak?

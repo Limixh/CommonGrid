@@ -4,8 +4,7 @@
 > **Hedef:** v1.0 — MVP'nin ötesinde tamamlanmış ürün olarak açık lansman
 > **Tahmini süre:** ~32 hafta (≈ 8 ay)
 > **Revizyon:** 1.3 — Güncellendi: kimlik izolasyonu ve sağlayıcı kapısı, görev/strateji sözleşmeleri, güvenli ayrıştırma, kullanıcı ve altyapı bütçeleri, gerçek görev benchmark'ları ve aday yaşam döngüsü
-> **Durum:** Geliştirme başladı — Faz 0 (2026-10-08). İlk uygulama ve test kayıtları: `docs/DEVELOPMENT.md`; fizibilite kapısı henüz değerlendirilmedi.
-> **Uygulama notu — ADR 0011:** Kaynak paketi üretimi, authenticated binary upload, immutable private byte registry/vault, gerçek Trivy taraması ve doğrulayıcı bağlantısı eklendi. Paket result/hard snapshot içindir; genel Lean/yazılım harness'i, production S3/scanner sandbox ve soft context sonraki entegrasyonlardır. Bu temel F3/F4 veya izolasyon kapısının tamamı değildir; bitmiş v1 hedefi ve faz kapsamları korunur.
+> **Uygulama takibi:** Güncel durum ve testler `docs/DEVELOPMENT.md`, CLI kabulü `docs/GO_GATE.md`, tarihli kararlar ADR'lerde tutulur. Bu belge planlanan fazları ve çıkış kriterlerini tanımlar.
 
 ---
 
@@ -184,8 +183,8 @@ Spike'tan bağımsız, her senaryoda gerekecek işler paralel yürür:
 - CI: lint, test, şema doğrulama; masaüstü için üç platformda derleme.
 - **Teknik kararlar (spec §18'den):** koordinatör dili (öneri: Go — uzun süreli, eşzamanlı bağlantılar ve düşük kaynak kullanımı için), barındırma sağlayıcısı, nesne depolama.
 - Görev şeması v1 (`packages/task-schema`): JSON Schema + her iki dil için üretilmiş tipler. `type`/`kind`, doğrulama profilleri, planlayıcı çıktı şeması, `task_version`/`contract_hash`, onaylı stratejiler ve denemeye özel `execution_context` sözleşmesi dahil. Simülatör aynı şemayı kullanır.
-- Veri modeli v1 ve migration altyapısı. PostgreSQL kiralama/bütçe/outbox üzerine submissions/checkpoints/reviews/winner kalıcı domain işlemleri ve gerçek DB kabulü eklendi (ADR 0009, `docs/DATABASE.md`). ADR 0010 kişisel kayıtları/mevcut lease metadata işlemlerini oturumla HTTP'ye bağlar; reserve/start kapalıdır. Gerçek artifact doğrulaması, puan/merge ve production workflow entegrasyonu ayrı kabul işidir.
-- OAuth girişi (GitHub, Google): kalıcı provider subject, browser-bound state/PKCE/OIDC ve opaque session temeli, hesap/katkı ekranı eklendi (ADR 0010, `docs/AUTHENTICATION.md`). Gerçek provider uygulama/staging ve paketlenmiş native auth dönüşü kabulü bekler.
+- Veri modeli v1, migration altyapısı; PostgreSQL kiralama/bütçe/outbox, gönderim/checkpoint/inceleme/tek kazanan, gerçek DB kabulü ve sonradan verifier/puan/merge/workflow bağlantısı.
+- OAuth girişi (GitHub, Google): kalıcı provider subject, browser-bound state/PKCE/OIDC, opaque session, hesap/katkı ekranı; gerçek provider/staging ve paketlenmiş native auth dönüşü kabulü.
 - Staging ortamı.
 - Referans Lean görevleri, benchmark metodolojisi ve ayarlama/değerlendirme kümelerinin ayrılması; lansman projelerinin hazırlanması.
 - Kullanıcı katkı bütçesi varsayılanları, platform doğrulama/depolama maliyet modeli ve kotalar (spec §6.9, §15).

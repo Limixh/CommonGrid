@@ -29,6 +29,12 @@
 | `account-ui-windows-2026-10-08.json` | 12 Playwright testi: 8 mock hesap/katkı + 4 mevcut fixture API çalışma alanı; hesap/katkı ekranları 1440/390 px görsel inceleme | Gerçek OAuth yönlendirmesi, native auth dönüşü veya gerçek hesap/model çalıştırma değildir |
 | `foundations-windows-2026-10-08.json` | ADR 0007 tarihli `npm run check`: 121 Node testi, Go testleri, generated/typecheck ve frontend/Go build | PostgreSQL integration, Temporal, UI/native release ve uzak CI yeniden çalıştırılmadı |
 | `session-foundations-windows-2026-10-08.json` | ADR 0008 son `npm run check`: 167 Node testi (13 script + 154 package/spike), sıfır failure; Go testleri, generated/typecheck ve frontend/Go build | Aynı entegrasyon/platform sınırları; session/provider fixture'ları gerçek expiry/rotation veya kota tükenmesi kabulü değildir |
+| [artifact-delivery-windows-2026-10-08.json](artifact-delivery-windows-2026-10-08.json) | Immutable kaynak teslimi, scanner ve verifier köprüsü kabulü | Development artifact sınırı; genel Lean/yazılım harness'i veya CLI GO değildir |
+| [artifact-postgres-windows-2026-10-08.json](artifact-postgres-windows-2026-10-08.json) | Artifact/verifier PostgreSQL ve HTTP zinciri | Fixture identity/harness; gerçek provider veya AI kabulü değildir |
+| [artifact-foundations-windows-2026-10-08.json](artifact-foundations-windows-2026-10-08.json) | ADR 0011 genel kaynak kontrolü | Tarihli check kanıtı; production veya tüm platform kabulü değildir |
+| [go-gate-foundations-windows-2026-10-08.json](go-gate-foundations-windows-2026-10-08.json) | ADR 0012 ürün/deneme testleri, şema/tip/derleme, oturum/limit hata yolları ve açık profile trust kontrolleri geçti | GO vermez; gerçek hesap/model kabulü ayrı kalır |
+| [go-gate-continuity-windows-2026-10-08.json](go-gate-continuity-windows-2026-10-08.json) | Güncel runtime ile iki sağlayıcıda sentetik restart, işlem yarışları ve cleanup geçti | Gerçek yenileme/kota gözlemi veya production recovery değildir |
+| [go-gate-adversarial-windows-2026-10-08.json](go-gate-adversarial-windows-2026-10-08.json) | Güncel runtime ile iki sağlayıcıda sentetik dosya/process/ağ/kaynak sınırı ve cleanup geçti | Gerçek credential/model veya bütün izolasyon yollarının kabulü değildir |
 
 Temporal recovery denemesi süreç temizliği değişikliğinden sonra tekrar çalıştırılıp geçti; buradaki kayıt son başarılı denemeden kopyalandı. Ham log/SQLite dosyaları `.local` altında kalır. Kaynaklar Git'e kopyalanmaz; kilit dosyası ile tekrar indirilebilir.
 
@@ -45,3 +51,5 @@ Managed session komutları `../cli-session/MANAGED_SESSIONS.md` içinde. `coding
 Hesapsız son paketi tekrar üretmek için `npm run check`, `npm run install:cli-fixtures`, `npm run spike:managed-adversarial` ve `npm run spike:coding-verifier`. Başarılı CLI protokol fixture kayıtları ayrı kalır; sentetik adversarial paket gerçek model çağrısı yapmaz. Eski `.local` Git apply skip hatası dahil başarısız ve kapsamı daha dar ara koşular `.local` altında korunur; burada yalnız son başarılı kanıt yayımlanır.
 
 Oturum sürekliliği için `npm run spike:session-continuity`; eski private profillere dokunmadan yeni sentetik kaynaklar oluşturulur ve kaldırılır. Salt okunur gerçek hesap kabulünün `--real-account [--resume]` sözleşmesi `../cli-session/MANAGED_SESSIONS.md` içindedir; CI'a eklenmez ve bu aşamada çalıştırılmadı. Resume checkpoint veya sayısal quota snapshot, yenileme/tükenme/izin kanıtı değildir. ADR 0008 kapsamı dar tutar.
+
+Güncel çalışma sırası [ADR 0012](../adr/0012-go-gate-priority-and-development-boundaries.md) ve [GO listesinde](../../docs/GO_GATE.md) tutulur. İndeks tarihli kanıtı korur; yeni sayılar yalnız tamamlanmış raporlardan alınır. İşlev testlerinde Luna/Haiku tercihi eski raporların model alanlarını değiştirmez.

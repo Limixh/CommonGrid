@@ -1,6 +1,6 @@
 # Faz 0: CLI / sandbox fizibilitesi
 
-Durum: **NOT EVALUATED**. İki resmi CLI ile izole gerçek kodlama, bağımsız verifier/diff, Codex managed refresh ve iki profile logout geçti. Claude doğal yenilemesi ve geniş adversarial/platform kabulü tamamlanmadı; GO kararı yoktur.
+Durum: **NOT EVALUATED**; `execution_enabled=false`. Önceki izole gerçek görev, verifier/diff, Codex refresh ve logout sonuçları tarihli kanıttır. Güncel auth/yenileme, normal kullanımda kota ve taşınabilir izolasyon kabulü bekler; GO kararı yoktur. Güncel liste [GO_GATE.md](../docs/GO_GATE.md), çalışma sırası [ADR 0012](adr/0012-go-gate-priority-and-development-boundaries.md) içinde.
 
 ## Açık kaynak kabul denemeleri
 
@@ -38,3 +38,11 @@ Gerekli kanıtlar, her CLI ve desteklenen platform için ayrı kaydedilecek:
 6. İki ajan için sağlayıcı koşullarının sürüm/tarih bazlı kaydı.
 
 Kontrollü gerçek hesap denemeleri bu kimlik ayrımıyla geçti; kapsam her raporda ayrıca belirtilir. Tam inceleme sonucu GO / GO WITH LIMITATION / REWORK / NO-GO olarak yol haritasındaki kurallarla kaydedilecek. Bağımsız Faz 0 temelleri geliştirilebilir.
+
+## Geliştirme ve kanıt sınırı
+
+Saf quota/session yardımcıları `packages/agent-adapters` altında tutulur; resmi CLI, private profile ve managed runner denemeleri `spike/` içinde kalır. İşlev testi model tercihleri paketin ayrı `testing/functional-test-models` yolundadır: Codex `gpt-6-luna`, Claude `haiku`. Bunlar ürün kullanıcısının model seçimini veya geliştirme ajanı modelini sınırlamaz. Önceki Astra/Sonnet raporları kendi tarih ve modelleriyle korunur.
+
+`npm run test:product` ürün ve saf paket testlerini, `npm run test:spike-fixtures` deneme güvenlik/protokol fixture testlerini çalıştırır. `npm run check` ikisini de içerir; gerçek hesap, AI veya Docker kabulünü başlatmaz. Bundled TLS roots varsayılandır; ek Claude root yalnız [açık profile seçimiyle](cli-session/MANAGED_SESSIONS.md) kullanılır.
+
+Yeni genel altyapı katmanları F0 teknik kabulünün arkasına alınır; gerekli küçük güvenlik düzeltmeleri devam eder. Tam v1 kapsamı [ürün belgesinde](../PROJECT_SPEC1.2.md) ve [yol haritasında](../implementation_roadmap1.3.md) korunur. Güncel giriş README ve GO listesiyle, tarihli ölçümler [rapor indeksi](results/README.md) ve [geliştirme arşiviyle](../docs/DEVELOPMENT_HISTORY.md) ayrılır.

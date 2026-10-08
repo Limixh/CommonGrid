@@ -64,17 +64,27 @@ npm run spike:managed-session -- destroy codex CODEX_UUID
 
 `destroy` yalnız seçili owner'ın CLI/auth/tools kaynaklarını kaldırır; broad prune yapmaz. Giriş sonrası profile'ı tekrar kullanmak için hacmi koruyun. CLI namespace'leri komut sonunda kaldırılır; private hacmin kalması cleanup hatası değildir. Host crash durumunda namespace PID1 ömrü 15 dakika ile sınırlıdır; bu production crash recovery kanıtı değildir. Auth hacmi için otomatik retention/şifreleme ve production garbage collection henüz yoktur.
 
-Provider egress sadece exact hostname:443, public IPv4 DNS ve TLS passthrough stdio relay'idir; task ağı `none` kalır. Public tools, bridge kaynakları ve CA eşitliği her start'ta doğrulanır. Base CA digest'i sabit Node imajının bundled root listesidir; TLS kapatılmaz. `install-trust PROVIDER UUID` yalnız güncel public bridge/broker hash'leriyle eşleşen cache'e, aktif komut yokken CA eklemek içindir; değişik içerik üzerine yazılmaz. Eski bridge/broker cache'ini yükseltmez; bunun için aşağıda anlatılan yeni `prepare` gerekir.
+Provider egress sadece exact hostname:443, public IPv4 DNS ve TLS passthrough stdio relay'idir; task ağı `none` kalır. Public tools, bridge kaynakları ve CA eşitliği her start'ta doğrulanır. Varsayılan trust sabit Node imajının bundled root listesidir. Host CA deposu otomatik taranmaz; TLS doğrulaması açık kalır. `install-trust PROVIDER UUID` yalnız güncel public bridge/broker hash'leriyle eşleşen cache'e bu bundled listeyi ekler. Eski bridge/broker cache'ini yükseltmek yeni `prepare` gerektirir.
 
-Bu makinede Claude model isteği Kaspersky HTTPS incelemesi nedeniyle ek public Windows root gerektirdi. Yalnız Windows'un doğruladığı zincirin installed Root sertifikası eklendi; private key, auth cache veya tüm host trust store taşınmadı. Benzer bir TLS hatasında kontrollü tekrar:
+### İsteğe bağlı, açık seçilmiş Claude TLS root'u
+
+Ek public root yalnız Claude için, kullanıcının PEM ve proof dosyasını birlikte açıkça seçmesiyle kurulur. Windows exporter manuel çalıştırılır: sabit `api.anthropic.com:443` için Windows hostname/zincir doğrulamasını yapar ve yalnız doğrulanmış zincirdeki installed Root sertifikasını dışarı verir. Private key veya host trust deposunun tamamını taşımaz. PowerShell 7 gerekir:
 
 ```powershell
 ./spike/cli-session/export-windows-trust.ps1 -CheckOnly
 ./spike/cli-session/export-windows-trust.ps1
-npm run spike:managed-session -- install-host-trust claude CLAUDE_UUID
+npm run spike:managed-session -- prepare claude --host-trust-pem ".local/managed-session/claude-windows-root.pem" --host-trust-proof ".local/managed-session/claude-windows-root.proof.json"
 ```
 
-Exporter PowerShell 7 ile yalnız `api.anthropic.com:443` için Windows hostname/chain doğrulaması ve installed Root kontrolü yapar. Yerel certificate/proof `.local` altında kalır. Mevcut farklı root üzerine yazılmaz; ağ/antivirus trust değiştiğinde önce sebep incelenir. Bu aday genel CA yönetimi veya rotation desteği değildir.
+Henüz ek root seçilmemiş bir profile için alternatif komut:
+
+```powershell
+npm run spike:managed-session -- install-host-trust claude CLAUDE_UUID --host-trust-pem ".local/managed-session/claude-windows-root.pem" --host-trust-proof ".local/managed-session/claude-windows-root.proof.json"
+```
+
+`--host-trust-pem PATH` ve `--host-trust-proof PATH` birlikte zorunludur; yalnız Claude `prepare` veya `install-host-trust` komutlarında kabul edilir. Seçim sırasında proof en fazla 30 günlük olmalı, sertifika geçerli olmalıdır. Root, profile owner ve sertifika/PEM SHA-256 değerlerini taşıyan metadata ile bağlanır; seçilmiş içerik tools hacmine sabitlenir. Startup bu değişmez içeriği salt okunur hacimden doğrular, host PEM/proof dosyalarını yeniden okumaz. Sertifikanın geçerlilik süresi her startup'ta kontrol edilir; 30 günlük proof sınırı yeni seçim içindir.
+
+Root değiştiğinde neden incelenir ve açık seçimle yeni profile hazırlanır. Mevcut profile'ın root'u sessizce güncellenmez; bu yol genel CA rotation yönetimi değildir. Yerel certificate/proof `.local` altında kalır. 2026-10-08 tarihli Kaspersky HTTPS incelemesi bulgusu önceki makineye ait kanıttır; yeni makinelerin aynı root'u gerektirdiği veya otomatik keşfedileceği anlamına gelmez.
 
 ## Hesapsız güvenlik testleri
 
@@ -105,3 +115,5 @@ npm run spike:session-acceptance -- codex CODEX_UUID --real-account --resume
 Claude için provider `claude` seçilir. Önceden hazırlanmış public profile manifesti ve resmi kullanıcı girişi gerekir; komut kendiliğinden login/logout veya model çağrısı yapmaz. Status → namespace restart → status, Codex için resmi refresh → status → `account/rateLimits/read` sırası uygulanır. Claude için force-refresh/kota metodu varsayılmaz. Import sırasında CLI başlatılmaz; fixture'lar hesap olmadan çalışır. Gerçek hesap komutu CI'a bağlı değildir ve bu aşamada çalıştırılmadı.
 
 Checkpoint profile/provider ve zamanlarla bağlı sınırlı metadatadır; credential içermez. Resume aralığı doğal token yenilemesi kanıtı olmaz. Kota `available` değeri bilginin okunabildiğini ifade eder; kullanılabilir bakiye garantisi değildir. Desteklenmeyen/bildirilmeyen bilgiler `unknown` kalır. Deadline/iptal ve cleanup ayrı sınırlar taşır; hâlâ bekleyen işlem varken cleanup kesinleşmiş sayılmaz. Ayrıntılar [ADR 0008](../adr/0008-session-continuity-quota-and-operation-fencing.md) içindedir.
+
+Güncel kabul sırası ve geliştirme sınırı [ADR 0012](../adr/0012-go-gate-priority-and-development-boundaries.md) içinde. Önce F0 auth/yenileme ve normal kullanımda kota gözlemleri tamamlanır; kota kasıtlı tüketilmez. Ucuz test modeli kullanılamazsa test durur. Desktop/API `execution_enabled=false`, tam izolasyon kapısı `not_evaluated` kalır.
