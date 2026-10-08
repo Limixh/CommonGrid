@@ -7,7 +7,8 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { codexFunctionalTestModel, claudeFunctionalTestModel } from "@commongrid/agent-adapters/testing/functional-test-models";
+import { codexFunctionalTestModel, claudeFunctionalTestModel, validateClaudeFunctionalTestJsonModel } from "@commongrid/agent-adapters/testing/functional-test-models";
+import { ProviderFailure, failureCode, validateClaudeStatus, validateClaudeResult } from "../../packages/agent-adapters/src/session-protocol.ts";
 
 assert.equal(process.platform, "win32", "native subscription smoke is currently Windows-only");
 const root = fileURLToPath(new URL("../../", import.meta.url));
@@ -18,8 +19,9 @@ const claude = path.join(profile, ".local/bin/claude.exe");
 const codex = path.join(profile, "AppData/Roaming/npm/node_modules/@openai/codex/node_modules/@openai/codex-win32-x64/vendor/x86_64-pc-windows-msvc/bin/codex.exe");
 const env = { ...process.env };
 for (const key of ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "OPENAI_BASE_URL", "ANTHROPIC_DEFAULT_HAIKU_MODEL", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY"]) delete env[key];
-const report: Record<string, any> = { checked_at: new Date().toISOString(), platform: "win32", purpose: "native_subscription_fixed_text_only_connection_smoke", real_model_inference_attempted: true, task_execution_tested: false, os_identity_isolation_tested: false, credential_files_copied: false, paid_api_fallback: false, execution_enabled: false, isolation_gate: "not_evaluated", providers: {} };
+const report: Record<string, any> = { checked_at: new Date().toISOString(), platform: "win32", purpose: "native_subscription_fixed_text_only_connection_smoke", real_model_inference_attempted: false, task_execution_tested: false, os_identity_isolation_tested: false, credential_files_copied: false, paid_api_fallback: false, execution_enabled: false, isolation_gate: "not_evaluated", providers: {} };
 const only = process.env.CG_SMOKE_PROVIDER;
+if(only!==undefined&&!['claude','codex'].includes(only))throw new Error("native_smoke_provider_invalid");
 function classify(message: unknown) {
   const text = String(message ?? "").toLowerCase();
   return [
@@ -43,18 +45,22 @@ function capture(command: string, args: string[], timeout = 15_000, statusStderr
 }
 try {
   if (only === "codex") throw new Error("skip_provider");
-  const status = JSON.parse(await capture(claude, ["auth", "status", "--json"]));
-  assert.equal(status.loggedIn, true); assert.equal(status.authMethod, "claude.ai");
-  report.providers.claude = { authenticated: true, method: "claude.ai", subscription: status.subscriptionType, status: "running" };
+  const status = validateClaudeStatus(await capture(claude, ["auth", "status", "--json"]),0,true);
+  report.providers.claude = { ...status, requested_model:claudeFunctionalTestModel, observed_model:null, model_verified:false, status: "running" };
+  report.real_model_inference_attempted=true;
   const c = JSON.parse(await capture(claude, ["--print", "--output-format", "json", "--tools", "", "--restricted", "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}', "--setting-sources", "", "--disable-slash-commands", "--no-session-persistence", "--no-chrome", "--permission-mode", "dontAsk", "--model", claudeFunctionalTestModel, "--fallback-model", claudeFunctionalTestModel, "Reply with exactly CG_OK. Do not use any tools."], 90_000));
-  assert.equal(c.is_error, false); assert.equal(c.subtype, "success"); assert.equal(c.result.trim(), "CG_OK");
-  Object.assign(report.providers.claude, { status: "passed", fixed_reply_verified: true, model: claudeFunctionalTestModel });
+  validateClaudeResult(c);
+  const observedModel=validateClaudeFunctionalTestJsonModel(c);
+  Object.assign(report.providers.claude,{model:observedModel,observed_model:observedModel,model_verified:true});
+  assert.equal(c.result.trim(), "CG_OK");
+  Object.assign(report.providers.claude, { status: "passed", fixed_reply_verified: true, model:observedModel, observed_model:observedModel, model_verified:true });
   console.log("PASS Claude: native Claude.ai subscription connection, tools disabled");
-} catch { if (only !== "codex") { report.providers.claude = { ...report.providers.claude, status: "failed" }; process.exitCode = 1; console.log("FAIL Claude native subscription smoke (private diagnostics not retained)"); } }
+} catch(error) { if (only !== "codex") { report.providers.claude = { ...report.providers.claude, status: "failed",failure:failureCode(error,"native_validation_failed"),...(error instanceof ProviderFailure?{provider_error_category:error.category}:{}) }; process.exitCode = 1; console.log("FAIL Claude native subscription smoke (private diagnostics not retained)"); } }
 
 try {
+  if (only === "claude") throw new Error("skip_provider");
   assert.match(await capture(codex, ["login", "status"], 15_000, true), /Logged in using ChatGPT/);
-  report.providers.codex = { authenticated: true, method: "ChatGPT", status: "running" };
+  report.providers.codex = { authenticated: true, method: "ChatGPT", requested_model:codexFunctionalTestModel,observed_model:null,model_verified:false,status: "running" };
   const child = spawn(codex, ["app-server", "--listen", "stdio://", "-c", 'model_provider="openai"', "-c", `model="${codexFunctionalTestModel}"`, "-c", 'model_reasoning_effort="low"', "-c", "features.apps=false", "-c", "features.multi_agent=false", "-c", "features.multi_agent_v2=false", "-c", "features.code_mode=false", "-c", "features.code_mode_only=false", "-c", 'web_search="disabled"', "-c", "tools.experimental_request_user_input.enabled=false"], { cwd: directory, env, windowsHide: true, stdio: ["pipe", "pipe", "pipe"] });
   const pending = new Map<number, { resolve: (value: any) => void; reject: (error: Error) => void }>();
   let id = 0, answer = "", resolve!: () => void, reject!: (error: Error) => void;
@@ -86,15 +92,17 @@ try {
     report.providers.codex.model = selected.model;
     report.providers.codex.stage = "thread_start";
     const thread = await request("thread/start", { model: selected.model, cwd: directory, approvalPolicy: "never", sandbox: "read-only", ephemeral: true, environments: [], dynamicTools: [], baseInstructions: "This is a connection smoke only. Do not use tools. Reply with exactly CG_OK." });
-    assert.equal(thread.model, codexFunctionalTestModel, "native_test_model_mismatch");
+    if(thread.model!==codexFunctionalTestModel)throw new ProviderFailure("model");
+    Object.assign(report.providers.codex,{observed_model:codexFunctionalTestModel,model_verified:true});
     report.providers.codex.stage = "turn_start";
+    report.real_model_inference_attempted=true;
     await request("turn/start", { threadId: thread.thread.id, input: [{ type: "text", text: "Reply with exactly CG_OK. Do not use any tools.", text_elements: [] }] });
     await done; assert.equal(answer.trim(), "CG_OK");
     Object.assign(report.providers.codex, { status: "passed", fixed_reply_verified: true, model: thread.model, environment_selection: "explicit_empty_array_experimental" });
     console.log("PASS Codex: native ChatGPT subscription connection, environment disabled");
   } finally { clearTimeout(timer); stop(); }
-} catch (error: any) { report.providers.codex = { ...report.providers.codex, status: "failed", failure: /^(native_|unexpected_)/.test(error.message ?? "") ? error.message : "native_validation_failed" }; process.exitCode = 1; console.log("FAIL Codex native subscription smoke (private diagnostics not retained)"); }
-report.success = ["codex", "claude"].every((provider) => report.providers[provider]?.status === "passed");
+} catch (error: any) { if(only!=="claude"){report.providers.codex = { ...report.providers.codex, status: "failed", failure: error instanceof ProviderFailure?failureCode(error): /^(native_|unexpected_)[a-z0-9_]{1,96}$/.test(error.message ?? "") ? error.message : "native_validation_failed",...(error instanceof ProviderFailure?{provider_error_category:error.category}:{}) }; process.exitCode = 1; console.log("FAIL Codex native subscription smoke (private diagnostics not retained)");} }
+report.success = (only?[only]:["codex", "claude"]).every((provider) => report.providers[provider]?.status === "passed");
 report.real_model_inference_verified = report.success;
 await writeFile(path.join(directory, "report.json"), JSON.stringify(report, null, 2) + "\n");
 console.log(`Report: ${path.join(directory, "report.json")}`);
