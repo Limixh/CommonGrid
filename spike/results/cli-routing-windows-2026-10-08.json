@@ -1,0 +1,103 @@
+{
+  "schema_version": "1.0",
+  "checked_at": "2026-10-08T07:32:58.532Z",
+  "platform": "win32",
+  "purpose": "read_only_inventory_and_pinned_source_review",
+  "source_checks": [
+    {
+      "id": "codex-models",
+      "sha256": "0178d235c589a31abd6ed0ea1e870935dc5819240eb0e813e178d3ebedf534f4",
+      "matched": true
+    },
+    {
+      "id": "codex-app-server-thread",
+      "sha256": "b710992fd8f527066db34e46fc0683466996822ea1640491a26d91f7a128d714",
+      "matched": true
+    },
+    {
+      "id": "codex-tool-plan",
+      "sha256": "8dfa01644163e4826021815d064444ec12799aeaf8f7a952ec6289319f2fd36e",
+      "matched": true
+    },
+    {
+      "id": "codex-features",
+      "sha256": "db6dad91fd2ea65d0c976c812be325c6109e97f6275410c6cfaae2d20a5cd3f9",
+      "matched": true
+    },
+    {
+      "id": "codex-config-schema",
+      "sha256": "17fbda7e71603aa6a83e986608f2e13c27ea46ce1a4b889196ba81a07c39d907",
+      "matched": true
+    },
+    {
+      "id": "swerex-docker",
+      "sha256": "c97e05914ecf93726d62d8f06c46c028595fddbcb2e1ddff2426428cba3a9e12",
+      "matched": true
+    },
+    {
+      "id": "swerex-runtime",
+      "sha256": "6469d5057ecf677e366b7dd9b894e023aba18d67ffbe743571b0919cff052227",
+      "matched": true
+    },
+    {
+      "id": "swerex-package",
+      "sha256": "4d5f8accf85be1d5110fd094af81c7a094ee0fd89261cf6fde9d1a536f01164e",
+      "matched": true
+    }
+  ],
+  "codex": {
+    "version": "codex-cli 0.157.1",
+    "matches_reviewed_version": true,
+    "exec_help_available": true,
+    "ephemeral_flag_documented_locally": true
+  },
+  "claude": {
+    "version": "2.1.293 (Claude Code)",
+    "tools_allowlist_flag_documented_locally": true,
+    "local_help_flags": {
+      "--tools": true,
+      "--strict-mcp-config": true,
+      "--restricted": true,
+      "--safe-mode": true,
+      "--setting-sources": true,
+      "--no-session-persistence": true,
+      "--disable-slash-commands": true
+    },
+    "resolution": "native_install",
+    "model_session_tested": false
+  },
+  "engines": [
+    {
+      "id": "docker",
+      "installed": true,
+      "reachable": true
+    },
+    {
+      "id": "podman",
+      "installed": false,
+      "reachable": false
+    }
+  ],
+  "swerex": {
+    "commit": "5c995c365dfb1fd5bc56fda688be5d8538f9931f",
+    "installed_or_executed": false,
+    "runtime_gate": "not_evaluated"
+  },
+  "reviewed_findings": [
+    "Codex shell_tool gate is distinct from apply_patch registration; shell-off alone is not a complete file/tool routing design.",
+    "Codex apply_patch_freeform is a removed compatibility flag in the pinned source, not a supported disable switch.",
+    "SWE-ReX Docker deployment publishes a runtime API port and accepts docker_args; CommonGrid needs its own control-channel, network, resource and identity design.",
+    "Claude local version/help capability inventory is recorded separately; no model session or built-in tool confinement was validated by this inventory."
+  ],
+  "isolation_gate": "not_evaluated",
+  "execution_enabled": false,
+  "real_account_tested": false,
+  "required_evidence": [
+    "OS identities and filesystem/process isolation",
+    "all built-in file/command paths confined or disabled",
+    "runtime API unreachable from task code",
+    "timeout/cancellation and process cleanup",
+    "token renewal/logout and provider compatibility",
+    "Windows/macOS/Linux matrix"
+  ]
+}

@@ -1,0 +1,134 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://commongrid.local/schemas/contracts/1.0",
+  "title": "CommonGridContract",
+  "oneOf": [
+    { "$ref": "#/$defs/TaskContract" },
+    { "$ref": "#/$defs/ExecutionContext" },
+    { "$ref": "#/$defs/Checkpoint" },
+    { "$ref": "#/$defs/PlannerProposal" }
+  ],
+  "$defs": {
+    "Id": { "type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]{0,95}$" },
+    "Hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "Commit": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+    "Path": { "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^[a-zA-Z0-9_.-]+(/[a-zA-Z0-9_.-]+)*$" },
+    "Strategy": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "instructions"],
+      "properties": { "id": { "$ref": "#/$defs/Id" }, "instructions": { "type": "string", "minLength": 1, "maxLength": 16000 } }
+    },
+    "Workspace": {
+      "type": "object", "additionalProperties": false,
+      "required": ["repo", "commit", "entry_files", "writable_paths"],
+      "properties": {
+        "repo": { "type": "string", "pattern": "^https://[a-zA-Z0-9.-]+/[a-zA-Z0-9_./-]+\\.git$", "maxLength": 512 },
+        "commit": { "$ref": "#/$defs/Commit" },
+        "entry_files": { "type": "array", "minItems": 1, "maxItems": 50, "uniqueItems": true, "items": { "$ref": "#/$defs/Path" } },
+        "writable_paths": { "type": "array", "minItems": 1, "maxItems": 50, "uniqueItems": true, "items": { "$ref": "#/$defs/Path" } }
+      }
+    },
+    "Environment": {
+      "type": "object", "additionalProperties": false,
+      "required": ["image", "cpu", "memory_mb", "time_limit_sec"],
+      "properties": {
+        "image": { "type": "string", "pattern": "^[a-zA-Z0-9./:_-]+@sha256:[a-f0-9]{64}$", "maxLength": 512 },
+        "cpu": { "type": "integer", "minimum": 1, "maximum": 64 },
+        "memory_mb": { "type": "integer", "minimum": 256, "maximum": 262144 },
+        "time_limit_sec": { "type": "integer", "minimum": 60, "maximum": 86400 }
+      }
+    },
+    "Verification": {
+      "type": "object", "additionalProperties": false,
+      "required": ["profile", "local_precheck", "server_command", "output_schema", "forbidden_patterns"],
+      "properties": {
+        "profile": { "type": "string", "enum": ["lean-proof", "software-tests", "planner-proposal"] },
+        "local_precheck": { "type": "string", "minLength": 1, "maxLength": 2048 },
+        "server_command": { "type": "string", "minLength": 1, "maxLength": 2048 },
+        "output_schema": { "type": "string", "enum": ["lean-artifact/1.0", "software-diff/1.0", "planner-proposal/1.0"] },
+        "forbidden_patterns": { "type": "array", "maxItems": 50, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 256 } }
+      }
+    },
+    "Parallelism": {
+      "type": "object", "additionalProperties": false, "required": ["mode", "initial", "cap"],
+      "properties": { "mode": { "type": "string", "enum": ["independent", "exclusive"] }, "initial": { "type": "integer", "minimum": 1, "maximum": 50 }, "cap": { "type": "integer", "minimum": 1, "maximum": 50 } }
+    },
+    "Agents": {
+      "type": "object", "additionalProperties": false, "required": ["preferred", "excluded"],
+      "properties": {
+        "preferred": { "type": "array", "uniqueItems": true, "maxItems": 2, "items": { "type": "string", "enum": ["codex", "claude-code"] } },
+        "excluded": { "type": "array", "uniqueItems": true, "maxItems": 2, "items": { "type": "string", "enum": ["codex", "claude-code"] } }
+      }
+    },
+    "Milestone": {
+      "type": "object", "additionalProperties": false, "required": ["id", "name", "check", "weight", "critical"],
+      "properties": { "id": { "$ref": "#/$defs/Id" }, "name": { "type": "string", "minLength": 1, "maxLength": 200 }, "check": { "type": "string", "minLength": 1, "maxLength": 2048 }, "weight": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 }, "critical": { "type": "boolean" } }
+    },
+    "Progress": {
+      "type": "object", "additionalProperties": false, "required": ["milestones"],
+      "properties": { "milestones": { "type": "array", "maxItems": 50, "items": { "$ref": "#/$defs/Milestone" } } }
+    },
+    "Review": {
+      "type": "object", "additionalProperties": false, "required": ["policy", "required_approvals"],
+      "properties": { "policy": { "type": "string", "enum": ["auto", "maintainer", "community"] }, "required_approvals": { "type": "integer", "minimum": 0, "maximum": 10 } }
+    },
+    "Handoff": {
+      "type": "object", "additionalProperties": false, "required": ["enabled", "checkpoint_interval_sec", "max_checkpoints", "allow_workspace_snapshot", "resume_from_latest"],
+      "properties": { "enabled": { "type": "boolean" }, "checkpoint_interval_sec": { "type": "integer", "minimum": 60, "maximum": 86400 }, "max_checkpoints": { "type": "integer", "minimum": 1, "maximum": 100 }, "allow_workspace_snapshot": { "type": "boolean" }, "resume_from_latest": { "type": "boolean" } }
+    },
+    "TaskContract": {
+      "title": "TaskContract", "type": "object", "additionalProperties": false,
+      "required": ["schema_version", "id", "task_version", "contract_hash", "project_id", "type", "kind", "title", "description", "prompt", "strategies", "workspace", "environment", "verification", "depends_on", "difficulty", "node_id", "parallelism", "agents", "progress", "review", "reward_points", "handoff"],
+      "properties": {
+        "schema_version": { "type": "string", "const": "1.0" }, "id": { "$ref": "#/$defs/Id" },
+        "task_version": { "type": "integer", "minimum": 1, "maximum": 2147483647 }, "contract_hash": { "$ref": "#/$defs/Hash" },
+        "project_id": { "$ref": "#/$defs/Id" }, "type": { "type": "string", "enum": ["lean", "software"] },
+        "kind": { "type": "string", "enum": ["solve", "plan", "refute", "rebase"] },
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 }, "description": { "type": "string", "minLength": 1, "maxLength": 16000 }, "prompt": { "type": "string", "minLength": 1, "maxLength": 32000 },
+        "strategies": { "type": "array", "minItems": 1, "maxItems": 20, "items": { "$ref": "#/$defs/Strategy" } },
+        "workspace": { "$ref": "#/$defs/Workspace" }, "environment": { "$ref": "#/$defs/Environment" }, "verification": { "$ref": "#/$defs/Verification" },
+        "depends_on": { "type": "array", "uniqueItems": true, "maxItems": 100, "items": { "$ref": "#/$defs/Id" } },
+        "difficulty": { "type": "string", "enum": ["easy", "medium", "hard", "open"] }, "node_id": { "$ref": "#/$defs/Id" },
+        "parallelism": { "$ref": "#/$defs/Parallelism" }, "agents": { "$ref": "#/$defs/Agents" }, "progress": { "$ref": "#/$defs/Progress" }, "review": { "$ref": "#/$defs/Review" },
+        "reward_points": { "type": "integer", "minimum": 0, "maximum": 1000000 }, "handoff": { "$ref": "#/$defs/Handoff" }
+      }
+    },
+    "AgentProfile": {
+      "type": "object", "additionalProperties": false, "required": ["provider", "cli_version", "adapter_version", "model", "reasoning", "metadata_source"],
+      "properties": {
+        "provider": { "type": "string", "enum": ["codex", "claude-code"] },
+        "cli_version": { "type": "string", "minLength": 1, "maxLength": 100 }, "adapter_version": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "model": { "type": "string", "minLength": 1, "maxLength": 100 }, "reasoning": { "type": "string", "minLength": 1, "maxLength": 100 }, "metadata_source": { "type": "string", "const": "client_reported" }
+      }
+    },
+    "Limits": {
+      "type": "object", "additionalProperties": false, "required": ["cpu", "memory_mb", "time_limit_sec"],
+      "properties": { "cpu": { "type": "integer", "minimum": 1, "maximum": 64 }, "memory_mb": { "type": "integer", "minimum": 256, "maximum": 262144 }, "time_limit_sec": { "type": "integer", "minimum": 1, "maximum": 86400 } }
+    },
+    "ExecutionContext": {
+      "title": "ExecutionContext", "type": "object", "additionalProperties": false,
+      "required": ["schema_version", "task_id", "task_version", "contract_hash", "lease_id", "attempt_id", "strategy_id", "agent", "effective_limits", "paid_api_allowed"],
+      "properties": {
+        "schema_version": { "type": "string", "const": "1.0" }, "task_id": { "$ref": "#/$defs/Id" }, "task_version": { "type": "integer", "minimum": 1 }, "contract_hash": { "$ref": "#/$defs/Hash" }, "lease_id": { "$ref": "#/$defs/Id" }, "attempt_id": { "$ref": "#/$defs/Id" }, "strategy_id": { "$ref": "#/$defs/Id" },
+        "agent": { "$ref": "#/$defs/AgentProfile" }, "effective_limits": { "$ref": "#/$defs/Limits" }, "paid_api_allowed": { "type": "boolean", "const": false }
+      }
+    },
+    "Checkpoint": {
+      "title": "Checkpoint", "type": "object", "additionalProperties": false,
+      "required": ["schema_version", "checkpoint_id", "task_id", "task_version", "contract_hash", "lease_id", "type", "base_commit", "summary", "continuation_instructions", "artifact_sha256"],
+      "properties": {
+        "schema_version": { "type": "string", "const": "1.0" }, "checkpoint_id": { "$ref": "#/$defs/Id" }, "task_id": { "$ref": "#/$defs/Id" }, "task_version": { "type": "integer", "minimum": 1 }, "contract_hash": { "$ref": "#/$defs/Hash" }, "lease_id": { "$ref": "#/$defs/Id" }, "parent_checkpoint_id": { "$ref": "#/$defs/Id" }, "type": { "type": "string", "enum": ["hard", "soft"] }, "base_commit": { "$ref": "#/$defs/Commit" },
+        "summary": { "type": "string", "maxLength": 4000 }, "continuation_instructions": { "type": "string", "maxLength": 24000 }, "artifact_sha256": { "$ref": "#/$defs/Hash" }
+      }
+    },
+    "ProposedChild": {
+      "type": "object", "additionalProperties": false, "required": ["id", "goal", "depends_on", "verification", "strategies", "environment", "progress"],
+      "properties": { "id": { "$ref": "#/$defs/Id" }, "goal": { "type": "string", "minLength": 1, "maxLength": 4000 }, "depends_on": { "type": "array", "uniqueItems": true, "maxItems": 20, "items": { "$ref": "#/$defs/Id" } }, "verification": { "$ref": "#/$defs/Verification" }, "strategies": { "type": "array", "minItems": 1, "maxItems": 20, "items": { "$ref": "#/$defs/Strategy" } }, "environment": { "$ref": "#/$defs/Environment" }, "progress": { "$ref": "#/$defs/Progress" } }
+    },
+    "PlannerProposal": {
+      "title": "PlannerProposal", "type": "object", "additionalProperties": false,
+      "required": ["schema_version", "task_id", "task_version", "contract_hash", "target_node_id", "relation", "children", "connection_artifact_sha256"],
+      "properties": { "schema_version": { "type": "string", "const": "1.0" }, "task_id": { "$ref": "#/$defs/Id" }, "task_version": { "type": "integer", "minimum": 1 }, "contract_hash": { "$ref": "#/$defs/Hash" }, "target_node_id": { "$ref": "#/$defs/Id" }, "relation": { "type": "string", "enum": ["and", "or"] }, "children": { "type": "array", "minItems": 2, "maxItems": 20, "items": { "$ref": "#/$defs/ProposedChild" } }, "connection_artifact_sha256": { "$ref": "#/$defs/Hash" } }
+    }
+  }
+}

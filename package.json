@@ -1,0 +1,54 @@
+{
+  "name": "commongrid",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "workspaces": [
+    "apps/desktop",
+    "packages/task-schema",
+    "packages/agent-adapters"
+  ],
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "dev:ui": "npm run dev -w @commongrid/desktop",
+    "dev:api": "node scripts/go.mjs run ./cmd/coordinator",
+    "desktop": "node scripts/native.mjs dev",
+    "generate": "node scripts/generate.mjs",
+    "generate:check": "node scripts/generate.mjs --check",
+    "typecheck": "tsc --noEmit && npm run typecheck -w @commongrid/desktop",
+    "test": "node --test scripts/test/*.test.mjs && tsx --test packages/task-schema/test/*.test.ts packages/agent-adapters/test/*.test.ts spike/cli-session/*.test.mjs spike/cli-session/*.test.mts && node scripts/go.mjs test ./...",
+    "build": "npm run build -w @commongrid/desktop && node scripts/go.mjs build ./...",
+    "check": "npm run generate:check && npm run typecheck && npm test && npm run build",
+    "doctor": "node scripts/doctor.mjs",
+    "test:ui": "node scripts/ui-tests.mjs",
+    "test:spike": "node scripts/spike.mjs test",
+    "test:db": "node scripts/postgres-tests.mjs",
+    "db:migrate": "node scripts/go.mjs run ./cmd/db migrate",
+    "spike:recovery": "node scripts/spike.mjs recovery",
+    "spike:routing": "node spike/cli-routing/probe.mjs",
+    "spike:sandbox": "node scripts/sandbox-tests.mjs",
+    "spike:cli-session": "node scripts/cli-session-tests.mjs",
+    "spike:account-smoke": "node --import tsx spike/cli-session/account-smoke.mts",
+    "spike:managed-session": "node --import tsx spike/cli-session/managed-session.mts",
+    "spike:session-acceptance": "node --import tsx spike/cli-session/managed-session-acceptance.mts",
+    "spike:session-continuity": "node --import tsx spike/cli-session/managed-continuity.mts",
+    "spike:coding-verifier": "node --import tsx spike/cli-session/coding-verifier.mts",
+    "spike:managed-boundary": "node --import tsx spike/cli-session/managed-boundary.mts",
+    "spike:managed-adversarial": "node --import tsx spike/cli-session/managed-adversarial.mts",
+    "spike:managed-task": "node --import tsx spike/cli-session/managed-task.mts",
+    "install:temporal": "node scripts/install-temporal.mjs",
+    "install:trivy": "node scripts/install-trivy.mjs",
+    "test:artifacts": "node scripts/artifact-tests.mjs",
+    "install:cli-fixtures": "node scripts/install-cli-fixtures.mjs",
+    "install:browsers": "node scripts/ui-tests.mjs install chromium --only-shell"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.0",
+    "@types/node": "22.13.10",
+    "json-schema-to-typescript": "15.0.4",
+    "tsx": "4.20.5",
+    "typescript": "5.9.3"
+  }
+}

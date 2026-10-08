@@ -1,0 +1,28 @@
+{
+  "checked_at": "2026-10-08T13:59:49.7509841Z",
+  "purpose": "durable_candidate_checkpoint_review_foundations_regression_and_build",
+  "command": "npm run check",
+  "success": true,
+  "node_tests": 169.0,
+  "node_failed": 0.0,
+  "node_groups": [
+    {
+      "scope": "scripts",
+      "passed": 13
+    },
+    {
+      "scope": "packages_and_spike",
+      "passed": 156
+    }
+  ],
+  "execution_enabled": false,
+  "isolation_gate": "not_evaluated",
+  "real_account_tested": false,
+  "real_model_inference": false,
+  "scope_limits": [
+    "PostgreSQL integration recorded separately in domain-postgres-windows-2026-10-08.json",
+    "Temporal, UI, native release and remote CI not re-run",
+    "Production artifact importer/scanner/verifier, HTTP authentication and device workflow not integrated"
+  ],
+  "log_retained_locally": true
+}

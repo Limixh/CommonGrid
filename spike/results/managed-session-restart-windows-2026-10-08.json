@@ -1,0 +1,51 @@
+{
+  "success": true,
+  "providers": {
+    "codex": {
+      "checked_at": "2026-10-08T07:52:40.061Z",
+      "provider": "codex",
+      "operation": "status",
+      "credential_files_copied": false,
+      "execution_enabled": false,
+      "isolation_gate": "not_evaluated",
+      "success": true,
+      "cleanup_confirmed": true,
+      "authenticated": false,
+      "method": "none",
+      "refresh_requested": false,
+      "logout_verified": false,
+      "network": {
+        "connected": 0,
+        "denied": 0,
+        "task_calls": 0,
+        "destinations": [],
+        "denied_destinations": [],
+        "network_errors": []
+      }
+    },
+    "claude": {
+      "checked_at": "2026-10-08T07:52:53.949Z",
+      "provider": "claude",
+      "operation": "status",
+      "credential_files_copied": false,
+      "execution_enabled": false,
+      "isolation_gate": "not_evaluated",
+      "success": true,
+      "cleanup_confirmed": true,
+      "authenticated": false,
+      "method": "none",
+      "logout_verified": false,
+      "network": {
+        "connected": 0,
+        "denied": 0,
+        "task_calls": 0,
+        "destinations": [],
+        "denied_destinations": [],
+        "network_errors": []
+      }
+    }
+  },
+  "purpose": "official_status_after_logout_new_cli_namespace",
+  "execution_enabled": false,
+  "isolation_gate": "not_evaluated"
+}

@@ -1,0 +1,20 @@
+{
+  "schema_version": "1.0",
+  "reviewed_on": "2026-10-08",
+  "platform": "linux-x64",
+  "codex": {
+    "version": "0.157.1",
+    "url": "https://github.com/openai/codex/releases/download/rust-v0.157.1/codex-x86_64-unknown-linux-musl.tar.gz",
+    "sha256": "e98c1e8e028e8137fa2d2415c82ec58e7b3701a627e3554aace5b3ca31454af2",
+    "binary_sha256": "3e2584f3f3829a43a0495011a1cecb2facbe64a2403e2b682351fd9c2983f970",
+    "archive_binary": "codex-x86_64-unknown-linux-musl"
+  },
+  "claude": {
+    "version": "2.1.293",
+    "url": "https://downloads.claude.ai/claude-code-releases/2.1.293/linux-x64/claude",
+    "sha256": "8968405e26db478af44eabc4635ab5ca557057b702a54460a59c13e1b253e978",
+    "manifest_url": "https://downloads.claude.ai/claude-code-releases/2.1.293/manifest.json",
+    "signing_key_url": "https://downloads.claude.ai/keys/claude-code.asc",
+    "signing_fingerprint": "31DDDE24DDFAB679F42D7BD2BAA929FF1A7ECACE"
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "checked_at": "2026-10-07T22:14:40Z",
+  "checks": {
+    "activity_retry_after_effect": true,
+    "cancellation": true,
+    "checkpoint_replayed": true,
+    "deadline": true,
+    "one_fixture_effect": true,
+    "server_and_worker_restart": true,
+    "stale_event_rejected": true
+  },
+  "cli_execution": false,
+  "fixture_only": true,
+  "limitations": [
+    "SQLite development server, not production HA",
+    "fixture file ledger, not PostgreSQL outbox or job reconciliation",
+    "no agent, account, sandbox or real artifact verification"
+  ],
+  "production_ready": false,
+  "recovered_state": {
+    "Phase": "waiting",
+    "CheckpointID": "fixture-checkpoint",
+    "IgnoredEvents": 0,
+    "AcceptedEvents": 1
+  },
+  "result": {
+    "State": {
+      "Phase": "fixture_verified",
+      "CheckpointID": "fixture-checkpoint",
+      "IgnoredEvents": 1,
+      "AcceptedEvents": 2
+    },
+    "Verification": {
+      "FixtureOnly": true,
+      "Reused": true,
+      "ActivityAttempt": 2
+    }
+  },
+  "run_id": "01a1186e-c835-7902-9eaa-cf3fd6381b1f",
+  "workflow_id": "fixture-recovery"
+}

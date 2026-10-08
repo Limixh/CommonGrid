@@ -1,0 +1,51 @@
+{
+  "checked_at": "2026-10-08T14:35:34.400Z",
+  "platform": "win32",
+  "scope": "F0 CommonGrid accounts and authenticated API foundation",
+  "execution_enabled": false,
+  "isolation_gate": "not_evaluated",
+  "real_account_tested": false,
+  "real_model_inference": false,
+  "real_oauth_provider_tested": false,
+  "remote_ci_tested": false,
+  "success": true,
+  "command": "npm run test:ui",
+  "passed_count": 12,
+  "failed_count": 0,
+  "account_mock_tests": 8,
+  "fixture_coordinator_workspace_tests": 4,
+  "passed": [
+    "fixture account clearly shows disabled providers without a pretend login",
+    "authenticated database catalog and private receipts clear on successful logout",
+    "a valid empty database is distinct from signed-out access",
+    "failed logout preserves the account, while expired receipts remove private context",
+    "account and receipt failures have recoverable loading and retry states",
+    "configured provider uses only the fixed same-origin sign-in path",
+    "late receipt results cannot return after logout and account views fit mobile",
+    "account and contribution panels remain accessible at desktop and phone widths",
+    "loads verified contracts, filters tasks and displays immutable JSON",
+    "local budget settings survive reload and reject overspending",
+    "locale persists and API failure has an explicit retry state",
+    "workspace fits narrow screen without horizontal overflow"
+  ],
+  "browser": "Playwright Chromium",
+  "widths_visually_inspected": [
+    1440,
+    390
+  ],
+  "screenshots": [
+    ".local/validation/account-1440.png",
+    ".local/validation/account-390.png",
+    ".local/validation/contributions-1440.png",
+    ".local/validation/contributions-390.png"
+  ],
+  "source_sha256": {
+    "apps/desktop/src/AccountPanel.tsx": "c437b4da574a6e92655b5de0ec4e43d93216faa03fda04872591e182fb3a1895",
+    "apps/desktop/src/App.tsx": "cb0a37ac4e8756764709496c352500f057a115baa088243f1625d723016ab175",
+    "apps/desktop/src/account-api.ts": "10e20007b2ec0136745865ba4b1a96a421d5757157880544c1180efde8eda94a",
+    "apps/desktop/src/styles.css": "2979b83c1051a4631e78b380b759711c32d09c91347374e48fb0b83f74c065a6",
+    "tests/ui/account.spec.ts": "e815aa3be6c8bed2ff75ab928a43bf9873b48f9976ba3c6ebc5b1069fe77856b",
+    "tests/ui/workspace.spec.ts": "87ec4708713aec6c96c793b60fcbc7a69b66cbbcce557797bfcaef25e65c4104"
+  },
+  "raw_last_run": "test-results/.last-run.json"
+}

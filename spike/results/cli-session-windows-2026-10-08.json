@@ -1,0 +1,111 @@
+{
+  "schema_version": "1.0",
+  "checked_at": "2026-10-08T01:01:43.977Z",
+  "platform": "win32",
+  "purpose": "official_cli_binaries_local_wire_fixture_and_task_tool_routing",
+  "real_account_tested": false,
+  "real_model_inference": false,
+  "execution_enabled": false,
+  "isolation_gate": "not_evaluated",
+  "base_image": "node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392",
+  "providers": {
+    "claude": {
+      "version": "2.1.293 (Claude Code)",
+      "fixture_model": "claude-sonnet-4-6",
+      "task_startup_ms": 4790,
+      "cli_setup_ms": 111686,
+      "cli_binary_size_bytes": 252755128,
+      "version_probe_ms": 646,
+      "model_requests": 2,
+      "task_tool_calls": 1,
+      "advertised_tools": [
+        "mcp__commongrid__task_exec"
+      ],
+      "checks": [
+        "official_binary_version",
+        "real_cli_wire_request",
+        "native_file_command_tools_absent",
+        "task_tool_roundtrip",
+        "task_workspace_written",
+        "fake_auth_inaccessible_to_task",
+        "control_unreachable_to_task",
+        "canary_unchanged",
+        "wrong_control_token_denied",
+        "attempt_selection_denied"
+      ],
+      "status": "passed",
+      "broker_requests": 2,
+      "cli_result": {
+        "subtype": "success",
+        "is_error": false
+      },
+      "cli_turn_ms": 3820,
+      "cli_memory_current_bytes": 283660288,
+      "cli_memory_peak_bytes": 397606912,
+      "task_memory_bytes": {
+        "current": 16179200,
+        "peak": 16625664
+      },
+      "rejected_broker_requests": 1
+    },
+    "codex": {
+      "version": "codex-cli 0.157.1",
+      "fixture_model": "gpt-5.1-codex",
+      "task_startup_ms": 3276,
+      "cli_setup_ms": 97594,
+      "cli_binary_size_bytes": 285340072,
+      "version_probe_ms": 1057,
+      "model_requests": 2,
+      "task_tool_calls": 1,
+      "advertised_tools": [
+        "task_exec"
+      ],
+      "checks": [
+        "official_binary_version",
+        "real_cli_wire_request",
+        "native_file_command_tools_absent",
+        "task_tool_roundtrip",
+        "task_workspace_written",
+        "fake_auth_inaccessible_to_task",
+        "control_unreachable_to_task",
+        "canary_unchanged",
+        "wrong_control_token_denied",
+        "attempt_selection_denied"
+      ],
+      "status": "passed",
+      "environment_selection": "explicit_empty_array_experimental",
+      "cli_result": {
+        "status": "completed"
+      },
+      "cli_turn_ms": 2937,
+      "cli_memory_current_bytes": 339398656,
+      "cli_memory_peak_bytes": 339824640,
+      "task_memory_bytes": {
+        "current": 15896576,
+        "peak": 16384000
+      },
+      "broker_requests": 1,
+      "rejected_broker_requests": 1
+    }
+  },
+  "cleanup_confirmed": true,
+  "binary_verification": {
+    "codex_sha256": "e98c1e8e028e8137fa2d2415c82ec58e7b3701a627e3554aace5b3ca31454af2",
+    "codex_binary_sha256": "3e2584f3f3829a43a0495011a1cecb2facbe64a2403e2b682351fd9c2983f970",
+    "claude_sha256": "8968405e26db478af44eabc4635ab5ca557057b702a54460a59c13e1b253e978",
+    "claude_manifest_signature_verified": true,
+    "claude_signing_fingerprint": "31DDDE24DDFAB679F42D7BD2BAA929FF1A7ECACE"
+  },
+  "cli_binary_delivery": "checksum_verified_public_binary_stream_into_owned_tmpfs",
+  "base_image_size_bytes": 326104305,
+  "setup_stage": "codex:version",
+  "cleanup_failure_codes": [],
+  "success": true,
+  "remaining": [
+    "real subscription task execution/diff inside an isolated CLI/auth runtime and token renewal/logout",
+    "all tool/plugin/subagent paths and adversarial transitions",
+    "network allowlist with real providers",
+    "cross-platform and crash recovery",
+    "production API integration and security review"
+  ]
+}

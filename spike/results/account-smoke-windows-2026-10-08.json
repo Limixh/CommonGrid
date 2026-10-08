@@ -1,0 +1,33 @@
+{
+  "checked_at": "2026-10-08T00:53:14.728Z",
+  "platform": "win32",
+  "purpose": "native_subscription_fixed_text_only_connection_smoke",
+  "real_model_inference_attempted": true,
+  "task_execution_tested": false,
+  "os_identity_isolation_tested": false,
+  "credential_files_copied": false,
+  "paid_api_fallback": false,
+  "execution_enabled": false,
+  "isolation_gate": "not_evaluated",
+  "providers": {
+    "claude": {
+      "authenticated": true,
+      "method": "claude.ai",
+      "subscription": "pro",
+      "status": "passed",
+      "fixed_reply_verified": true
+    },
+    "codex": {
+      "authenticated": true,
+      "method": "ChatGPT",
+      "status": "passed",
+      "stage": "turn_start",
+      "model": "gpt-6-astra",
+      "turn_status": "completed",
+      "fixed_reply_verified": true,
+      "environment_selection": "explicit_empty_array_experimental"
+    }
+  },
+  "success": true,
+  "real_model_inference_verified": true
+}

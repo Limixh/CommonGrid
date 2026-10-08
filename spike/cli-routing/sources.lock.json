@@ -1,0 +1,48 @@
+{
+  "schema_version": "1.0",
+  "reviewed_at": "2026-10-08",
+  "codex_version": "0.157.1",
+  "swerex_commit": "5c995c365dfb1fd5bc56fda688be5d8538f9931f",
+  "sources": [
+    {
+      "id": "codex-models",
+      "url": "https://raw.githubusercontent.com/openai/codex/rust-v0.157.1/codex-rs/models-manager/models.json",
+      "sha256": "0178d235c589a31abd6ed0ea1e870935dc5819240eb0e813e178d3ebedf534f4"
+    },
+    {
+      "id": "codex-app-server-thread",
+      "url": "https://raw.githubusercontent.com/openai/codex/rust-v0.157.1/codex-rs/app-server-protocol/src/protocol/v2/thread.rs",
+      "sha256": "b710992fd8f527066db34e46fc0683466996822ea1640491a26d91f7a128d714"
+    },
+    {
+      "id": "codex-tool-plan",
+      "url": "https://raw.githubusercontent.com/openai/codex/rust-v0.157.1/codex-rs/core/src/tools/spec_plan.rs",
+      "sha256": "8dfa01644163e4826021815d064444ec12799aeaf8f7a952ec6289319f2fd36e"
+    },
+    {
+      "id": "codex-features",
+      "url": "https://raw.githubusercontent.com/openai/codex/rust-v0.157.1/codex-rs/features/src/lib.rs",
+      "sha256": "db6dad91fd2ea65d0c976c812be325c6109e97f6275410c6cfaae2d20a5cd3f9"
+    },
+    {
+      "id": "codex-config-schema",
+      "url": "https://raw.githubusercontent.com/openai/codex/rust-v0.157.1/codex-rs/core/config.schema.json",
+      "sha256": "17fbda7e71603aa6a83e986608f2e13c27ea46ce1a4b889196ba81a07c39d907"
+    },
+    {
+      "id": "swerex-docker",
+      "url": "https://raw.githubusercontent.com/SWE-agent/SWE-ReX/5c995c365dfb1fd5bc56fda688be5d8538f9931f/src/swerex/deployment/docker.py",
+      "sha256": "c97e05914ecf93726d62d8f06c46c028595fddbcb2e1ddff2426428cba3a9e12"
+    },
+    {
+      "id": "swerex-runtime",
+      "url": "https://raw.githubusercontent.com/SWE-agent/SWE-ReX/5c995c365dfb1fd5bc56fda688be5d8538f9931f/src/swerex/runtime/abstract.py",
+      "sha256": "6469d5057ecf677e366b7dd9b894e023aba18d67ffbe743571b0919cff052227"
+    },
+    {
+      "id": "swerex-package",
+      "url": "https://raw.githubusercontent.com/SWE-agent/SWE-ReX/5c995c365dfb1fd5bc56fda688be5d8538f9931f/pyproject.toml",
+      "sha256": "4d5f8accf85be1d5110fd094af81c7a094ee0fd89261cf6fde9d1a536f01164e"
+    }
+  ]
+}

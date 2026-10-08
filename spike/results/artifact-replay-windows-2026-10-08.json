@@ -1,0 +1,44 @@
+{
+  "checked_at": "2026-10-08T08:35:20.920Z",
+  "purpose": "historical_ai_patch_apply_and_source_policy_replay",
+  "real_model_inference": false,
+  "candidate_executed": false,
+  "execution_enabled": false,
+  "isolation_gate": "not_evaluated",
+  "providers": [
+    {
+      "provider": "claude",
+      "source_report": "managed-task-claude-windows-2026-10-08.json",
+      "source_patch": "managed-task-claude.patch",
+      "patch_sha256": "ab382fcfa41625f72134cab6dc325b71b76e5d1f8df65c967b8aaf4b3b47cbcd",
+      "base_sha256": "84bca9d99599d19fcce52870ca5b12e01f0c65a1b639a6b26de2ecc9c8fe7424",
+      "candidate_sha256": "af02e59dd75fd2f22c7dde819c6040bcaf975dc6a7eb2ec21a7f7d11830ef842",
+      "patch_hash_matches_report": true,
+      "base_hash_matches_report": true,
+      "candidate_hash_matches_diff_and_verifier": true,
+      "git_apply_check": true,
+      "git_actual_apply": true,
+      "source_policy_passed": true,
+      "source_policy_scope": "single_sum_mjs_bounded_known_credential_shapes",
+      "candidate_executed": false
+    },
+    {
+      "provider": "codex",
+      "source_report": "managed-task-codex-windows-2026-10-08.json",
+      "source_patch": "managed-task-codex.patch",
+      "patch_sha256": "7de95fca321f9b6d3d960b3d92c973226cd08e008fbb561c8a88e4a7fc162492",
+      "base_sha256": "84bca9d99599d19fcce52870ca5b12e01f0c65a1b639a6b26de2ecc9c8fe7424",
+      "candidate_sha256": "129edda8b0af9e070b61e394958d3a0471eacdffa9a9d7a30d9f1b8df7a36405",
+      "patch_hash_matches_report": true,
+      "base_hash_matches_report": true,
+      "candidate_hash_matches_diff_and_verifier": true,
+      "git_apply_check": true,
+      "git_actual_apply": true,
+      "source_policy_passed": true,
+      "source_policy_scope": "single_sum_mjs_bounded_known_credential_shapes",
+      "candidate_executed": false
+    }
+  ],
+  "cleanup_confirmed": true,
+  "success": true
+}

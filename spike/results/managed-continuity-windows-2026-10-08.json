@@ -1,0 +1,58 @@
+{
+  "checked_at": "2026-10-08T12:53:04.486Z",
+  "purpose": "synthetic_same_profile_runtime_continuity",
+  "synthetic_profiles_only": true,
+  "existing_private_profiles_accessed": false,
+  "real_account_tested": false,
+  "real_model_inference": false,
+  "credential_files_copied": false,
+  "execution_enabled": false,
+  "isolation_gate": "not_evaluated",
+  "providers": {
+    "claude": {
+      "status": "passed",
+      "checks": [
+        "six_competing_starts_and_cleanup_preserve_incumbent",
+        "wrong_operation_exec_and_bridge_cannot_dispatch",
+        "reference_recovery_refuses_running_owned_namespace",
+        "same_operation_restart_retains_fake_private_state",
+        "stopped_exact_operation_reconciled_and_stale_cleanup_preserves_successor",
+        "canceled_exec_removes_owned_namespace_descendants_and_preserves_new_operation",
+        "timed_out_exec_removes_owned_namespace_descendants_and_retains_private_volumes",
+        "unexpected_control_exit_observed_and_owned_namespace_explicitly_reconciled",
+        "silent_real_docker_control_has_bounded_readiness_and_explicit_recovery"
+      ],
+      "competing_starts_rejected": 6,
+      "interrupted_exec_cleanup_ms": 2295,
+      "timed_out_exec_cleanup_ms": 12164,
+      "readiness_failure_ms": 3015
+    },
+    "codex": {
+      "status": "passed",
+      "checks": [
+        "six_competing_starts_and_cleanup_preserve_incumbent",
+        "wrong_operation_exec_and_bridge_cannot_dispatch",
+        "reference_recovery_refuses_running_owned_namespace",
+        "same_operation_restart_retains_fake_private_state",
+        "stopped_exact_operation_reconciled_and_stale_cleanup_preserves_successor",
+        "canceled_exec_removes_owned_namespace_descendants_and_preserves_new_operation",
+        "timed_out_exec_removes_owned_namespace_descendants_and_retains_private_volumes",
+        "unexpected_control_exit_observed_and_owned_namespace_explicitly_reconciled",
+        "silent_real_docker_control_has_bounded_readiness_and_explicit_recovery"
+      ],
+      "competing_starts_rejected": 6,
+      "interrupted_exec_cleanup_ms": 2162,
+      "timed_out_exec_cleanup_ms": 7837,
+      "readiness_failure_ms": 3007
+    }
+  },
+  "cleanup_confirmed": true,
+  "scope_limits": [
+    "same-profile runtime commands only; real provider concurrency/quotas not accepted",
+    "reference explicit stopped-operation reconciliation; automatic crash detection/recovery not accepted",
+    "no production profile locking or persistent operation journal",
+    "host/daemon failure during cleanup still requires ownership-verified reconciliation",
+    "pinned Linux Docker host setup only"
+  ],
+  "success": true
+}

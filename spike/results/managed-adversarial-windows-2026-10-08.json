@@ -1,0 +1,113 @@
+{
+  "checked_at": "2026-10-08T13:01:18.892Z",
+  "purpose": "synthetic_malicious_task_and_control_acceptance",
+  "synthetic_profiles_only": true,
+  "real_account_tested": false,
+  "real_model_inference": false,
+  "credential_files_copied": false,
+  "existing_private_profiles_accessed": false,
+  "execution_enabled": false,
+  "isolation_gate": "not_evaluated",
+  "providers": {
+    "claude": {
+      "status": "passed",
+      "checks": [
+        "distinct_pid_mount_network_namespaces",
+        "task_uid_caps_readonly_mounts_and_cgroup_limits",
+        "malicious_filesystem_process_fd_env_socket_ptrace_probes",
+        "pid_and_tmpfs_exhaustion_bounded",
+        "unknown_ip_metadata_plaintext_proxy_destinations_denied",
+        "broker_malformed_auth_size_arguments_attempt_scope_denied",
+        "broker_task_result_output_limit",
+        "broker_call_limit_blocks_side_effects",
+        "private_canary_and_process_intact_after_attacks",
+        "deadline_exhaustion_tears_down_task_namespace",
+        "output_exhaustion_tears_down_task_namespace"
+      ],
+      "separation": {
+        "private_paths_denied": true,
+        "process_absent": true,
+        "private_fd_absent": true,
+        "private_env_absent": true,
+        "root_readonly": true,
+        "ptrace_denied": true,
+        "no_capabilities": true,
+        "no_new_privileges": true,
+        "seccomp_filter": true,
+        "private_sockets_unreachable": true,
+        "external_network_unreachable": true
+      },
+      "resources": {
+        "tmpfs_bounded": true,
+        "pids_bounded": true,
+        "children_started": 113
+      },
+      "control": {
+        "connected": 0,
+        "denied": 4,
+        "task_calls": 16,
+        "destinations": [],
+        "denied_destinations": [
+          "authority_denied"
+        ],
+        "network_errors": [],
+        "control_failure": false
+      }
+    },
+    "codex": {
+      "status": "passed",
+      "checks": [
+        "distinct_pid_mount_network_namespaces",
+        "task_uid_caps_readonly_mounts_and_cgroup_limits",
+        "malicious_filesystem_process_fd_env_socket_ptrace_probes",
+        "pid_and_tmpfs_exhaustion_bounded",
+        "unknown_ip_metadata_plaintext_proxy_destinations_denied",
+        "broker_malformed_auth_size_arguments_attempt_scope_denied",
+        "broker_task_result_output_limit",
+        "broker_call_limit_blocks_side_effects",
+        "private_canary_and_process_intact_after_attacks",
+        "deadline_exhaustion_tears_down_task_namespace",
+        "output_exhaustion_tears_down_task_namespace"
+      ],
+      "separation": {
+        "private_paths_denied": true,
+        "process_absent": true,
+        "private_fd_absent": true,
+        "private_env_absent": true,
+        "root_readonly": true,
+        "ptrace_denied": true,
+        "no_capabilities": true,
+        "no_new_privileges": true,
+        "seccomp_filter": true,
+        "private_sockets_unreachable": true,
+        "external_network_unreachable": true
+      },
+      "resources": {
+        "tmpfs_bounded": true,
+        "pids_bounded": true,
+        "children_started": 113
+      },
+      "control": {
+        "connected": 0,
+        "denied": 4,
+        "task_calls": 16,
+        "destinations": [],
+        "denied_destinations": [
+          "authority_denied"
+        ],
+        "network_errors": [],
+        "control_failure": false
+      }
+    }
+  },
+  "cleanup_confirmed": true,
+  "scope_limits": [
+    "pinned Linux x86-64 Docker image only",
+    "synthetic canaries; no real credential extraction test",
+    "workspace volume has no disk quota",
+    "memory/CPU limits inspected, not OOM/CPU stress acceptance",
+    "Docker daemon/kernel/host compromise not evaluated",
+    "provider extension paths not exhaustively evaluated"
+  ],
+  "success": true
+}

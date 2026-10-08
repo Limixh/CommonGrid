@@ -1,0 +1,82 @@
+{
+  "checked_at": "2026-10-08T14:35:34.400Z",
+  "platform": "win32",
+  "scope": "F0 CommonGrid accounts and authenticated API foundation",
+  "execution_enabled": false,
+  "isolation_gate": "not_evaluated",
+  "real_account_tested": false,
+  "real_model_inference": false,
+  "real_oauth_provider_tested": false,
+  "remote_ci_tested": false,
+  "success": true,
+  "command": "npm run check",
+  "node_tests": {
+    "scripts": 13,
+    "package_and_spike": 156,
+    "passed": 169,
+    "failed": 0
+  },
+  "generated_check": true,
+  "typecheck": true,
+  "frontend_build": true,
+  "coordinator_build": true,
+  "go_tests": {
+    "commongrid/coordinator/internal/contract": {
+      "named_passed": 57,
+      "named_database_skipped": 0
+    },
+    "commongrid/coordinator/internal/auth": {
+      "named_passed": 65,
+      "named_database_skipped": 0
+    },
+    "commongrid/coordinator/cmd/coordinator": {
+      "named_passed": 3,
+      "named_database_skipped": 0
+    },
+    "commongrid/coordinator/internal/httpapi": {
+      "named_passed": 27,
+      "named_database_skipped": 1
+    },
+    "commongrid/coordinator/internal/store": {
+      "named_passed": 6,
+      "named_database_skipped": 43
+    }
+  },
+  "go_uncached_followup": true,
+  "go_vet": true,
+  "database_acceptance_separate": true,
+  "source_sha256": {
+    "apps/desktop/src/AccountPanel.tsx": "c437b4da574a6e92655b5de0ec4e43d93216faa03fda04872591e182fb3a1895",
+    "apps/desktop/src/App.tsx": "cb0a37ac4e8756764709496c352500f057a115baa088243f1625d723016ab175",
+    "apps/desktop/src/account-api.ts": "10e20007b2ec0136745865ba4b1a96a421d5757157880544c1180efde8eda94a",
+    "apps/desktop/src/styles.css": "2979b83c1051a4631e78b380b759711c32d09c91347374e48fb0b83f74c065a6",
+    "scripts/postgres-tests.mjs": "ecab9ddd832b7af17ca413151749380f3cbf0ab4b7c822b6b0f86ef2ff2eb1e1",
+    "services/coordinator/cmd/coordinator/main.go": "6cb61fbd7218acb1d90673843d686ec02571512f32f90eac19614458aa0c74e6",
+    "services/coordinator/cmd/coordinator/main_test.go": "ce0185e8f2e8a8317bb4fc19cbb27540f540c050273a6801f112f143dcc0ec38",
+    "services/coordinator/go.mod": "327570806cd2852508e0abc98037602880e30d1300542e71c4dc0e8905c7b66e",
+    "services/coordinator/go.sum": "8eb1dc6937b76cebaa4e08492716263ae72205b4830b144da61a58fea4c288d6",
+    "services/coordinator/internal/auth/manager.go": "c93da97c24dad5d60d56aaa8464fa90999377c3897886c85ccd3c1db08c361a5",
+    "services/coordinator/internal/auth/manager_test.go": "d57776f4e16e19990f7b27793f82f3d644662de368cfba82bd761da654093cf4",
+    "services/coordinator/internal/auth/provider.go": "85dc2bdf763a42120ea149dc48215479d8ed9cbca082bcfa2663fdffd6c97975",
+    "services/coordinator/internal/auth/provider_test.go": "01c7134bacdf3b7a991712ede668eb9dfd727412be096fa36a5cbb1f0843c028",
+    "services/coordinator/internal/httpapi/live.go": "2de92c862b73f2654d1735cd73f080ef55aada5b45be262c3a7d1c2aca0207e5",
+    "services/coordinator/internal/httpapi/live_test.go": "275c4e1879a46c64bc41ad7ec956dbc4283f95cc62f97fd12d29772109c0e010",
+    "services/coordinator/internal/httpapi/postgres_integration_test.go": "e6740a63ef8805cb4f8ee7427af881b4ac3edca9511d38869f14dd67b5dd722a",
+    "services/coordinator/internal/httpapi/server.go": "06c035893c9c8285ac965d45ee123d3927707089e0cb4df5d5fd66c886fb4972",
+    "services/coordinator/internal/store/accounts.go": "19531fb8e0ebef5db6629df94f587ecd9587bd27ed6dca4d9785a998757cc63b",
+    "services/coordinator/internal/store/accounts_postgres_test.go": "098caaa4c6f2e1ef9f01e3379a73b897d3c4525fd849d78ae7d640ba81af0d20",
+    "services/coordinator/internal/store/migrations/0005_accounts.sql": "298207c6ab756f903c06ac9d6c397b95a97659e2d162a2e418d852cfdbd2d9ec",
+    "services/coordinator/internal/store/readiness.go": "eb8a95397ee91d1505b204695b5f0972cc760e33491d20beada98686ecbecb7d",
+    "services/coordinator/internal/store/readmodels.go": "05f0915d4a3d2163dfc892d662869ef702da4242570a7747ea71a8c42647c623",
+    "tests/ui/account.spec.ts": "e815aa3be6c8bed2ff75ab928a43bf9873b48f9976ba3c6ebc5b1069fe77856b",
+    "tests/ui/workspace.spec.ts": "87ec4708713aec6c96c793b60fcbc7a69b66cbbcce557797bfcaef25e65c4104"
+  },
+  "raw_check_log": ".local/validation/account-api-2026-10-08/check-final.log",
+  "raw_go_events": ".local/validation/account-api-2026-10-08/go-test.jsonl",
+  "limitations": [
+    "Real OAuth app configuration/HTTPS staging acceptance pending",
+    "Packaged native auth callback pending",
+    "Artifact importer/scanner/verifier and review workspace pending",
+    "CLI isolation gate remains closed"
+  ]
+}

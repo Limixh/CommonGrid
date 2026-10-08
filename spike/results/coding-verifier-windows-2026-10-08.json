@@ -1,0 +1,80 @@
+{
+  "checked_at": "2026-10-08T08:31:38.023Z",
+  "purpose": "controlled_coding_verifier_and_artifact_fixture",
+  "real_model_inference": false,
+  "real_account_tested": false,
+  "execution_enabled": false,
+  "isolation_gate": "not_evaluated",
+  "artifact_safety": {
+    "scope": "single_sum_mjs_fixture",
+    "secret_policy": "bounded_known_credential_shapes_and_literal_assignments",
+    "general_importer": false,
+    "production_secret_scanner": false
+  },
+  "checks": [
+    "broken_baseline_rejected",
+    "candidate_exit_zero_cannot_spoof_oracle",
+    "frozen_bounded_regular_file_snapshot",
+    "independent_private_oracle_32_cases",
+    "git_apply_check",
+    "applied_patch_matches_verified_candidate_hash",
+    "candidate_path_literals_preserved_in_verified_patch_roundtrip",
+    "extra_file_rejected",
+    "symlink_without_extra_file_rejected",
+    "oversized_candidate_rejected",
+    "hidden_auth_named_file_rejected",
+    "nested_git_directory_rejected",
+    "candidate_directory_rejected",
+    "candidate_fifo_rejected",
+    "hardlink_with_second_entry_rejected",
+    "nul_content_rejected",
+    "invalid_utf8_rejected",
+    "bidi_hidden_content_rejected",
+    "synthetic_bearer_secret_rejected",
+    "synthetic_private_key_rejected",
+    "synthetic_provider_token_rejected",
+    "synthetic_refresh_token_assignment_rejected",
+    "direct_verifier_secret_rejected_before_staging",
+    "direct_diff_secret_rejected_before_writing"
+  ],
+  "cleanup_confirmed": true,
+  "verifier": {
+    "passed": true,
+    "cases": 32,
+    "candidate_sha256": "db00e4a06aea7bbe143249faf0eddf8be1ffe6ef482513f92ff250ea7c5a7249",
+    "network": "none",
+    "workspace": "read_only",
+    "oracle": "host_private_expected_results",
+    "agent_access": false
+  },
+  "diff": {
+    "patch_file": "coding-verifier-fixture.patch",
+    "patch_sha256": "0df9c5d7896a05f5906672ddc807d3d59e648f5cafeb32a7caa385283d353931",
+    "base_sha256": "84bca9d99599d19fcce52870ca5b12e01f0c65a1b639a6b26de2ecc9c8fe7424",
+    "candidate_sha256": "db00e4a06aea7bbe143249faf0eddf8be1ffe6ef482513f92ff250ea7c5a7249",
+    "applied_candidate_sha256": "db00e4a06aea7bbe143249faf0eddf8be1ffe6ef482513f92ff250ea7c5a7249",
+    "git_apply_check": true,
+    "git_apply_roundtrip": true
+  },
+  "literal_artifact": {
+    "verifier": {
+      "passed": true,
+      "cases": 32,
+      "candidate_sha256": "1961327505a668a7c0bbc771b7b4865c8fca4698d93a519bac703eb3b8677c3f",
+      "network": "none",
+      "workspace": "read_only",
+      "oracle": "host_private_expected_results",
+      "agent_access": false
+    },
+    "diff": {
+      "patch_file": "coding-verifier-literal-fixture.patch",
+      "patch_sha256": "1fcc85e4b36b057d1427825fa8144a7231cfcc46f9e92916faa7e152f7957f82",
+      "base_sha256": "84bca9d99599d19fcce52870ca5b12e01f0c65a1b639a6b26de2ecc9c8fe7424",
+      "candidate_sha256": "1961327505a668a7c0bbc771b7b4865c8fca4698d93a519bac703eb3b8677c3f",
+      "applied_candidate_sha256": "1961327505a668a7c0bbc771b7b4865c8fca4698d93a519bac703eb3b8677c3f",
+      "git_apply_check": true,
+      "git_apply_roundtrip": true
+    }
+  },
+  "success": true
+}

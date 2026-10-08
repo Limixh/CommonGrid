@@ -1,0 +1,7 @@
+{
+  "schema_version": "1.0",
+  "image": "node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392",
+  "registry": "https://registry-1.docker.io/v2/library/node/manifests/22-bookworm-slim",
+  "reviewed_on": "2026-10-08",
+  "purpose": "controlled_F0_cli_and_task_runtimes_not_production"
+}

@@ -1,0 +1,270 @@
+{
+  "source": "fixture",
+  "execution_enabled": false,
+  "projects": [
+    {
+      "id": "proof-lab",
+      "title": "İspat atölyesi",
+      "type": "lean",
+      "description": "Lean görev sözleşmeleri ve ayrıştırma akışının geliştirme kataloğu."
+    },
+    {
+      "id": "runtime-lab",
+      "title": "Algoritma atölyesi",
+      "type": "software",
+      "description": "Bağımsız testlerle doğrulanacak yazılım görevlerinin geliştirme kataloğu."
+    }
+  ],
+  "tasks": [
+    {
+      "schema_version": "1.0",
+      "id": "lean-add-comm",
+      "task_version": 1,
+      "project_id": "proof-lab",
+      "type": "lean",
+      "kind": "solve",
+      "title": "Doğal sayılarda toplama değişmeliliği",
+      "description": "Her a b : Nat için a + b = b + a teoremini, sabitlenmiş hedef tanımını değiştirmeden ispatla.",
+      "prompt": "Challenge.lean içindeki add_comm hedefini Nat tümevarımıyla ispatla. Yeni aksiyom, sorry veya hedef değişikliği kabul edilmez.",
+      "strategies": [
+        {
+          "id": "induction",
+          "instructions": "İlk değişkende tümevarım yap; sıfır ve ardıl yardımcı lemmalarını kullan."
+        }
+      ],
+      "workspace": {
+        "repo": "https://example.com/commongrid-fixtures.git",
+        "commit": "0000000000000000000000000000000000000000",
+        "entry_files": [
+          "Challenge.lean",
+          "Main.lean"
+        ],
+        "writable_paths": [
+          "Main.lean"
+        ]
+      },
+      "environment": {
+        "image": "commongrid/lean-fixture@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "cpu": 2,
+        "memory_mb": 4096,
+        "time_limit_sec": 1800
+      },
+      "verification": {
+        "profile": "lean-proof",
+        "local_precheck": "lake build",
+        "server_command": "commongrid-lean-check Main.lean",
+        "output_schema": "lean-artifact/1.0",
+        "forbidden_patterns": [
+          "sorry",
+          "axiom"
+        ]
+      },
+      "depends_on": [],
+      "difficulty": "easy",
+      "node_id": "nat-add-comm",
+      "parallelism": {
+        "mode": "independent",
+        "initial": 3,
+        "cap": 10
+      },
+      "agents": {
+        "preferred": [
+          "codex"
+        ],
+        "excluded": []
+      },
+      "progress": {
+        "milestones": [
+          {
+            "id": "base",
+            "name": "Taban durumu",
+            "check": "zero_add",
+            "weight": 0.3,
+            "critical": true
+          },
+          {
+            "id": "step",
+            "name": "Tümevarım adımı",
+            "check": "succ_add",
+            "weight": 0.7,
+            "critical": true
+          }
+        ]
+      },
+      "review": {
+        "policy": "maintainer",
+        "required_approvals": 1
+      },
+      "reward_points": 100,
+      "handoff": {
+        "enabled": true,
+        "checkpoint_interval_sec": 300,
+        "max_checkpoints": 5,
+        "allow_workspace_snapshot": true,
+        "resume_from_latest": true
+      },
+      "contract_hash": "cfac882ac5614702bd343a3bc7264550f843472ef89668986e64c106adac2024"
+    },
+    {
+      "schema_version": "1.0",
+      "id": "software-bounds",
+      "task_version": 1,
+      "project_id": "runtime-lab",
+      "type": "software",
+      "kind": "solve",
+      "title": "İkili aramada sınır koşulları",
+      "description": "Sıralı bir dizide ilk eşleşen öğeyi bulan lower_bound fonksiyonunun sınır koşullarını düzelt.",
+      "prompt": "src/search.ts içindeki lower_bound fonksiyonunu düzelt. Boş dizi, tekrar eden değerler ve bulunamayan hedefler için mevcut testleri geçir. Test dosyalarını değiştirme.",
+      "strategies": [
+        {
+          "id": "invariant",
+          "instructions": "Yarı açık [lo, hi) aralığının invariantını koru; önce en küçük karşı örneği bul."
+        },
+        {
+          "id": "boundary-first",
+          "instructions": "Önce boş dizi ve uç değerleri incele, ardından tekrar eden değerleri ele al."
+        }
+      ],
+      "workspace": {
+        "repo": "https://example.com/commongrid-fixtures.git",
+        "commit": "0000000000000000000000000000000000000000",
+        "entry_files": [
+          "src/search.ts",
+          "tests/search.test.ts"
+        ],
+        "writable_paths": [
+          "src/search.ts"
+        ]
+      },
+      "environment": {
+        "image": "commongrid/software-fixture@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "cpu": 2,
+        "memory_mb": 2048,
+        "time_limit_sec": 1800
+      },
+      "verification": {
+        "profile": "software-tests",
+        "local_precheck": "npm test",
+        "server_command": "npm test",
+        "output_schema": "software-diff/1.0",
+        "forbidden_patterns": []
+      },
+      "depends_on": [],
+      "difficulty": "medium",
+      "node_id": "search-bounds",
+      "parallelism": {
+        "mode": "exclusive",
+        "initial": 1,
+        "cap": 1
+      },
+      "agents": {
+        "preferred": [
+          "codex"
+        ],
+        "excluded": []
+      },
+      "progress": {
+        "milestones": [
+          {
+            "id": "edges",
+            "name": "Sınır koşulları",
+            "check": "npm test -- edges",
+            "weight": 0.4,
+            "critical": true
+          },
+          {
+            "id": "duplicates",
+            "name": "Tekrarlayan değerler",
+            "check": "npm test -- duplicates",
+            "weight": 0.6,
+            "critical": true
+          }
+        ]
+      },
+      "review": {
+        "policy": "maintainer",
+        "required_approvals": 1
+      },
+      "reward_points": 120,
+      "handoff": {
+        "enabled": true,
+        "checkpoint_interval_sec": 300,
+        "max_checkpoints": 5,
+        "allow_workspace_snapshot": true,
+        "resume_from_latest": true
+      },
+      "contract_hash": "a30d885a6025871701a9a03c324bb5782d9353911d07d8d47655ea7c01fc919a"
+    },
+    {
+      "schema_version": "1.0",
+      "id": "lean-plan",
+      "task_version": 1,
+      "project_id": "proof-lab",
+      "type": "lean",
+      "kind": "plan",
+      "title": "İspatı alt hedeflere ayır",
+      "description": "Doğal sayı aritmetiği hedefi için doğrulanabilir bir ayrıştırma öner.",
+      "prompt": "Açık alt hedefler ve bağımlılıklar öner. Bağlantı ispatını alt hedef hipotezleriyle yaz; kök hedefi değiştirme.",
+      "strategies": [
+        {
+          "id": "induction",
+          "instructions": "İlk değişkende tümevarım yap; sıfır ve ardıl yardımcı lemmalarını kullan."
+        }
+      ],
+      "workspace": {
+        "repo": "https://example.com/commongrid-fixtures.git",
+        "commit": "0000000000000000000000000000000000000000",
+        "entry_files": [
+          "Challenge.lean",
+          "Main.lean"
+        ],
+        "writable_paths": [
+          "Main.lean"
+        ]
+      },
+      "environment": {
+        "image": "commongrid/lean-fixture@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "cpu": 2,
+        "memory_mb": 4096,
+        "time_limit_sec": 1800
+      },
+      "verification": {
+        "profile": "planner-proposal",
+        "local_precheck": "commongrid-proposal-check proposal.json",
+        "server_command": "commongrid-proposal-check proposal.json",
+        "output_schema": "planner-proposal/1.0",
+        "forbidden_patterns": []
+      },
+      "depends_on": [],
+      "difficulty": "hard",
+      "node_id": "nat-root",
+      "parallelism": {
+        "mode": "independent",
+        "initial": 3,
+        "cap": 10
+      },
+      "agents": {
+        "preferred": [
+          "codex"
+        ],
+        "excluded": []
+      },
+      "progress": {
+        "milestones": []
+      },
+      "review": {
+        "policy": "maintainer",
+        "required_approvals": 1
+      },
+      "reward_points": 100,
+      "handoff": {
+        "enabled": true,
+        "checkpoint_interval_sec": 300,
+        "max_checkpoints": 5,
+        "allow_workspace_snapshot": true,
+        "resume_from_latest": true
+      },
+      "contract_hash": "ada2344d99ce0d8b0034fe0cb8c651696fe2a71d8bc2e3267f21fdc50c1560aa"
+    }
+  ]
+}

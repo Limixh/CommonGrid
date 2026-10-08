@@ -1,0 +1,23 @@
+{
+  "checked_at": "2026-10-08T07:38:12.952Z",
+  "provider": "claude",
+  "operation": "logout",
+  "credential_files_copied": false,
+  "execution_enabled": false,
+  "isolation_gate": "not_evaluated",
+  "success": true,
+  "cleanup_confirmed": true,
+  "authenticated": false,
+  "method": "none",
+  "logout_verified": true,
+  "network": {
+    "connected": 1,
+    "denied": 0,
+    "task_calls": 0,
+    "destinations": [
+      "platform.claude.com"
+    ],
+    "denied_destinations": [],
+    "network_errors": []
+  }
+}

@@ -1,0 +1,18 @@
+diff --git a/sum.mjs b/sum.mjs
+index 66aa6f7..e69cec8 100644
+--- a/sum.mjs
++++ b/sum.mjs
+@@ -1 +1,12 @@
+-export function sumIntegers(values) { return values.reduce((total, value) => total + value); }
++export function sumIntegers(values) {
++  if (!Array.isArray(values)) throw new TypeError('values must be an array');
++  for (const v of values) {
++    if (!Number.isSafeInteger(v)) throw new TypeError('all values must be safe integers');
++  }
++  let sum = 0;
++  for (const v of values) {
++    sum += v;
++    if (!Number.isSafeInteger(sum)) throw new RangeError('running sum exceeded safe integer range');
++  }
++  return sum;
++}

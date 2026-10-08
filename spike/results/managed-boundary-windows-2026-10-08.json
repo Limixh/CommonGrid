@@ -1,0 +1,70 @@
+{
+  "checked_at": "2026-10-08T07:33:30.994Z",
+  "purpose": "managed_runtime_fake_auth_and_public_tls_boundary",
+  "real_account_tested": false,
+  "real_model_inference": false,
+  "credential_files_copied": false,
+  "execution_enabled": false,
+  "isolation_gate": "not_evaluated",
+  "providers": {
+    "claude": {
+      "checks": [
+        "network_none_no_host_mounts_readonly_tools",
+        "competing_profile_command_cannot_delete_incumbent",
+        "task_cannot_read_auth_env_or_use_proxy",
+        "unknown_domain_ip_and_plaintext_port_denied",
+        "provider_tls_passthrough_certificate_verified",
+        "broker_auth_attempt_scope_and_real_task_roundtrip",
+        "task_call_budget_denies_execution_after_limit",
+        "private_home_survives_cli_restart"
+      ],
+      "status": "passed",
+      "warm_cli_start_ms": 11406,
+      "network": {
+        "connected": 1,
+        "denied": 3,
+        "task_calls": 16,
+        "destinations": [
+          "platform.claude.com"
+        ],
+        "denied_destinations": [
+          "example.com:443",
+          "127.0.0.1:443",
+          "auth.openai.com:80"
+        ],
+        "network_errors": []
+      }
+    },
+    "codex": {
+      "checks": [
+        "network_none_no_host_mounts_readonly_tools",
+        "competing_profile_command_cannot_delete_incumbent",
+        "task_cannot_read_auth_env_or_use_proxy",
+        "unknown_domain_ip_and_plaintext_port_denied",
+        "provider_tls_passthrough_certificate_verified",
+        "broker_auth_attempt_scope_and_real_task_roundtrip",
+        "task_call_budget_denies_execution_after_limit",
+        "private_home_survives_cli_restart"
+      ],
+      "status": "passed",
+      "warm_cli_start_ms": 7711,
+      "network": {
+        "connected": 1,
+        "denied": 3,
+        "task_calls": 16,
+        "destinations": [
+          "auth.openai.com"
+        ],
+        "denied_destinations": [
+          "example.com:443",
+          "127.0.0.1:443",
+          "auth.openai.com:80"
+        ],
+        "network_errors": []
+      }
+    }
+  },
+  "cleanup_confirmed": true,
+  "private_volumes_retained": true,
+  "success": true
+}

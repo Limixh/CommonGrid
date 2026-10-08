@@ -1,0 +1,28 @@
+{
+  "checked_at": "2026-10-08T12:55:04.3931131Z",
+  "purpose": "session_continuity_foundations_regression_and_build",
+  "command": "npm run check",
+  "success": true,
+  "node_tests": 167,
+  "node_failed": 0,
+  "execution_enabled": false,
+  "isolation_gate": "not_evaluated",
+  "real_account_tested": false,
+  "real_model_inference": false,
+  "scope_limits": [
+    "PostgreSQL integration, Temporal, UI and native release not re-run",
+    "Remote CI not run",
+    "Real session renewal, quota exhaustion and concurrency not accepted"
+  ],
+  "log_retained_locally": true,
+  "node_groups": [
+    {
+      "scope": "scripts",
+      "passed": 13
+    },
+    {
+      "scope": "packages_and_spike",
+      "passed": 154
+    }
+  ]
+}

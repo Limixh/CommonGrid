@@ -1,0 +1,25 @@
+{
+  "checked_at": "2026-10-08T07:35:56.190Z",
+  "provider": "codex",
+  "operation": "refresh",
+  "credential_files_copied": false,
+  "execution_enabled": false,
+  "isolation_gate": "not_evaluated",
+  "success": true,
+  "cleanup_confirmed": true,
+  "authenticated": true,
+  "method": "chatgpt",
+  "refresh_requested": true,
+  "logout_verified": false,
+  "network": {
+    "connected": 9,
+    "denied": 0,
+    "task_calls": 0,
+    "destinations": [
+      "chatgpt.com",
+      "auth.openai.com"
+    ],
+    "denied_destinations": [],
+    "network_errors": []
+  }
+}

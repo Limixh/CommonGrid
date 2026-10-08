@@ -1,0 +1,26 @@
+{
+  "checked_at": "2026-10-07T23:07:39.680Z",
+  "platform": "win32",
+  "server_version": "postgres (PostgreSQL) 18.6",
+  "migration_sha256": "23fd94f749ddf87d6efc2b90ad4c1b29c371e9ab22ff9962a721924967d5be66",
+  "passed": [
+    "TestManagedSchemaGuard",
+    "TestCapacityAccounting",
+    "TestRequestIdentity",
+    "TestPostgresMigrationsAndImmutability",
+    "TestPostgresConcurrentReservationsCannotOverspend",
+    "TestPostgresAncestorBudgetRollsBackAllScopes",
+    "TestPostgresIdempotentReservationAndStaleContract",
+    "TestPostgresTaskAndGlobalUserCapacity",
+    "TestPostgresStopKeepsReservationAndSettlementIsIdempotent",
+    "TestPostgresExpiryAndLateCompletion",
+    "TestPostgresVersionUpdateRequiresEndedLeases",
+    "TestPostgresOutboxInsertFailureRollsBackLeaseAndBudget",
+    "TestPostgresOutboxReplayFencingAndPerLeaseOrder",
+    "TestPostgresConcurrentOutboxClaimsAreDistinct"
+  ],
+  "skipped": [],
+  "failed": [],
+  "success": true,
+  "execution_enabled": false
+}

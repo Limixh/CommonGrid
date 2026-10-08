@@ -1,0 +1,25 @@
+{
+  "checked_at": "2026-10-08T08:32:19.4193368Z",
+  "purpose": "foundations_regression_and_build",
+  "command": "npm run check",
+  "success": true,
+  "node_tests": 121,
+  "node_failed": 0,
+  "execution_enabled": false,
+  "isolation_gate": "not_evaluated",
+  "scope_limits": [
+    "PostgreSQL integration, Temporal, UI and native release not re-run",
+    "Remote CI not run"
+  ],
+  "log_retained_locally": true,
+  "node_groups": [
+    {
+      "scope": "scripts",
+      "passed": 13
+    },
+    {
+      "scope": "packages_and_spike",
+      "passed": 108
+    }
+  ]
+}

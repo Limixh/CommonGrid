@@ -1,0 +1,50 @@
+{
+  "checked_at": "2026-10-08T07:31:15.923Z",
+  "purpose": "controlled_real_subscription_coding_task_in_isolated_cli",
+  "provider": "codex",
+  "model": "gpt-6-astra",
+  "credential_files_copied": false,
+  "paid_api_fallback": false,
+  "execution_enabled": false,
+  "isolation_gate": "not_evaluated",
+  "real_model_inference_attempted": true,
+  "task_calls": 2,
+  "cleanup_confirmed": true,
+  "catalog_sha256": "850a01af776a85af411bb92be923635ef48c09f2b2f475bc5604bd41ea5fe5f6",
+  "tool_profile": "pinned_catalog_direct_no_multi_agent",
+  "managed_refresh_requested": true,
+  "available_models": [
+    "gpt-6-astra"
+  ],
+  "verifier": {
+    "passed": true,
+    "cases": 32,
+    "candidate_sha256": "129edda8b0af9e070b61e394958d3a0471eacdffa9a9d7a30d9f1b8df7a36405",
+    "network": "none",
+    "workspace": "read_only",
+    "oracle": "host_private_expected_results",
+    "agent_access": false
+  },
+  "diff": {
+    "patch_file": "managed-task-codex.patch",
+    "patch_sha256": "7de95fca321f9b6d3d960b3d92c973226cd08e008fbb561c8a88e4a7fc162492",
+    "base_sha256": "84bca9d99599d19fcce52870ca5b12e01f0c65a1b639a6b26de2ecc9c8fe7424",
+    "candidate_sha256": "129edda8b0af9e070b61e394958d3a0471eacdffa9a9d7a30d9f1b8df7a36405",
+    "git_apply_check": true
+  },
+  "real_coding_verified": true,
+  "success": true,
+  "network": {
+    "connected": 14,
+    "denied": 0,
+    "task_calls": 0,
+    "destinations": [
+      "chatgpt.com",
+      "auth.openai.com",
+      "sdmntprsouthcentralus.oaiusercontent.com",
+      "sdmntprcentralus.oaiusercontent.com"
+    ],
+    "denied_destinations": [],
+    "network_errors": []
+  }
+}

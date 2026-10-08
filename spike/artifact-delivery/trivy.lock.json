@@ -1,0 +1,10 @@
+{
+  "version": "0.75.0",
+  "source": "https://github.com/aquasecurity/trivy/releases/tag/v0.75.0",
+  "assets": {
+    "win32-x64": { "name": "trivy_0.75.0_windows-64bit.zip", "sha256": "4e43bd71a30f51aee39525f60f2b47043af77eb8df8fe082aae4372b69c6660f", "binary": "trivy.exe", "binary_sha256": "3b4fcf6fec53c4c73c325cfd518c7264100695b19e6c59c6a777e4a67dc9f0e6" },
+    "linux-x64": { "name": "trivy_0.75.0_Linux-64bit.tar.gz", "sha256": "c6e65abddb348e25f10549df887045629cf28cc72453cd1c63acb717316b3f3f", "binary": "trivy" },
+    "darwin-x64": { "name": "trivy_0.75.0_macOS-64bit.tar.gz", "sha256": "291edaa9778acbe4693d067b5ad60ee11570e5ac68296e85595417528ca641e4", "binary": "trivy" },
+    "darwin-arm64": { "name": "trivy_0.75.0_macOS-ARM64.tar.gz", "sha256": "4a77108cccf8e55c8d6823e1e759939a622277e66cd0daa3c1fc621ed69e4568", "binary": "trivy" }
+  }
+}

@@ -1,0 +1,90 @@
+{
+  "schema_version": "1.0",
+  "id": "software-bounds",
+  "task_version": 1,
+  "project_id": "runtime-lab",
+  "type": "software",
+  "kind": "solve",
+  "title": "İkili aramada sınır koşulları",
+  "description": "Sıralı bir dizide ilk eşleşen öğeyi bulan lower_bound fonksiyonunun sınır koşullarını düzelt.",
+  "prompt": "src/search.ts içindeki lower_bound fonksiyonunu düzelt. Boş dizi, tekrar eden değerler ve bulunamayan hedefler için mevcut testleri geçir. Test dosyalarını değiştirme.",
+  "strategies": [
+    {
+      "id": "invariant",
+      "instructions": "Yarı açık [lo, hi) aralığının invariantını koru; önce en küçük karşı örneği bul."
+    },
+    {
+      "id": "boundary-first",
+      "instructions": "Önce boş dizi ve uç değerleri incele, ardından tekrar eden değerleri ele al."
+    }
+  ],
+  "workspace": {
+    "repo": "https://example.com/commongrid-fixtures.git",
+    "commit": "0000000000000000000000000000000000000000",
+    "entry_files": [
+      "src/search.ts",
+      "tests/search.test.ts"
+    ],
+    "writable_paths": [
+      "src/search.ts"
+    ]
+  },
+  "environment": {
+    "image": "commongrid/software-fixture@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "cpu": 2,
+    "memory_mb": 2048,
+    "time_limit_sec": 1800
+  },
+  "verification": {
+    "profile": "software-tests",
+    "local_precheck": "npm test",
+    "server_command": "npm test",
+    "output_schema": "software-diff/1.0",
+    "forbidden_patterns": []
+  },
+  "depends_on": [],
+  "difficulty": "medium",
+  "node_id": "search-bounds",
+  "parallelism": {
+    "mode": "exclusive",
+    "initial": 1,
+    "cap": 1
+  },
+  "agents": {
+    "preferred": [
+      "codex"
+    ],
+    "excluded": []
+  },
+  "progress": {
+    "milestones": [
+      {
+        "id": "edges",
+        "name": "Sınır koşulları",
+        "check": "npm test -- edges",
+        "weight": 0.4,
+        "critical": true
+      },
+      {
+        "id": "duplicates",
+        "name": "Tekrarlayan değerler",
+        "check": "npm test -- duplicates",
+        "weight": 0.6,
+        "critical": true
+      }
+    ]
+  },
+  "review": {
+    "policy": "maintainer",
+    "required_approvals": 1
+  },
+  "reward_points": 120,
+  "handoff": {
+    "enabled": true,
+    "checkpoint_interval_sec": 300,
+    "max_checkpoints": 5,
+    "allow_workspace_snapshot": true,
+    "resume_from_latest": true
+  },
+  "contract_hash": "a30d885a6025871701a9a03c324bb5782d9353911d07d8d47655ea7c01fc919a"
+}

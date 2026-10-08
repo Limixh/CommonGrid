@@ -1,0 +1,94 @@
+{
+  "schema_version": "1.0",
+  "checked_at": "2026-10-08T00:43:34.060Z",
+  "platform": "win32",
+  "purpose": "live_fixture_task_container_attacks_no_cli_or_account",
+  "image": "node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392",
+  "execution_enabled": false,
+  "real_account_tested": false,
+  "isolation_gate": "not_evaluated",
+  "task_tools_boundary": "fixture_tests_passed",
+  "checks": [
+    {
+      "name": "runtime policy and resource limits",
+      "passed": true
+    },
+    {
+      "name": "task writes succeed and root filesystem writes fail",
+      "passed": true
+    },
+    {
+      "name": "kernel cgroup limits match the declared task limits",
+      "passed": true
+    },
+    {
+      "name": "host paths, auth canary, daemon socket and traversal cannot reveal secrets",
+      "passed": true
+    },
+    {
+      "name": "proc and environment cannot expose the separate fake CLI identity",
+      "passed": true
+    },
+    {
+      "name": "outbound network is blocked",
+      "passed": true
+    },
+    {
+      "name": "tmpfs executable and privileged namespace operations are denied",
+      "passed": true
+    },
+    {
+      "name": "child process exhaustion is bounded by the PID cgroup",
+      "passed": true
+    },
+    {
+      "name": "opaque workspace does not retain an earlier attempt",
+      "passed": true
+    },
+    {
+      "name": "deadline stops a command and its detached child process tree",
+      "passed": true
+    },
+    {
+      "name": "cancellation stops the entire task environment",
+      "passed": true
+    },
+    {
+      "name": "unbounded tool output stops the task without forwarding the output",
+      "passed": true
+    }
+  ],
+  "cleanup_confirmed": true,
+  "remaining": [
+    "actual CLI/auth OS boundary and all tool paths",
+    "MCP/control-channel authorization and confinement",
+    "real account/diff and token renewal/logout",
+    "provider compatibility",
+    "macOS/Linux host matrix",
+    "independent security review"
+  ],
+  "engine": {
+    "server_version": "29.8.2",
+    "os": "linux",
+    "architecture": "x86_64"
+  },
+  "resolved_image_id": "sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392",
+  "passed": 12,
+  "failed": 0,
+  "success": true,
+  "owned_containers": [
+    "cg-auth-fixture-e5456369-e714-49a3-82cd-78bbb79511d8",
+    "cg-task-1db3cc62-53e1-4f90-b11f-cbb2fa077db6",
+    "cg-task-91c041ba-b191-49c1-9719-c975a16b18c9",
+    "cg-task-974d94b7-adb7-4645-86ff-5ca977c3767e",
+    "cg-task-f8665ca4-340d-4887-a882-2a156c9826fa",
+    "cg-task-69ce5a12-9bba-4ce3-813d-2799e8ae4ce2"
+  ],
+  "owned_volumes": [
+    "cg-workspace-1db3cc62-53e1-4f90-b11f-cbb2fa077db6",
+    "cg-workspace-91c041ba-b191-49c1-9719-c975a16b18c9",
+    "cg-workspace-974d94b7-adb7-4645-86ff-5ca977c3767e",
+    "cg-workspace-f8665ca4-340d-4887-a882-2a156c9826fa",
+    "cg-workspace-69ce5a12-9bba-4ce3-813d-2799e8ae4ce2"
+  ]
+}
