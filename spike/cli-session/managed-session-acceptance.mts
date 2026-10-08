@@ -5,7 +5,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { ProviderFailure, assertBridgeHealthy, failureCode, isRecord } from "../../packages/agent-adapters/src/session-protocol.ts";
-import { claudeStatus, codexRpc, readCodexQuota, sanitizeQuotaObservation } from "./managed-provider-session.mts";
+import { claudeStatus, codexRpc, readCodexQuota } from "./managed-provider-session.mts";
+
+import { sanitizeQuotaObservation } from "@commongrid/agent-adapters";
 
 export type AcceptanceProvider="claude"|"codex";
 export interface AcceptanceIdentity {provider:AcceptanceProvider;owner:string}
@@ -133,7 +135,7 @@ export async function acceptanceMain(args=process.argv.slice(2)) {
   // Runtime loading reads only pinned public manifests; no runtime/auth action
   // occurs when this module is imported by the deterministic fixture suite.
   const {ManagedCliRuntime,startBridge}=await import("./managed-runtime.mts");
-  const runtime=ManagedCliRuntime.restore(options);
+  const runtime=ManagedCliRuntime.restore({owner:options.owner,provider:options.provider,trust:manifest.trust});
   let bridge:Awaited<ReturnType<typeof startBridge>>|undefined;
   const controller=new AbortController(),cancel=()=>controller.abort(new ProviderFailure("canceled"));process.on("SIGINT",cancel);process.on("SIGTERM",cancel);
   try {

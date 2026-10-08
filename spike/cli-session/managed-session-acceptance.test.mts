@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { ProviderFailure } from "../../packages/agent-adapters/src/session-protocol.ts";
 import { runSessionAcceptance, parseAcceptanceArgs, validateSessionCheckpoint, type AcceptanceEnvironment, type AcceptanceProvider } from "./managed-session-acceptance.mts";
-import { normalizeCodexQuota } from "./managed-provider-session.mts";
+import { normalizeCodexQuota } from "@commongrid/agent-adapters";
 
 const owner="11111111-1111-4111-8111-111111111111",clock=Date.parse("2026-10-08T10:00:00.000Z");
 const options={provider:"codex" as const,owner,realAccount:true,cleanupDeadlineMs:25};

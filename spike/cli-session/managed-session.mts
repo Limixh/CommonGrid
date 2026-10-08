@@ -1,32 +1,57 @@
 // Explicit local developer commands. Never enabled through desktop/HTTP or CI.
 import assert from "node:assert/strict";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile, rename, unlink } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { ManagedCliRuntime, startBridge, type SessionIdentity } from "./managed-runtime.mts";
-import { ProviderFailure, assertBridgeHealthy, failureCode } from "../../packages/agent-adapters/src/session-protocol.ts";
+import { ProviderFailure, assertBridgeHealthy, failureCode, isRecord } from "../../packages/agent-adapters/src/session-protocol.ts";
 import { codexRpc, claudeStatus, claudeInteractiveLogin, boundedSessionOperation } from "./managed-provider-session.mts";
 
 const root=fileURLToPath(new URL("../../",import.meta.url));
+export function parseManagedSessionArgs(args:string[]) {
+  const [command,provider,...rest]=args;
+  if(!["prepare","install-trust","install-host-trust","install-coding-profile","status","login","refresh","logout","destroy"].includes(command)||!['claude','codex'].includes(provider))throw new Error("managed_session_args_invalid");
+  const owner=command==="prepare"?undefined:rest.shift();
+  if(command!=="prepare"&&(typeof owner!=="string"||!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(owner)))throw new Error("managed_session_args_invalid");
+  let hostTrust: {pemPath:string;proofPath:string}|undefined;
+  if(rest.length){
+    if(provider!=="claude"||!["prepare","install-host-trust"].includes(command)||rest.length!==4)throw new Error("managed_session_args_invalid");
+    const paths:Record<string,string>={};
+    for(let i=0;i<rest.length;i+=2){
+      const flag=rest[i],value=rest[i+1];
+      if(!["--host-trust-pem","--host-trust-proof"].includes(flag)||Object.hasOwn(paths,flag)||!value?.trim()||value.startsWith("--")||/[\x00\r\n]/.test(value))throw new Error("managed_session_args_invalid");
+      paths[flag]=value;
+    }
+    hostTrust={pemPath:paths['--host-trust-pem'],proofPath:paths['--host-trust-proof']};
+  }
+  if(command==="install-host-trust"&&!hostTrust)throw new Error("managed_host_trust_selection_required");
+  return {command,provider:provider as "claude"|"codex",owner,hostTrust};
+}
 export async function managedSessionMain(args=process.argv.slice(2)) {
-const [command,provider,owner]=args;
-assert.ok(["prepare","install-trust","install-host-trust","install-coding-profile","status","login","refresh","logout","destroy"].includes(command),"Use prepare|install-trust|install-host-trust|install-coding-profile|status|login|refresh|logout|destroy claude|codex [session UUID]");
-assert.ok(provider === "claude" || provider === "codex","invalid provider");
+const {command,provider,owner,hostTrust}=parseManagedSessionArgs(args);
 const directory=path.join(root,".local/managed-session"); await mkdir(directory,{recursive:true});
 let runtime: ManagedCliRuntime;
 if(command === "prepare") {
-  runtime=await ManagedCliRuntime.prepare(provider);
+  runtime=await ManagedCliRuntime.prepare(provider,{hostTrust});
   await writeFile(path.join(directory,`${runtime.owner}.json`),JSON.stringify({schema_version:"1.0",...runtime.identity(),created_at:new Date().toISOString(),credential_files_copied:false},null,2)+"\n");
   console.log(`Prepared ${provider}: ${runtime.owner}. Private auth volume is empty; official login required.`);
   console.log(`npm run spike:managed-session -- login ${provider} ${runtime.owner}`);
   return runtime.owner;
 }
-runtime=ManagedCliRuntime.restore({owner,provider});
+runtime=ManagedCliRuntime.restore({owner:owner!,provider});
 const saved=JSON.parse(await readFile(path.join(directory,`${runtime.owner}.json`),"utf8")) as SessionIdentity;
-assert.equal(saved.owner,owner);assert.equal(saved.provider,provider);
+assert.ok(isRecord(saved),"managed_public_manifest_invalid");assert.equal(saved.owner,owner);assert.equal(saved.provider,provider);
+runtime=ManagedCliRuntime.restore({owner:owner!,provider,trust:saved.trust});
 if(command === "destroy") {await runtime.destroy();console.log("Owned CLI/auth/tools resources removed; native login unchanged.");return;}
 if(command === "install-trust") {await runtime.installTrustBundle();console.log("Public CA bundle installed from the pinned Node image. TLS verification remains enabled.");return;}
-if(command === "install-host-trust") {await runtime.installClaudeHostTrust();console.log("Claude-only public CA installed after Windows TLS and Root-store verification; no private key exported.");return;}
+if(command === "install-host-trust") {
+  await runtime.installClaudeHostTrust(hostTrust!);
+  const target=path.join(directory,`${runtime.owner}.json`),temporary=target+`.${randomUUID()}.tmp`;
+  try{await writeFile(temporary,JSON.stringify({...saved,...runtime.identity()},null,2)+"\n",{flag:"wx"});await rename(temporary,target);}
+  finally{await unlink(temporary).catch(error=>{if(error.code!=="ENOENT")throw error;});}
+  console.log("Explicit public CA pinned to this Claude profile; no private key exported.");return;
+}
 if(command === "install-coding-profile") {await runtime.installCodexCodingProfile();console.log("Fixture-verified public Codex direct-tool profile installed; provider and auth unchanged.");return;}
 
 

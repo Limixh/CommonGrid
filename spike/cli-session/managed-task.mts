@@ -11,12 +11,13 @@ import { executeTaskTool } from "../../packages/agent-adapters/src/task-tool.ts"
 import { ManagedCliRuntime, startBridge, taskImage } from "./managed-runtime.mts";
 import { codingPrompt, seedTask, snapshotCandidate, verifyCandidate, createDiff } from "./coding-task.mts";
 import { assertCodingProfileVerified, codexCodingModel } from "./codex-profile.mts";
-import { claudeFunctionalTestModel } from "./functional-test-models.mts";
+import { claudeFunctionalTestModel } from "@commongrid/agent-adapters/testing/functional-test-models";
 import { BoundedJsonInput, BoundedJsonLines, OperationCancellation, ProviderFailure, RpcLifecycle, TaskCallbackGuard, assertBridgeHealthy, classifyProviderFailure, failureCode, isRecord, validRpcId, validateClaudeStatus, validateClaudeResult, validateCodexIdentity, validateCodexTurn } from "../../packages/agent-adapters/src/session-protocol.ts";
 const [provider,owner]=process.argv.slice(2);assert.ok(provider === "claude" || provider === "codex");
-const runtime=ManagedCliRuntime.restore({owner,provider});
+ManagedCliRuntime.restore({owner,provider}); // Validate UUID before constructing the metadata path.
 const root=fileURLToPath(new URL("../../",import.meta.url));
 const saved=JSON.parse(await readFile(path.join(root,".local/managed-session",`${owner}.json`),"utf8"));assert.equal(saved.owner,owner);assert.equal(saved.provider,provider);
+const runtime=ManagedCliRuntime.restore({owner,provider,trust:saved.trust});
 const directory=path.join(root,".local/managed-task",randomUUID());await mkdir(directory,{recursive:true});
 const schema=JSON.parse(await readFile(new URL("tool-schema.json",import.meta.url),"utf8"));
 const report:Record<string,any>={checked_at:new Date().toISOString(),purpose:"controlled_real_subscription_coding_task_in_isolated_cli",provider,model:provider === "claude"?claudeFunctionalTestModel:codexCodingModel,credential_files_copied:false,paid_api_fallback:false,execution_enabled:false,isolation_gate:"not_evaluated",real_model_inference_attempted:false,task_calls:0,cleanup_confirmed:false};

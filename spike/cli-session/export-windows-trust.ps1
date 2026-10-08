@@ -34,7 +34,8 @@ try {
         $existing = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($existingDer)
         if ([Convert]::ToHexString([System.Security.Cryptography.SHA256]::HashData($existing.RawData)).ToLowerInvariant() -ne $fingerprint) { throw 'Existing root differs; review before replacing it' }
     } else { [IO.File]::WriteAllText($pemPath, $pem, [Text.UTF8Encoding]::new($false)) }
-    $proof = @{windows_tls_verified=$true; installed_root=$true; private_key_exported=$false; certificate_sha256=$fingerprint; endpoint="${endpoint}:443"; source='Windows verified TLS chain and installed Root certificate'; checked_at=[DateTime]::UtcNow.ToString('o')}
+    $pemFingerprint = [Convert]::ToHexString([System.Security.Cryptography.SHA256]::HashData([IO.File]::ReadAllBytes($pemPath))).ToLowerInvariant()
+    $proof = @{windows_tls_verified=$true; installed_root=$true; private_key_exported=$false; purpose='managed_claude_optional_public_root'; certificate_sha256=$fingerprint; pem_sha256=$pemFingerprint; endpoint="${endpoint}:443"; source='operator_verified_tls_chain_and_installed_root'; checked_at=[DateTime]::UtcNow.ToString('o')}
     [IO.File]::WriteAllText((Join-Path $outputDirectory 'claude-windows-root.proof.json'), ($proof | ConvertTo-Json) + "`n", [Text.UTF8Encoding]::new($false))
     Write-Output 'Verified public Windows root saved locally; no private key exported.'
 } finally {

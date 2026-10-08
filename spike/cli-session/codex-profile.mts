@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { readFile, mkdir, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { codexFunctionalTestModel } from "./functional-test-models.mts";
+import { codexFunctionalTestModel } from "@commongrid/agent-adapters/testing/functional-test-models";
 export const codexCodingModel=codexFunctionalTestModel;
 export const catalogSource={url:"https://raw.githubusercontent.com/openai/codex/rust-v0.157.1/codex-rs/models-manager/models.json",sha256:"0178d235c589a31abd6ed0ea1e870935dc5819240eb0e813e178d3ebedf534f4"};
 const root=fileURLToPath(new URL("../../",import.meta.url));

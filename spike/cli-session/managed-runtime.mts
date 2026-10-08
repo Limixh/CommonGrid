@@ -2,7 +2,7 @@
 // No host credential path, Docker socket, task workspace or published port.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { createHash, randomBytes, randomUUID, X509Certificate } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
@@ -13,6 +13,8 @@ import { executeTaskTool } from "../../packages/agent-adapters/src/task-tool.ts"
 import { type SubscriptionProvider } from "../../packages/agent-adapters/src/egress-policy.ts";
 import { attachManagedControl } from "./managed-control.mts";
 import { assertCodingProfileVerified } from "./codex-profile.mts";
+import { assertManagedProfileTrust, readManagedHostTrust, installManagedHostTrustScript, verifyManagedHostTrustScript, type ManagedHostTrustOptions, type ManagedProfileTrust } from "./managed-trust.mts";
+export type { ManagedHostTrustOptions, ManagedProfileTrust } from "./managed-trust.mts";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const base = JSON.parse(await readFile(new URL("../sandbox/image.lock.json", import.meta.url),"utf8"));
@@ -71,18 +73,7 @@ async function digest(source: string) {
   const hash = createHash("sha256"); for await (const chunk of createReadStream(source)) hash.update(chunk);
   return hash.digest("hex");
 }
-export interface SessionIdentity { owner: string; provider: SubscriptionProvider }
-async function claudeLocalTrust() {
-  try {
-    const proof=JSON.parse(await readFile(path.join(root,".local/managed-session/claude-windows-root.proof.json"),"utf8"));
-    const pem=await readFile(path.join(root,".local/managed-session/claude-windows-root.pem"),"utf8");
-    const certificate=new X509Certificate(pem);
-    assert.equal(proof.windows_tls_verified,true);assert.equal(proof.installed_root,true);assert.equal(proof.private_key_exported,false);
-    assert.equal(createHash("sha256").update(certificate.raw).digest("hex"),proof.certificate_sha256);
-    assert.equal(certificate.ca,true);assert.equal(certificate.subject,certificate.issuer);
-    return {pem,sha256:proof.certificate_sha256};
-  }catch(error:any){if(error.code==="ENOENT")return undefined;throw new Error("managed_host_trust_invalid");}
-}
+export interface SessionIdentity { owner: string; provider: SubscriptionProvider; trust?: ManagedProfileTrust }
 export class ManagedCliRuntime {
   readonly owner: string;
   readonly provider: SubscriptionProvider;
@@ -91,6 +82,7 @@ export class ManagedCliRuntime {
   readonly authVolume: string;
   private readonly initContainer: string;
   private readonly operation = randomUUID();
+  private profileTrust?: Readonly<ManagedProfileTrust>;
   private starting = false;
   // A canceled create client can lose its ID while the daemon is still working.
   // Absence in a single listing cannot prove that mutation never completed.
@@ -98,13 +90,14 @@ export class ManagedCliRuntime {
   private constructor(identity: SessionIdentity) {
     if (!uuidV4.test(identity.owner) || !["claude","codex"].includes(identity.provider)) throw new Error("managed_identity_invalid");
     this.owner = identity.owner; this.provider = identity.provider;
+    if (identity.trust !== undefined) { assertManagedProfileTrust(identity.trust, this.owner, this.provider); this.profileTrust = Object.freeze({...identity.trust}); }
     this.container = `cg-managed-${this.provider}-${this.owner}`;
     this.initContainer = `cg-managed-init-${this.owner}`;
     this.toolsVolume = `cg-managed-tools-${this.owner}`;
     this.authVolume = `cg-managed-auth-${this.owner}`;
   }
   static restore(identity: SessionIdentity) { return new ManagedCliRuntime(identity); }
-  identity(): SessionIdentity { return {owner:this.owner,provider:this.provider}; }
+  identity(): SessionIdentity { return {owner:this.owner,provider:this.provider,...(this.profileTrust ? {trust:{...this.profileTrust}} : {})}; }
   operationIdentity() { return { ...this.identity(), operation: this.operation }; }
   private command(args: string[], options: ManagedOperationOptions = {}) { return checked(args, 30_000, options); }
   private async containerEvidence(name: string, options: ManagedOperationOptions = {}) {
@@ -122,8 +115,11 @@ export class ManagedCliRuntime {
     const field = kind === "container" ? ".Config.Labels" : ".Labels";
     assert.equal(await this.command([kind === "container" ? "inspect" : "volume", ...(kind === "container" ? [] : ["inspect"]),"--format",`{{index ${field} "${labelKey}"}}`,name], options),this.owner,"managed_owner_mismatch");
   }
-  static async prepare(provider: SubscriptionProvider) {
+  static async prepare(provider: SubscriptionProvider, options: {hostTrust?: ManagedHostTrustOptions} = {}) {
     const runtime = new ManagedCliRuntime({owner:randomUUID(),provider});
+    if (options.hostTrust !== undefined) assert.equal(provider, "claude", "managed_profile_trust_provider_invalid");
+    const extra = options.hostTrust !== undefined ? await readManagedHostTrust(options.hostTrust, runtime.owner) : undefined;
+    if (extra) runtime.profileTrust = Object.freeze({...extra.trust});
     const source = path.join(root,".tools/cli-fixtures",provider);
     assert.equal(await digest(source),provider === "claude" ? pins.claude.sha256 : pins.codex.binary_sha256);
     const proof = JSON.parse(await readFile(path.join(root,".tools/cli-fixtures/verification.json"),"utf8"));
@@ -143,10 +139,9 @@ export class ManagedCliRuntime {
         assert.equal(result.code,0,"managed_public_delivery_failed");
       }
       await checked(["exec",initId,"node","-e","require('node:fs').writeFileSync('/opt/cg/ca.pem',require('node:tls').rootCertificates.join('\\n')+'\\n',{flag:'wx',mode:0o444});"]);
-      // Fresh Claude profiles must install the same validated public CA bundle
-      // that start() selects. No existing private profile is changed here.
-      const extra = provider === "claude" ? await claudeLocalTrust() : undefined;
-      if (extra) await checked(["exec",initId,"node","-e","require('node:fs').writeFileSync('/opt/cg/claude-ca.pem',require('node:tls').rootCertificates.join('\\n')+'\\n'+process.argv[1],{flag:'wx',mode:0o444});","--",extra.pem]);
+      // Only an explicit selection installs an extra public root. The default
+      // profile uses the pinned image's bundled roots on every machine.
+      if (extra) await checked(["exec",initId,"node","-e",installManagedHostTrustScript,"--",extra.pem,JSON.stringify(extra.trust)]);
       await checked(["exec",initId,"/bin/chmod","0700","/home/node"]);
       await checked(["exec",initId,"/bin/chown","1000:1000","/home/node"]);
       await checked(["exec",initId,"/bin/chmod","0555","/opt/cg"]);
@@ -166,11 +161,12 @@ export class ManagedCliRuntime {
     const script="const f=require('node:fs'),bundle=require('node:tls').rootCertificates.join('\\n')+'\\n';if(f.existsSync('/opt/cg/ca.pem')){if(f.readFileSync('/opt/cg/ca.pem','utf8')!==bundle)throw Error('invalid_bundle');}else{f.chmodSync('/opt/cg',0o755);try{f.writeFileSync('/opt/cg/ca.pem',bundle,{flag:'wx',mode:0o444});}finally{f.chmodSync('/opt/cg',0o555);}}";
     try {await checked(["run","--name",this.initContainer,"--label",`${labelKey}=${this.owner}`,"--label",`io.commongrid.spike.operation=${this.operation}`,"--network","none","--read-only","--user","0:0","--cap-drop","ALL","--security-opt","no-new-privileges","--memory","128m","--pids-limit","16","--mount",`type=volume,src=${this.toolsVolume},dst=/opt/cg,volume-nocopy`,base.image,"node","-e",script]);}finally{await this.stop();}
   }
-  async installClaudeHostTrust() {
-    assert.equal(this.provider,"claude");const extra=await claudeLocalTrust();assert.ok(extra,"managed_host_trust_proof_required");
-    assert.equal(await checked(["container","ls","--all","--filter",`name=^/${this.container}$`,"--format","{{.Names}}"]),"","managed_profile_busy");await this.verify("volume",this.toolsVolume);
-    const script="const f=require('node:fs'),bundle=require('node:tls').rootCertificates.join('\\n')+'\\n'+process.argv[1];if(f.existsSync('/opt/cg/claude-ca.pem')){if(f.readFileSync('/opt/cg/claude-ca.pem','utf8')!==bundle)throw Error('invalid_bundle');}else{f.chmodSync('/opt/cg',0o755);try{f.writeFileSync('/opt/cg/claude-ca.pem',bundle,{flag:'wx',mode:0o444});}finally{f.chmodSync('/opt/cg',0o555);}}";
-    try{await checked(["run","--name",this.initContainer,"--label",`${labelKey}=${this.owner}`,"--label",`io.commongrid.spike.operation=${this.operation}`,"--network","none","--read-only","--user","0:0","--cap-drop","ALL","--security-opt","no-new-privileges","--memory","128m","--pids-limit","16","--mount",`type=volume,src=${this.toolsVolume},dst=/opt/cg,volume-nocopy`,base.image,"node","-e",script,"--",extra.pem]);}finally{await this.stop();}
+  async installClaudeHostTrust(options: ManagedHostTrustOptions) {
+    assert.equal(this.provider,"claude");const extra=await readManagedHostTrust(options,this.owner);
+    if (this.profileTrust) assert.deepEqual(extra.trust,this.profileTrust,"managed_profile_trust_mismatch");
+    assert.equal(await this.command(["container","ls","--all","--filter",`name=^/${this.container}$`,"--format","{{.Names}}"]),"","managed_profile_busy");await this.verify("volume",this.toolsVolume);
+    try{await this.command(["run","--name",this.initContainer,"--label",`${labelKey}=${this.owner}`,"--label",`io.commongrid.spike.operation=${this.operation}`,"--network","none","--read-only","--user","0:0","--cap-drop","ALL","--security-opt","no-new-privileges","--memory","128m","--pids-limit","16","--mount",`type=volume,src=${this.toolsVolume},dst=/opt/cg,volume-nocopy`,base.image,"node","-e",installManagedHostTrustScript,"--",extra.pem,JSON.stringify(extra.trust)]);}finally{await this.stop();}
+    this.profileTrust = Object.freeze({...extra.trust});
   }
   async installCodexCodingProfile() {
     assert.equal(this.provider,"codex");const catalog=await assertCodingProfileVerified();
@@ -188,8 +184,8 @@ export class ManagedCliRuntime {
     try {
     await this.verify("volume",this.authVolume, options); await this.verify("volume",this.toolsVolume, options);
     assert.equal(await invoke(["container", "ls", "--all", "--filter", `name=^/${this.container}$`, "--format", "{{.Names}}"]), "", "managed_profile_busy");
-    const extra=this.provider==="claude"?await claudeLocalTrust():undefined;
-    const ca=extra?"/opt/cg/claude-ca.pem":"/opt/cg/ca.pem";
+    const trust=this.profileTrust;
+    const ca=trust?"/opt/cg/optional-public-ca.pem":"/opt/cg/ca.pem";
     assertActiveSignal(options.signal);
     createDispatched = true;
     containerId = await invoke(["create","--name",this.container,"--label",`${labelKey}=${this.owner}`,"--label",`io.commongrid.spike.operation=${this.operation}`,"--network","none","--read-only","--user","1000:1000","--workdir","/home/node","--cap-drop","ALL","--security-opt","no-new-privileges","--pids-limit","96","--cpus","1","--memory","1024m","--memory-swap","1024m","--init",
@@ -211,7 +207,7 @@ export class ManagedCliRuntime {
         assert.equal(actual,await digest(fileURLToPath(new URL(file,import.meta.url))),"managed_bridge_source_changed_reprepare_required");
       }
       assert.equal(await invoke(["exec",containerId,"node","-e","console.log(require('node:fs').readFileSync('/opt/cg/ca.pem','utf8')===require('node:tls').rootCertificates.join('\\n')+'\\n');"]),"true","managed_trust_bundle_invalid");
-      if(extra)assert.equal(await invoke(["exec",containerId,"node","-e","console.log(require('node:fs').readFileSync('/opt/cg/claude-ca.pem','utf8')===require('node:tls').rootCertificates.join('\\n')+'\\n'+process.argv[1]);","--",extra.pem]),"true","managed_host_trust_bundle_invalid");
+      if(trust)assert.equal(await invoke(["exec",containerId,"node","-e",verifyManagedHostTrustScript,"--",JSON.stringify(trust)]),"true","managed_host_trust_bundle_invalid");
       assertActiveSignal(options.signal);
     } catch (error) {
       if (createDispatched) {

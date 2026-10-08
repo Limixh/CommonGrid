@@ -1,0 +1,144 @@
+{
+  "checked_at": "2026-10-08T20:25:53.897Z",
+  "purpose": "synthetic_malicious_task_and_control_acceptance",
+  "synthetic_profiles_only": true,
+  "real_account_tested": false,
+  "real_model_inference": false,
+  "credential_files_copied": false,
+  "existing_private_profiles_accessed": false,
+  "execution_enabled": false,
+  "isolation_gate": "not_evaluated",
+  "providers": {
+    "claude": {
+      "status": "passed",
+      "checks": [
+        "distinct_pid_mount_network_namespaces",
+        "task_uid_caps_readonly_mounts_and_cgroup_limits",
+        "malicious_filesystem_process_fd_env_socket_ptrace_probes",
+        "pid_and_tmpfs_exhaustion_bounded",
+        "unknown_ip_metadata_plaintext_proxy_destinations_denied",
+        "broker_malformed_auth_size_arguments_attempt_scope_denied",
+        "broker_task_result_output_limit",
+        "broker_call_limit_blocks_side_effects",
+        "private_canary_and_process_intact_after_attacks",
+        "deadline_exhaustion_tears_down_task_namespace",
+        "output_exhaustion_tears_down_task_namespace"
+      ],
+      "separation": {
+        "private_paths_denied": true,
+        "process_absent": true,
+        "private_fd_absent": true,
+        "private_env_absent": true,
+        "root_readonly": true,
+        "ptrace_denied": true,
+        "no_capabilities": true,
+        "no_new_privileges": true,
+        "seccomp_filter": true,
+        "private_sockets_unreachable": true,
+        "external_network_unreachable": true
+      },
+      "resources": {
+        "tmpfs_bounded": true,
+        "pids_bounded": true,
+        "children_started": 113
+      },
+      "control": {
+        "connected": 0,
+        "denied": 4,
+        "task_calls": 16,
+        "destinations": [],
+        "denied_destinations": [
+          "authority_denied"
+        ],
+        "network_errors": [],
+        "control_failure": false
+      }
+    },
+    "codex": {
+      "status": "passed",
+      "checks": [
+        "distinct_pid_mount_network_namespaces",
+        "task_uid_caps_readonly_mounts_and_cgroup_limits",
+        "malicious_filesystem_process_fd_env_socket_ptrace_probes",
+        "pid_and_tmpfs_exhaustion_bounded",
+        "unknown_ip_metadata_plaintext_proxy_destinations_denied",
+        "broker_malformed_auth_size_arguments_attempt_scope_denied",
+        "broker_task_result_output_limit",
+        "broker_call_limit_blocks_side_effects",
+        "private_canary_and_process_intact_after_attacks",
+        "deadline_exhaustion_tears_down_task_namespace",
+        "output_exhaustion_tears_down_task_namespace"
+      ],
+      "separation": {
+        "private_paths_denied": true,
+        "process_absent": true,
+        "private_fd_absent": true,
+        "private_env_absent": true,
+        "root_readonly": true,
+        "ptrace_denied": true,
+        "no_capabilities": true,
+        "no_new_privileges": true,
+        "seccomp_filter": true,
+        "private_sockets_unreachable": true,
+        "external_network_unreachable": true
+      },
+      "resources": {
+        "tmpfs_bounded": true,
+        "pids_bounded": true,
+        "children_started": 113
+      },
+      "control": {
+        "connected": 0,
+        "denied": 4,
+        "task_calls": 16,
+        "destinations": [],
+        "denied_destinations": [
+          "authority_denied"
+        ],
+        "network_errors": [],
+        "control_failure": false
+      }
+    }
+  },
+  "cleanup_confirmed": true,
+  "scope_limits": [
+    "pinned Linux x86-64 Docker image only",
+    "synthetic canaries; no real credential extraction test",
+    "workspace volume has no disk quota",
+    "memory/CPU limits inspected, not OOM/CPU stress acceptance",
+    "Docker daemon/kernel/host compromise not evaluated",
+    "provider extension paths not exhaustively evaluated"
+  ],
+  "success": true,
+  "evidence_stage": "adr0012_go_gate_fixture_acceptance",
+  "source_sha256": {
+    "package.json": "e6e354539e1d127fbb5a13fd80adc9046c45bdb6e6318bed0ee20ee663bcfc10",
+    "packages/agent-adapters/package.json": "c82d4aeb5fcd4a292aaeaea3e47b1123b8a9481a8c9542892737e63105dba459",
+    "packages/agent-adapters/src/index.ts": "bc967c2673e972ce13c25af5c0ca4d62abcfd1f384c52c993032e9f01a5e0b07",
+    "packages/agent-adapters/src/quota-observation.ts": "a14048b9573787f9ccc09e3815ac6fdcdaa91d356c0f8f9599678a4eceda504c",
+    "packages/agent-adapters/test/quota-observation.test.ts": "a1ebc59822330fb7d17d0149a7e69ab8015745d399fc953d103e534107337511",
+    "packages/agent-adapters/testing/functional-test-models.ts": "f0eece3e3da547f402af93cca0acf67648ecc34c71219c602df35621715a1422",
+    "spike/cli-session/managed-runtime.mts": "5f0d5bb236724dab41daeaaf771f333d10a6554f68587f27e0823e977491dcae",
+    "spike/cli-session/managed-runtime.test.mts": "ad8850792a755d629c695ee11088c33d552c4d66a4352b5d62d7a1e26ec74ceb",
+    "spike/cli-session/managed-trust.mts": "6a742f4adb75df9ff9dae4faf60cbbc3b4aa490a3a14538a87b32ceb1cc1f841",
+    "spike/cli-session/managed-provider-session.mts": "27d59c05fff65fb3fc73ce209d59d0ce6825bc5204d7e967917f1d628411285b",
+    "spike/cli-session/managed-provider-session.test.mts": "8c83dce0a78b1aa2f18be4868756e8b594ae4004c9f2dbaef495a6564098562d",
+    "spike/cli-session/managed-provider-failures.test.mts": "11fc3b992ecfc34bb7e22419c390c2387da7950e2e764f86575599b5e8f86ea3",
+    "spike/cli-session/managed-session-acceptance.mts": "cd0b94da02cffb51702b696f022ebc3a68b65d0447ac991a712c9fb8d1814a25",
+    "spike/cli-session/managed-session-acceptance.test.mts": "dbbbcd7f035ad77c2bf59f32403227a57c27a5ff1cbc14354aec6488f857b9ee",
+    "spike/cli-session/managed-session-failures.test.mts": "b17dd7c67328cb24d2ded18f4710cf01f4522762b56c0d852eb961f128c75923",
+    "spike/cli-session/managed-session.mts": "16786d97e9226b5dcd1fe0930d18897e159033ee9d72789489de7ed3a27205a7",
+    "spike/cli-session/managed-session-args.test.mts": "006a707dac633d4a5659acc70de0c7b2245527dd393a5482036498042a6da386",
+    "spike/cli-session/managed-task.mts": "b8039e2364f42d86e77ecd52e11df843abc82d42dd9be6c6e48a9a2a3ebac633",
+    "spike/cli-session/managed-boundary.mts": "6d65dc6a520131d9ca72838a341a6cd2bbf2245d19225a18d89e6b10d6639440",
+    "spike/cli-session/account-smoke.mts": "da6109f9c0e8c2b12c422614b00f04d6f449e52421a8a97b627b09df09b69219",
+    "spike/cli-session/codex-profile.mts": "d578b288359951deefa0712ba0c6206e94554d77ac4f46b682e7bdaa62d9eedd",
+    "spike/cli-session/export-windows-trust.ps1": "c7f71156058b2b82e0c4033f2894bbb27a7b5c5b7b07110589eb3c7e5026f584",
+    "spike/cli-session/managed-continuity.mts": "f8ffd8f17c8d4ac58148c746ce8692366056871780f554363bee815aa1a659a5",
+    "spike/cli-session/managed-adversarial.mts": "f30fa4744bf46cba61075507432721ea419f60efa19b00a9949739121debadbf"
+  },
+  "raw_evidence": ".local/managed-adversarial/403c7e08-72a2-4b1d-aa0d-660ce837fce5/report.json",
+  "command_log_sha256": "c31f46bd6f9b5a65d76205d77eff4c9a74beda76529d7e3adc287d0de89ae6ba",
+  "paid_api_fallback": false,
+  "production_ready": false
+}

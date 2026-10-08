@@ -7,7 +7,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { codexFunctionalTestModel, claudeFunctionalTestModel } from "./functional-test-models.mts";
+import { codexFunctionalTestModel, claudeFunctionalTestModel } from "@commongrid/agent-adapters/testing/functional-test-models";
 
 assert.equal(process.platform, "win32", "native subscription smoke is currently Windows-only");
 const root = fileURLToPath(new URL("../../", import.meta.url));

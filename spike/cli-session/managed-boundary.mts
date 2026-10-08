@@ -1,7 +1,7 @@
 // Real public HTTPS reachability + fake auth boundary. No login/inference.
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { ManagedCliRuntime, startBridge, checked, taskImage } from "./managed-runtime.mts";
@@ -11,7 +11,11 @@ const directory=fileURLToPath(new URL(`../../.local/managed-boundary/${randomUUI
 const report:Record<string,any>={checked_at:new Date().toISOString(),purpose:"managed_runtime_fake_auth_and_public_tls_boundary",real_account_tested:false,real_model_inference:false,credential_files_copied:false,execution_enabled:false,isolation_gate:"not_evaluated",providers:{},cleanup_confirmed:false,private_volumes_retained:true};
 let cleanup=true;
 for(const provider of ["claude","codex"] as const) {
-  const runtime=ManagedCliRuntime.restore({owner:provider === "claude"?claudeOwner:codexOwner,provider});
+  const owner=provider === "claude"?claudeOwner:codexOwner;
+  ManagedCliRuntime.restore({owner,provider}); // Validate UUID before reading public metadata.
+  const saved=JSON.parse(await readFile(fileURLToPath(new URL(`../../.local/managed-session/${owner}.json`,import.meta.url)),"utf8"));
+  assert.equal(saved.owner,owner);assert.equal(saved.provider,provider);
+  const runtime=ManagedCliRuntime.restore({owner,provider,trust:saved.trust});
   const task=await TaskToolsRuntime.create({image:taskImage,cpu:1,memoryMb:256},300_000);
   let bridge:Awaited<ReturnType<typeof startBridge>>|undefined;
   const checks:string[]=[];report.providers[provider]={checks,status:"running"};

@@ -1,8 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID, X509Certificate } from "node:crypto";
+import { readFile, mkdtemp, writeFile, rm, rmdir } from "node:fs/promises";
+import { rootCertificates } from "node:tls";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { runInNewContext } from "node:vm";
 import { DockerCommandError } from "../../packages/agent-adapters/src/task-runtime.ts";
 import { ManagedCliRuntime, assertManagedContainerFence, removeManagedContainer, removeManagedOperationContainer, type ManagedContainerEvidence } from "./managed-runtime.mts";
+import { assertManagedProfileTrust, validateManagedHostTrust, installManagedHostTrustScript, verifyManagedHostTrustScript } from "./managed-trust.mts";
 
 const owner = randomUUID(), operation = randomUUID(), id = "a".repeat(64);
 const evidence = (changes: Partial<ManagedContainerEvidence> = {}): ManagedContainerEvidence => ({id,owner,operation,running:false,status:"exited",...changes});
@@ -143,4 +149,189 @@ test("start refuses an existing same-operation namespace without cleanup", async
   (runtime as any).command = async (args: string[]) => { commands.push(args); return args[0] === "volume" ? owner : runtime.container; };
   await assert.rejects(() => runtime.start(), /managed_profile_busy/);
   assert.ok(!commands.some(args => args[0] === "create" || args[0] === "rm"));
+});
+
+const trustNow = Date.now();
+const publicRoot = rootCertificates.find(pem => {
+  const certificate = new X509Certificate(pem);
+  return certificate.ca && certificate.subject === certificate.issuer && certificate.verify(certificate.publicKey) && Date.parse(certificate.validFrom) <= trustNow && Date.parse(certificate.validTo) > trustNow;
+})! + "\n";
+const sha256 = (value: string | Buffer) => createHash("sha256").update(value).digest("hex");
+const trustProof = {
+  windows_tls_verified:true, installed_root:true, private_key_exported:false,
+  purpose:"managed_claude_optional_public_root", endpoint:"api.anthropic.com:443", source:"operator_verified_tls_chain_and_installed_root",
+  checked_at:new Date(trustNow).toISOString(), certificate_sha256:sha256(new X509Certificate(publicRoot).raw), pem_sha256:sha256(publicRoot),
+};
+const selectedTrust = () => validateManagedHostTrust(publicRoot, trustProof, owner, trustNow).trust;
+
+test("optional root requires scoped purpose, verified endpoint, source, current proof and exact public bytes", () => {
+  assert.equal(selectedTrust().profile_owner, owner);
+  for (const change of [
+    {purpose:"product_default"}, {endpoint:"example.com:443"}, {source:"antivirus_workaround"},
+    {checked_at:"invalid"}, {checked_at:"2026-02-31T12:00:00Z"}, {checked_at:new Date(trustNow + 1).toISOString()}, {checked_at:new Date(trustNow - 31 * 86400_000).toISOString()},
+    {windows_tls_verified:false}, {installed_root:false}, {private_key_exported:true},
+    {pem_sha256:undefined}, {pem_sha256:"0".repeat(64)}, {certificate_sha256:"0".repeat(64)},
+  ]) assert.throws(() => validateManagedHostTrust(publicRoot, {...trustProof,...change}, owner, trustNow), /managed_host_trust_invalid/);
+  for (const value of [publicRoot + publicRoot, publicRoot + "PRIVATE KEY", publicRoot.replace(/\n/g,"\r\n")]) {
+    assert.throws(() => validateManagedHostTrust(value, trustProof, owner, trustNow), /managed_host_trust_invalid/);
+  }
+});
+
+test("trust selection is bound to one Claude profile and snapshots cannot mutate runtime selection", () => {
+  const trust = selectedTrust(), runtime = ManagedCliRuntime.restore({owner,provider:"claude",trust});
+  trust.pem_sha256 = "0".repeat(64);
+  const identity = runtime.identity(); identity.trust!.pem_sha256 = "1".repeat(64);
+  assert.equal(runtime.identity().trust!.pem_sha256, trustProof.pem_sha256);
+  assert.throws(() => ManagedCliRuntime.restore({owner:randomUUID(),provider:"claude",trust:selectedTrust()}), /managed_profile_trust_owner_mismatch/);
+  assert.throws(() => ManagedCliRuntime.restore({owner,provider:"codex",trust:selectedTrust()}), /managed_profile_trust_provider_invalid/);
+  assert.throws(() => ManagedCliRuntime.restore({owner,provider:"claude",trust:{...selectedTrust(),kind:"bundled" as any}}), /managed_profile_trust_invalid/);
+  assert.equal(ManagedCliRuntime.restore({owner,provider:"claude"}).identity().trust, undefined);
+});
+
+test("malformed saved trust exposes fixed codes without raw metadata or AssertionError payloads", () => {
+  const supplied = "SYNTHETIC_PRIVATE_VALUE_DO_NOT_PRINT";
+  const changes: Array<[Record<string,unknown>,string]> = [
+    [{schema_version:supplied},"managed_profile_trust_invalid"], [{kind:supplied},"managed_profile_trust_invalid"],
+    [{profile_owner:supplied},"managed_profile_trust_owner_mismatch"], [{purpose:supplied},"managed_profile_trust_purpose_invalid"],
+    [{endpoint:`https://${supplied}/?token=${supplied}`},"managed_profile_trust_endpoint_invalid"], [{source:supplied},"managed_profile_trust_source_invalid"],
+    [{checked_at:supplied},"managed_profile_trust_date_invalid"], [{certificate_sha256:supplied},"managed_profile_trust_hash_invalid"],
+    [{pem_sha256:{secret:supplied}},"managed_profile_trust_hash_invalid"], [{[supplied]:supplied},"managed_profile_trust_invalid"],
+  ];
+  const onlyCode = (expected:string) => (error:unknown) => {
+    assert.ok(error instanceof Error);
+    assert.equal(error.name,"Error"); assert.equal(error.message,expected);
+    assert.ok(!(error instanceof assert.AssertionError));
+    assert.ok(!["actual","expected","cause","operator"].some(key => Object.hasOwn(error,key)));
+    assert.ok(!`${error.stack}\n${JSON.stringify(error)}`.includes(supplied));
+    return true;
+  };
+  for (const [change,code] of changes) {
+    const trust = {...selectedTrust(),...change};
+    assert.throws(() => assertManagedProfileTrust(trust,owner,"claude"),onlyCode(code));
+    assert.throws(() => ManagedCliRuntime.restore({owner,provider:"claude",trust:trust as any}),onlyCode(code));
+  }
+  assert.throws(() => assertManagedProfileTrust({secret:supplied},owner,supplied),onlyCode("managed_profile_trust_provider_invalid"));
+  assert.throws(() => assertManagedProfileTrust([supplied],owner,"claude"),onlyCode("managed_profile_trust_invalid"));
+});
+
+function trustFixtureScripts() {
+  const files = new Map<string,string>(), output: unknown[] = [];
+  const fs = {
+    existsSync:(file:string) => files.has(file),
+    readFileSync:(file:string) => { if (!files.has(file)) throw Error("fixture_missing"); return files.get(file)!; },
+    writeFileSync:(file:string,value:string) => { if (files.has(file)) throw Error("fixture_exists"); files.set(file,value); },
+    chmodSync:() => {},
+  };
+  const evaluate = (script:string, values:string[]) => runInNewContext(script, {
+    require:(name:string) => name === "node:fs" ? fs : name === "node:tls" ? {rootCertificates:["fixture-bundled-root"]} : {createHash,X509Certificate},
+    process:{argv:["node",...values]}, console:{log:(value:unknown) => output.push(value)},
+  });
+  return {files,output,evaluate};
+}
+
+test("fixture-only immutable bundle installation and startup verify pinned root, manifest and bundled roots", () => {
+  const fixture = trustFixtureScripts(), manifest = JSON.stringify(selectedTrust());
+  fixture.evaluate(installManagedHostTrustScript,[publicRoot,manifest]);
+  const original = [...fixture.files];
+  fixture.evaluate(installManagedHostTrustScript,[publicRoot,manifest]);
+  assert.deepEqual([...fixture.files], original);
+  fixture.evaluate(verifyManagedHostTrustScript,[manifest]); assert.equal(fixture.output.at(-1), true);
+  for (const [file] of original) {
+    const value = fixture.files.get(file)!;
+    fixture.files.set(file,value + "tampered");
+    assert.throws(() => fixture.evaluate(installManagedHostTrustScript,[publicRoot,manifest]), /profile_trust_mismatch/);
+    fixture.evaluate(verifyManagedHostTrustScript,[manifest]); assert.equal(fixture.output.at(-1), false);
+    fixture.files.set(file,value);
+  }
+  const foreign = JSON.stringify({...selectedTrust(),profile_owner:randomUUID()});
+  fixture.evaluate(verifyManagedHostTrustScript,[foreign]); assert.equal(fixture.output.at(-1), false);
+});
+
+async function fakeStartedRuntime(trust = undefined as ReturnType<typeof selectedTrust> | undefined, validTrust = true) {
+  const runtime = ManagedCliRuntime.restore({owner,provider:"claude",...(trust ? {trust} : {})}), commands:string[][]=[];
+  const pins = JSON.parse(await readFile(new URL("binaries.lock.json",import.meta.url),"utf8"));
+  const bridges = new Map(await Promise.all(["runtime-bridge.mjs","tunnel-wire.mjs","mcp.mjs","task-broker.mjs"].map(async file => [file,sha256(await readFile(new URL(file,import.meta.url)))] as const)));
+  let exists = false;
+  (runtime as any).command = async (args:string[]) => {
+    commands.push(args);
+    if (args[0] === "volume") return owner;
+    if (args[0] === "create") { exists = true; return id; }
+    if (args[0] === "inspect") return JSON.stringify(evidence({operation:runtime.operationIdentity().operation,running:true,status:"running"}));
+    if (args[0] === "rm") { exists = false; return ""; }
+    if (args.includes(`id=${id}`)) return exists ? id : "";
+    if (args[0] === "exec") {
+      const script = args[4];
+      if (script === verifyManagedHostTrustScript) return String(validTrust);
+      for (const [file,hash] of bridges) if (script.includes(`/opt/cg/${file}`)) return hash;
+      if (script.includes("/opt/cg/claude'")) return pins.claude.sha256;
+      return "true";
+    }
+    return "";
+  };
+  return {runtime,commands};
+}
+
+test("ordinary Claude profile starts with bundled roots and no implicit host-root selection", async () => {
+  const {runtime,commands} = await fakeStartedRuntime();
+  await runtime.start();
+  const create = commands.find(args => args[0] === "create")!;
+  assert.ok(create.includes("SSL_CERT_FILE=/opt/cg/ca.pem"));
+  assert.ok(create.includes("NODE_EXTRA_CA_CERTS=/opt/cg/ca.pem"));
+  assert.ok(!commands.some(args => args.includes(verifyManagedHostTrustScript)));
+});
+
+test("restored opt-in profile selects only its prepared root without loading host paths", async () => {
+  const {runtime,commands} = await fakeStartedRuntime(selectedTrust());
+  await runtime.start();
+  const create = commands.find(args => args[0] === "create")!;
+  assert.ok(create.includes("SSL_CERT_FILE=/opt/cg/optional-public-ca.pem"));
+  const verification = commands.find(args => args.includes(verifyManagedHostTrustScript))!;
+  assert.equal(verification.at(-1),JSON.stringify(runtime.identity().trust));
+  assert.ok(!verification.includes(publicRoot));
+});
+
+test("unprepared or changed optional root fails closed and removes only captured operation ID", async () => {
+  const {runtime,commands} = await fakeStartedRuntime(selectedTrust(),false);
+  await assert.rejects(() => runtime.start(), /managed_host_trust_bundle_invalid/);
+  assert.deepEqual(commands.find(args => args[0] === "rm"),["rm","--force",id]);
+  assert.ok(!commands.some(args => args[0] === "volume" && args[1] === "rm"));
+});
+
+test("host trust installation requires explicit files and never dispatches for invalid selection", async () => {
+  const runtime = ManagedCliRuntime.restore({owner,provider:"claude"});
+  let calls = 0; (runtime as any).command = async () => { calls++; throw Error("unexpected_dispatch"); };
+  await assert.rejects(() => runtime.installClaudeHostTrust(undefined as any), /managed_host_trust_selection_required/);
+  await assert.rejects(() => ManagedCliRuntime.prepare("codex",{hostTrust:{pemPath:"unused",proofPath:"unused"}}), /managed_profile_trust_provider_invalid/);
+  const directory = await mkdtemp(path.join(tmpdir(),"cg-public-trust-fixture-"));
+  const pemPath = path.join(directory,"public.pem"), proofPath = path.join(directory,"proof.json");
+  try {
+    await writeFile(pemPath,publicRoot); await writeFile(proofPath,JSON.stringify({...trustProof,purpose:"wrong"}));
+    await assert.rejects(() => runtime.installClaudeHostTrust({pemPath,proofPath}), /managed_host_trust_invalid/);
+    assert.equal(calls,0); assert.equal(runtime.identity().trust,undefined);
+  } finally { await rm(pemPath,{force:true}); await rm(proofPath,{force:true}); await rmdir(directory); }
+});
+
+test("explicit public root install publishes selection only after successful offline tools-only operation", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(),"cg-public-trust-install-fixture-"));
+  const pemPath = path.join(directory,"public.pem"), proofPath = path.join(directory,"proof.json");
+  try {
+    await writeFile(pemPath,publicRoot); await writeFile(proofPath,JSON.stringify(trustProof));
+    for (const fail of [true,false]) {
+      const runtime = ManagedCliRuntime.restore({owner,provider:"claude"}), commands:string[][]=[];
+      (runtime as any).command = async (args:string[]) => {
+        commands.push(args);
+        if (args[0] === "volume") return owner;
+        if (args[0] === "run" && fail) throw Error("fixture_delivery_failed");
+        return "";
+      };
+      if (fail) { await assert.rejects(() => runtime.installClaudeHostTrust({pemPath,proofPath}), /fixture_delivery_failed/); assert.equal(runtime.identity().trust,undefined); }
+      else { await runtime.installClaudeHostTrust({pemPath,proofPath}); assert.deepEqual(runtime.identity().trust,selectedTrust()); }
+      const run = commands.find(args => args[0] === "run")!;
+      assert.equal(run[run.indexOf("--network")+1],"none");
+      assert.ok(run.includes(installManagedHostTrustScript));
+      assert.equal(run.filter(arg => arg.startsWith("type=volume,")).length,1);
+      assert.ok(run.includes(`type=volume,src=${runtime.toolsVolume},dst=/opt/cg,volume-nocopy`));
+      assert.ok(!run.some(arg => arg.includes(runtime.authVolume)));
+    }
+  } finally { await rm(pemPath,{force:true}); await rm(proofPath,{force:true}); await rmdir(directory); }
 });
