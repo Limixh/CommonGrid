@@ -1,0 +1,49 @@
+{
+  "schema_version": "1.0",
+  "checked_at": "2026-10-09T08:34:15.563Z",
+  "source_commit": "70fd7c6afc3d62b9b12709d5b91e386130ac0e90",
+  "source_sha256": {
+    "spike/cli-session/coding-task.mts": "fb399fef796331cd2c2b82847aee16ccab4a3ce8d2668c5fb6d7994d7d447517",
+    "spike/cli-session/coding-verifier.mts": "8b54e61bff1433ca4dfaaa436ee8815ea91b2cab4a6c1871f353c59e678759f4",
+    "spike/cli-session/managed-task.mts": "9d0edab485e1c0836f14b46d38586342b81a45acab440f61f75b18ecbd129165",
+    "spike/cli-session/managed-task-evidence.test.mts": "6044702b94e449c5a55ec38fcb3944771ef1bb742d22931d150e82a9d7dd48c2",
+    "packages/agent-adapters/src/task-tool.ts": "5a52fe86c520fb9abbf0280ab8fc75555af922a0ee9c4c187d196d94b1eaaf2f",
+    "packages/agent-adapters/src/task-runtime.ts": "cc5ae5823b149363b8f50bd530f2d140e4acbf7c9bf9e0569739021fcbde0c5f"
+  },
+  "purpose": "Local check after sparse-array verifier regression and first-error clarification",
+  "platform": "win32",
+  "local_date": "2026-10-09",
+  "timezone": "Europe/Istanbul",
+  "execution_enabled": false,
+  "isolation_gate": "not_evaluated",
+  "production_ready": false,
+  "real_account_tested": false,
+  "real_model_inference": false,
+  "credential_files_copied": false,
+  "paid_api_fallback": false,
+  "command": "npm run check",
+  "command_exit_code": 0,
+  "node_tests": {
+    "product_tools": 4,
+    "product_packages": 99,
+    "spike_tools": 9,
+    "spike_fixtures": 172,
+    "total": 284,
+    "failed": 0,
+    "skipped": 0,
+    "counting": "Node TAP tests including nested cases and grouping tests"
+  },
+  "generated_check": true,
+  "typecheck": true,
+  "go_tests": true,
+  "go_cached_results_reused": true,
+  "frontend_build": true,
+  "go_build": true,
+  "check_log_sha256": "7b549dd0f02093c6fabf63ec1fec1365193d264676839d31c05ab4f1e1ab5cd1",
+  "scope_limits": [
+    "Account-free tests and builds; actual Luna task and delayed Claude continuity are recorded separately",
+    "Two actual sparse cases added without JSON flattening; runtime, cached bridge, model pins, host oracle and baseline did not change",
+    "Previous live Luna failure cause remains unproven; instruction clarification is not a retrospective cause claim",
+    "Remote CI record covers exact earlier32a766d commit, not this later instruction change"
+  ]
+}

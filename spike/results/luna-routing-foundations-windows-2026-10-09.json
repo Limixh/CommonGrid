@@ -1,0 +1,48 @@
+{
+  "schema_version": "1.0",
+  "checked_at": "2026-10-09T08:15:21.126Z",
+  "source_commit": "f09a592913556a240a808b694110ab54019088a8",
+  "source_sha256": {
+    "spike/cli-session/coding-task.mts": "3810c6e34c7e499c6a4b7fcd8a0a479b3289fd3f890263f9c746dbc71ba7e374",
+    "spike/cli-session/managed-task.mts": "9d0edab485e1c0836f14b46d38586342b81a45acab440f61f75b18ecbd129165",
+    "spike/cli-session/managed-task-evidence.test.mts": "6044702b94e449c5a55ec38fcb3944771ef1bb742d22931d150e82a9d7dd48c2",
+    "packages/agent-adapters/src/task-tool.ts": "5a52fe86c520fb9abbf0280ab8fc75555af922a0ee9c4c187d196d94b1eaaf2f",
+    "packages/agent-adapters/src/task-runtime.ts": "cc5ae5823b149363b8f50bd530f2d140e4acbf7c9bf9e0569739021fcbde0c5f"
+  },
+  "purpose": "Local check after direct argv and timeout instruction clarification",
+  "platform": "win32",
+  "local_date": "2026-10-09",
+  "timezone": "Europe/Istanbul",
+  "execution_enabled": false,
+  "isolation_gate": "not_evaluated",
+  "production_ready": false,
+  "real_account_tested": false,
+  "real_model_inference": false,
+  "credential_files_copied": false,
+  "paid_api_fallback": false,
+  "command": "npm run check",
+  "command_exit_code": 0,
+  "node_tests": {
+    "product_tools": 4,
+    "product_packages": 99,
+    "spike_tools": 9,
+    "spike_fixtures": 172,
+    "total": 284,
+    "failed": 0,
+    "skipped": 0,
+    "counting": "Node TAP tests including nested cases and grouping tests"
+  },
+  "generated_check": true,
+  "typecheck": true,
+  "go_tests": true,
+  "go_cached_results_reused": true,
+  "frontend_build": true,
+  "go_build": true,
+  "check_log_sha256": "96dc498b747097f1ed5ab96f0b6d63f5e9ebcbd2a3c7513b5448e5e154648c25",
+  "scope_limits": [
+    "Account-free tests and builds; actual Luna task and delayed Claude continuity are recorded separately",
+    "Only task instruction text changed; runtime, cached bridge, model pins, oracle and baseline did not change",
+    "Previous live Luna failure cause remains unproven; instruction clarification is not a retrospective cause claim",
+    "Remote CI record covers exact earlier32a766d commit, not this later instruction change"
+  ]
+}

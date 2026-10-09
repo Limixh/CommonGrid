@@ -1,0 +1,88 @@
+{
+  "schema_version": "1.0",
+  "platform": "win32",
+  "container_platform": "linux-x64",
+  "local_date": "2026-10-09",
+  "timezone": "Europe/Istanbul",
+  "execution_enabled": false,
+  "isolation_gate": "not_evaluated",
+  "production_ready": false,
+  "credential_files_copied": false,
+  "paid_api_fallback": false,
+  "checked_at": "2026-10-09T08:06:33.570Z",
+  "purpose": "Current managed Codex callback guard to real task Docker exec and bounded reply fixture",
+  "source_commit": "32a766d7bdd07a418202e9930cce094d8c5472b6",
+  "source_sha256": {
+    "spike/cli-session/managed-task.mts": "42e472eda5e6e1a7aec4fc5d4c31a57408b7eb10fa943691e2831e56ae543a90",
+    "spike/cli-session/coding-task.mts": "3def64a4ba05f7db0c6c46da02b6881e4d610261ff49a92145a73e449bac7ea0",
+    "packages/agent-adapters/src/task-tool.ts": "5a52fe86c520fb9abbf0280ab8fc75555af922a0ee9c4c187d196d94b1eaaf2f",
+    "packages/agent-adapters/src/task-runtime.ts": "cc5ae5823b149363b8f50bd530f2d140e4acbf7c9bf9e0569739021fcbde0c5f"
+  },
+  "real_account_tested": false,
+  "real_model_inference": false,
+  "task_image": "node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392",
+  "callback_results": [
+    {
+      "outcome": "success",
+      "exit_code": 0,
+      "stdout_bytes": 6,
+      "stderr_bytes": 0,
+      "elapsed_ms": 978
+    },
+    {
+      "outcome": "success",
+      "exit_code": 0,
+      "stdout_bytes": 96,
+      "stderr_bytes": 0,
+      "elapsed_ms": 858
+    },
+    {
+      "outcome": "success",
+      "exit_code": 0,
+      "stdout_bytes": 0,
+      "stderr_bytes": 0,
+      "elapsed_ms": 822
+    },
+    {
+      "outcome": "success",
+      "exit_code": 0,
+      "stdout_bytes": 36,
+      "stderr_bytes": 0,
+      "elapsed_ms": 856
+    }
+  ],
+  "checks": [
+    "task_workdir_is_task",
+    "callback_reads_seeded_baseline",
+    "callback_writes_literal_argv_candidate",
+    "callback_runs_candidate_examples",
+    "readonly_snapshot_matches_written_candidate",
+    "independent_32_case_verifier",
+    "real_patch_apply_roundtrip_matches_verifier"
+  ],
+  "candidate_changed": true,
+  "verifier": {
+    "passed": true,
+    "cases": 32,
+    "candidate_sha256": "db00e4a06aea7bbe143249faf0eddf8be1ffe6ef482513f92ff250ea7c5a7249",
+    "network": "none",
+    "workspace": "read_only",
+    "oracle": "host_private_expected_results",
+    "agent_access": false
+  },
+  "diff": {
+    "patch_file": "coding-verifier-fixture.patch",
+    "patch_sha256": "0df9c5d7896a05f5906672ddc807d3d59e648f5cafeb32a7caa385283d353931",
+    "base_sha256": "84bca9d99599d19fcce52870ca5b12e01f0c65a1b639a6b26de2ecc9c8fe7424",
+    "candidate_sha256": "db00e4a06aea7bbe143249faf0eddf8be1ffe6ef482513f92ff250ea7c5a7249",
+    "applied_candidate_sha256": "db00e4a06aea7bbe143249faf0eddf8be1ffe6ef482513f92ff250ea7c5a7249",
+    "git_apply_check": true,
+    "git_apply_roundtrip": true
+  },
+  "success": true,
+  "cleanup_confirmed": true,
+  "scope_limits": [
+    "Deterministic candidate and decoded callback fixture on a real task Docker namespace; no official CLI or model inference",
+    "This preflight used the earlier 32-case verifier; sparse regressions and real candidate replay are separate evidence"
+  ]
+}

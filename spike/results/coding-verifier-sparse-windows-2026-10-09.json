@@ -1,0 +1,148 @@
+{
+  "schema_version": "1.0",
+  "platform": "win32",
+  "container_platform": "linux-x64",
+  "local_date": "2026-10-09",
+  "timezone": "Europe/Istanbul",
+  "execution_enabled": false,
+  "isolation_gate": "not_evaluated",
+  "production_ready": false,
+  "credential_files_copied": false,
+  "paid_api_fallback": false,
+  "checked_at": "2026-10-09T08:30:07.579Z",
+  "purpose": "Sparse-array verifier acceptance and exact prior AI candidate replay without new inference",
+  "source_commit": "70fd7c6afc3d62b9b12709d5b91e386130ac0e90",
+  "source_sha256": {
+    "spike/cli-session/coding-task.mts": "fb399fef796331cd2c2b82847aee16ccab4a3ce8d2668c5fb6d7994d7d447517",
+    "spike/cli-session/coding-verifier.mts": "8b54e61bff1433ca4dfaaa436ee8815ea91b2cab4a6c1871f353c59e678759f4"
+  },
+  "real_account_tested": false,
+  "real_model_inference": false,
+  "verifier_case_count": 34,
+  "existing_json_cases": 32,
+  "real_sparse_cases": 2,
+  "holes_constructed_in_child": true,
+  "oracle_remains_host_private": true,
+  "checks": [
+    "broken_baseline_rejected",
+    "candidate_exit_zero_cannot_spoof_oracle",
+    "every_prevalidation_passes_32_json_cases_but_sparse_arrays_rejected",
+    "frozen_bounded_regular_file_snapshot",
+    "independent_private_oracle_34_cases_including_sparse_arrays",
+    "git_apply_check",
+    "applied_patch_matches_verified_candidate_hash",
+    "candidate_path_literals_preserved_in_verified_patch_roundtrip",
+    "extra_file_rejected",
+    "symlink_without_extra_file_rejected",
+    "oversized_candidate_rejected",
+    "hidden_auth_named_file_rejected",
+    "nested_git_directory_rejected",
+    "candidate_directory_rejected",
+    "candidate_fifo_rejected",
+    "hardlink_with_second_entry_rejected",
+    "nul_content_rejected",
+    "invalid_utf8_rejected",
+    "bidi_hidden_content_rejected",
+    "synthetic_bearer_secret_rejected",
+    "synthetic_private_key_rejected",
+    "synthetic_provider_token_rejected",
+    "synthetic_refresh_token_assignment_rejected",
+    "direct_verifier_secret_rejected_before_staging",
+    "direct_diff_secret_rejected_before_writing"
+  ],
+  "fixture_verifier": {
+    "passed": true,
+    "cases": 34,
+    "json_cases_passed": true,
+    "sparse_cases_passed": true,
+    "candidate_sha256": "db00e4a06aea7bbe143249faf0eddf8be1ffe6ef482513f92ff250ea7c5a7249",
+    "network": "none",
+    "workspace": "read_only",
+    "oracle": "host_private_expected_results",
+    "agent_access": false
+  },
+  "fixture_diff": {
+    "patch_file": "coding-verifier-fixture.patch",
+    "patch_sha256": "0df9c5d7896a05f5906672ddc807d3d59e648f5cafeb32a7caa385283d353931",
+    "base_sha256": "84bca9d99599d19fcce52870ca5b12e01f0c65a1b639a6b26de2ecc9c8fe7424",
+    "candidate_sha256": "db00e4a06aea7bbe143249faf0eddf8be1ffe6ef482513f92ff250ea7c5a7249",
+    "applied_candidate_sha256": "db00e4a06aea7bbe143249faf0eddf8be1ffe6ef482513f92ff250ea7c5a7249",
+    "git_apply_check": true,
+    "git_apply_roundtrip": true
+  },
+  "literal_artifact": {
+    "verifier": {
+      "passed": true,
+      "cases": 34,
+      "json_cases_passed": true,
+      "sparse_cases_passed": true,
+      "candidate_sha256": "1961327505a668a7c0bbc771b7b4865c8fca4698d93a519bac703eb3b8677c3f",
+      "network": "none",
+      "workspace": "read_only",
+      "oracle": "host_private_expected_results",
+      "agent_access": false
+    },
+    "diff": {
+      "patch_file": "coding-verifier-literal-fixture.patch",
+      "patch_sha256": "1fcc85e4b36b057d1427825fa8144a7231cfcc46f9e92916faa7e152f7957f82",
+      "base_sha256": "84bca9d99599d19fcce52870ca5b12e01f0c65a1b639a6b26de2ecc9c8fe7424",
+      "candidate_sha256": "1961327505a668a7c0bbc771b7b4865c8fca4698d93a519bac703eb3b8677c3f",
+      "applied_candidate_sha256": "1961327505a668a7c0bbc771b7b4865c8fca4698d93a519bac703eb3b8677c3f",
+      "git_apply_check": true,
+      "git_apply_roundtrip": true
+    }
+  },
+  "negative_control": {
+    "passed": false,
+    "cases": 34,
+    "json_cases_passed": true,
+    "sparse_cases_passed": false,
+    "candidate_sha256": "8179ce1ef9280230f47ff9b9d5e247e5a0f71605f8c54dfd4e041f1382079372",
+    "network": "none",
+    "workspace": "read_only",
+    "oracle": "host_private_expected_results",
+    "agent_access": false
+  },
+  "real_candidate_replays": {
+    "luna": {
+      "passed": false,
+      "cases": 34,
+      "json_cases_passed": true,
+      "sparse_cases_passed": false,
+      "candidate_sha256": "e56f2a4e90e971f887d1bb79cfc0dab612d41e25932f95693735d4398ac6b7c1",
+      "network": "none",
+      "workspace": "read_only",
+      "oracle": "host_private_expected_results",
+      "agent_access": false
+    },
+    "haiku": {
+      "passed": true,
+      "cases": 34,
+      "json_cases_passed": true,
+      "sparse_cases_passed": true,
+      "candidate_sha256": "3693f7aeb4ca6aadd14b442cfbd3ff137825c1df0d92e2221fd64116a2fe9730",
+      "network": "none",
+      "workspace": "read_only",
+      "oracle": "host_private_expected_results",
+      "agent_access": false
+    }
+  },
+  "original_model_reports_rewritten": false,
+  "first_replay_attempt": {
+    "success": false,
+    "failure": "docker_timeout",
+    "cleanup_confirmed": false,
+    "candidate_results_not_certified": true
+  },
+  "later_replay_success": true,
+  "cleanup_confirmed": true,
+  "success": true,
+  "luna_candidate_accepted": false,
+  "haiku_candidate_accepted": true,
+  "scope_limits": [
+    "Luna fails actual sparse inputs with RangeError where TypeError is required; its original 32-case success is preserved as narrower evidence",
+    "All candidate execution for this replay occurred in isolated network-none readonly Docker verifier namespaces, without an AI request",
+    "Candidate hashes match the exact earlier model outputs; fixture patch files are reused only after exact byte checksums match",
+    "First failed replay was not relabeled as success; no automatic crash recovery or production isolation GO is implied"
+  ]
+}

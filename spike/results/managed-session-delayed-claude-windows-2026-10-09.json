@@ -1,0 +1,91 @@
+{
+  "schema_version": "1.0",
+  "platform": "win32",
+  "container_platform": "linux-x64",
+  "local_date": "2026-10-09",
+  "timezone": "Europe/Istanbul",
+  "execution_enabled": false,
+  "isolation_gate": "not_evaluated",
+  "production_ready": false,
+  "credential_files_copied": false,
+  "paid_api_fallback": false,
+  "checked_at": "2026-10-09T08:08:58.870Z",
+  "purpose": "Delayed official session resume and independent readonly Codex quota observation",
+  "source_commit": "32a766d7bdd07a418202e9930cce094d8c5472b6",
+  "source_sha256": {
+    "spike/cli-session/managed-session-acceptance.mts": "cd0b94da02cffb51702b696f022ebc3a68b65d0447ac991a712c9fb8d1814a25",
+    "spike/cli-session/managed-provider-session.mts": "27d59c05fff65fb3fc73ce209d59d0ce6825bc5204d7e967917f1d628411285b",
+    "spike/cli-session/managed-runtime.mts": "5f0d5bb236724dab41daeaaf771f333d10a6554f68587f27e0823e977491dcae"
+  },
+  "provider": "claude",
+  "cli_version": "2.1.293",
+  "cli_binary_sha256": "8968405e26db478af44eabc4635ab5ca557057b702a54460a59c13e1b253e978",
+  "real_account_tested": true,
+  "real_model_inference": false,
+  "resumed": true,
+  "elapsed_since_first_authenticated_ms": 39933216,
+  "intervening_session_activity_unobserved": true,
+  "stages": [
+    {
+      "stage": "namespace_start",
+      "checked_at": "2026-10-09T08:08:58.879Z",
+      "elapsed_ms": 10998,
+      "success": true
+    },
+    {
+      "stage": "initial_authenticated_status",
+      "checked_at": "2026-10-09T08:09:09.877Z",
+      "elapsed_ms": 1496,
+      "success": true,
+      "authenticated": true,
+      "method": "claude.ai"
+    },
+    {
+      "stage": "namespace_stop_for_restart",
+      "checked_at": "2026-10-09T08:09:11.373Z",
+      "elapsed_ms": 2078,
+      "success": true
+    },
+    {
+      "stage": "namespace_restart",
+      "checked_at": "2026-10-09T08:09:13.451Z",
+      "elapsed_ms": 10056,
+      "success": true
+    },
+    {
+      "stage": "restart_authenticated_status",
+      "checked_at": "2026-10-09T08:09:23.507Z",
+      "elapsed_ms": 1334,
+      "success": true,
+      "authenticated": true,
+      "method": "claude.ai"
+    }
+  ],
+  "success": true,
+  "cleanup_confirmed": true,
+  "logout_attempted": false,
+  "new_login_attempted": false,
+  "checkpoint_is_provider_renewal_proof": false,
+  "actual_token_rotation_observed": false,
+  "real_provider_expiry_acceptance": "pending",
+  "concurrent_account_usage_verified": false,
+  "codex_readonly_quota": {
+    "checked_at": "2026-10-09T08:11:22.114Z",
+    "state": "available",
+    "source": "official_codex_account_rate_limits_read",
+    "normalized_windows_count": 1,
+    "success": true,
+    "cleanup_confirmed": true,
+    "real_model_inference": false,
+    "usage_and_reset_values_redacted_for_account_privacy": true,
+    "quota_exhaustion_verified": false,
+    "actual_reset_observed": false,
+    "quota_observation_is_usage_permission": false
+  },
+  "private_profiles_retained": true,
+  "scope_limits": [
+    "Same Claude profile observed authenticated after approximately 11 hours and namespace restart; intervening provider activity is not observed",
+    "No credential/token contents read or copied; status/resume does not prove natural token renewal",
+    "Quota snapshot indicates structured information access only, not usage permission or real exhaustion/reset acceptance"
+  ]
+}

@@ -41,6 +41,13 @@
 | [current-cli-acceptance-windows-2026-10-09.json](current-cli-acceptance-windows-2026-10-09.json) | Güncel gerçek görev/oturum sonuçları; Claude checkpoint, Codex refresh deadline ve ayrı quota gözlemi | İlk cleanup=false koşuları korunur; sonraki manuel uzlaştırma geçmişi başarılıya çevirmez; doğal yenileme/kota tükenmesi kabulü değildir |
 | [codex-luna-profile-windows-2026-10-09.json](codex-luna-profile-windows-2026-10-09.json) | Güncel pinned Luna direct-tool envanter fixture kabulü | Mock inference; başarısız gerçek Luna task'ını kabul etmez |
 | [cheap-model-foundations-windows-2026-10-09.json](cheap-model-foundations-windows-2026-10-09.json) | Güncel model doğrulama ve tanı değişikliklerinin yerel genel kontrolü | Sonuç/sayı raporda; doğal provider yenilemesi veya yeni uzak CI kabulü değildir |
+| [github-foundations-32a766d-2026-10-09.json](github-foundations-32a766d-2026-10-09.json) | `32a766d` için 11 uzak CI işi geçti | Sonraki argv yönergesi ve 34 vaka değişikliği kapsam dışı; gerçek hesap/model kullanmaz |
+| [task-routing-diagnostics-windows-2026-10-09.json](task-routing-diagnostics-windows-2026-10-09.json) | AI kullanmadan callback → gerçek task dosyası → cevap yolu; 7 kontrol, 32 vaka ve cleanup | Deterministik aday; resmi CLI/model çıkarımı değildir |
+| [managed-task-luna-diagnostics-windows-2026-10-09.json](managed-task-luna-diagnostics-windows-2026-10-09.json) | Luna ile üç başarılı callback, gerçek [patch](managed-task-luna-diagnostics-2026-10-09.patch), önceki 32 vaka ve cleanup | Aynı aday sonraki 34 vaka kontrolünde reddedildi; önceki Luna koşusunun nedeni kanıtlanmadı |
+| [coding-verifier-sparse-windows-2026-10-09.json](coding-verifier-sparse-windows-2026-10-09.json) | 25 Docker kontrolü; gerçek boş yuvalarla 34 vaka; özgün Luna adayı reddedildi, Haiku geçti | Yeni çıkarım yok; ilk replay timeout'u korunur; genel doğruluk/GO değildir |
+| [managed-session-delayed-claude-windows-2026-10-09.json](managed-session-delayed-claude-windows-2026-10-09.json) | Aynı Claude profili yaklaşık 11 saat sonra login olmadan status/restart geçti; ayrı Codex kota okuması | Aradaki etkinlik gözlenmedi; token yenilemesi veya kota tükenmesi kanıtı değildir |
+| [luna-routing-foundations-windows-2026-10-09.json](luna-routing-foundations-windows-2026-10-09.json) | `f09a592` argv yönergesi için 284 test ve yerel genel kontrol | Yeni gerçek görev ve sonraki güçlü verifier ayrı kanıttır |
+| [coding-verifier-sparse-foundations-windows-2026-10-09.json](coding-verifier-sparse-foundations-windows-2026-10-09.json) | `70fd7c6` 34 vaka düzeltmesi için 284 test ve yerel genel kontrol | Gerçek Docker kontrolü ayrı; yeni çıkarım veya uzak CI değildir |
 
 Temporal recovery denemesi süreç temizliği değişikliğinden sonra tekrar çalıştırılıp geçti; buradaki kayıt son başarılı denemeden kopyalandı. Ham log/SQLite dosyaları `.local` altında kalır. Kaynaklar Git'e kopyalanmaz; kilit dosyası ile tekrar indirilebilir.
 
@@ -61,3 +68,5 @@ Oturum sürekliliği için `npm run spike:session-continuity`; eski private prof
 Güncel çalışma sırası [ADR 0012](../adr/0012-go-gate-priority-and-development-boundaries.md) ve [GO listesinde](../../docs/GO_GATE.md) tutulur. İndeks tarihli kanıtı korur; yeni sayılar yalnız tamamlanmış raporlardan alınır. İşlev testlerinde Luna/Haiku tercihi eski raporların model alanlarını değiştirmez.
 
 Yeni Haiku/Luna profilleri sonraki normal gözlemler için giriş yapmış halde korunur; önceki Sonnet/Astra profilleri logout durumundadır. Güncel görev, model, cleanup ve checkpoint sınırları [ADR 0013](../adr/0013-current-cheap-model-acceptance.md) içinde; GO verilmedi.
+
+Sonraki araç yolu ve boş yuva bulguları [ADR 0014](../adr/0014-task-routing-and-sparse-verifier.md) içindedir. Luna'nın dosya değişikliği yapması doğrulandı; yeni adayın eski 32 vakadan geçmesi güncel 34 vaka kabulü sayılmaz.

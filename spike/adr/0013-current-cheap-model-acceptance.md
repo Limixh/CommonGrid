@@ -2,6 +2,8 @@
 
 Tarih: 2026-10-09 (yerel; kayıtların UTC zamanı 8 Ekim 21:xx). Durum: Haiku görevi kabul edildi; Luna görev adayı/verifier kabulü başarısız. GO verilmedi; `execution_enabled=false`, `isolation_gate=not_evaluated`.
 
+Bu ADR ilk yerel kabul grubunu kaydeder. Sonraki gerçek araç tanısı ve 34 vakalık doğrulama [ADR 0014](0014-task-routing-and-sparse-verifier.md) içindedir.
+
 ## Kabul kapsamı
 
 Kullanıcı kendi hesabıyla resmi CLI girişini yeni izole Claude/Codex profillerinde tamamlar. Mevcut host credential dosyaları okunmaz veya kopyalanmaz. Sonraki gözlemlerde aynı profile korunur; gerekli olmadıkça login/logout yapılmaz. Güncel resmi CLI sürümü, binary hash'i, kaynak commit'i ve varsa dar katalog/profil hash'i kanıta bağlanır. İşlev testi yalnız Codex `gpt-6-luna` ve Claude `haiku` kullanır.

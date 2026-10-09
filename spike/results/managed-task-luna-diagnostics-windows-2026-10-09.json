@@ -1,0 +1,98 @@
+{
+  "schema_version": "1.0",
+  "platform": "win32",
+  "container_platform": "linux-x64",
+  "local_date": "2026-10-09",
+  "timezone": "Europe/Istanbul",
+  "execution_enabled": false,
+  "isolation_gate": "not_evaluated",
+  "production_ready": false,
+  "credential_files_copied": false,
+  "paid_api_fallback": false,
+  "checked_at": "2026-10-09T08:14:05.161Z",
+  "purpose": "controlled_real_subscription_coding_task_in_isolated_cli",
+  "source_commit": "f09a592913556a240a808b694110ab54019088a8",
+  "source_sha256": {
+    "spike/cli-session/coding-task.mts": "3810c6e34c7e499c6a4b7fcd8a0a479b3289fd3f890263f9c746dbc71ba7e374",
+    "spike/cli-session/managed-task.mts": "9d0edab485e1c0836f14b46d38586342b81a45acab440f61f75b18ecbd129165",
+    "spike/cli-session/managed-runtime.mts": "5f0d5bb236724dab41daeaaf771f333d10a6554f68587f27e0823e977491dcae",
+    "spike/cli-session/codex-profile.mts": "d578b288359951deefa0712ba0c6206e94554d77ac4f46b682e7bdaa62d9eedd",
+    "packages/agent-adapters/testing/functional-test-models.ts": "537e6a9c90a6ca9697c7a99234f6b778abfe1fa026fabbde0330a1118796dd89"
+  },
+  "provider": "codex",
+  "cli_version": "0.157.1",
+  "cli_binary_sha256": "3e2584f3f3829a43a0495011a1cecb2facbe64a2403e2b682351fd9c2983f970",
+  "requested_model": "gpt-6-luna",
+  "observed_model": "gpt-6-luna",
+  "model_verified": true,
+  "real_model_inference_attempted": true,
+  "model_task_invocations_this_phase": 1,
+  "automatic_model_retry": false,
+  "task_calls": 3,
+  "task_callback_results": [
+    {
+      "outcome": "success",
+      "exit_code": 0,
+      "stdout_bytes": 96,
+      "stderr_bytes": 0
+    },
+    {
+      "outcome": "success",
+      "exit_code": 0,
+      "stdout_bytes": 0,
+      "stderr_bytes": 0
+    },
+    {
+      "outcome": "success",
+      "exit_code": 0,
+      "stdout_bytes": 16,
+      "stderr_bytes": 0
+    }
+  ],
+  "candidate_changed": true,
+  "provider_completion": "completed",
+  "catalog_sha256": "175f81d2f94f5586f1471cceb8483fc4f93845ad9d144b4157c5e0cd97a55c31",
+  "tool_profile": "pinned_catalog_direct_no_multi_agent",
+  "managed_refresh_requested": true,
+  "verifier": {
+    "passed": true,
+    "cases": 32,
+    "candidate_sha256": "e56f2a4e90e971f887d1bb79cfc0dab612d41e25932f95693735d4398ac6b7c1",
+    "network": "none",
+    "workspace": "read_only",
+    "oracle": "host_private_expected_results",
+    "agent_access": false
+  },
+  "diff": {
+    "patch_file": "managed-task-luna-diagnostics-2026-10-09.patch",
+    "patch_sha256": "699dc3f95b2515f969086a6d2f358947560140b61c704a629c724574cbefe485",
+    "base_sha256": "84bca9d99599d19fcce52870ca5b12e01f0c65a1b639a6b26de2ecc9c8fe7424",
+    "candidate_sha256": "e56f2a4e90e971f887d1bb79cfc0dab612d41e25932f95693735d4398ac6b7c1",
+    "applied_candidate_sha256": "e56f2a4e90e971f887d1bb79cfc0dab612d41e25932f95693735d4398ac6b7c1",
+    "git_apply_check": true,
+    "git_apply_roundtrip": true
+  },
+  "recorded_run_success": true,
+  "recorded_run_real_coding_verified": true,
+  "cleanup_confirmed": true,
+  "network": {
+    "connected": 13,
+    "denied": 0,
+    "task_calls": 0,
+    "destinations": [
+      "chatgpt.com",
+      "auth.openai.com"
+    ],
+    "denied_destinations": [],
+    "network_errors": [],
+    "control_failure": false
+  },
+  "candidate_accepted_under_current_verifier": false,
+  "subsequent_verifier_report": "coding-verifier-sparse-windows-2026-10-09.json",
+  "scope_limits": [
+    "This exact recorded run passed the earlier 32-case verifier and produced a real diff; the later 34-case replay rejects the same candidate",
+    "Previous unchanged Luna run remains unchanged; clarified argv instructions do not prove its old failure cause",
+    "Only closed task outcome/exit/byte counts recorded; no raw argv, stdout/stderr or provider payload persisted",
+    "No new model call after the sparse bug was found; no expensive model or paid API fallback"
+  ]
+}
