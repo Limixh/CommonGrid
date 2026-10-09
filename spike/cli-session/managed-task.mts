@@ -9,7 +9,7 @@ import { randomUUID } from "node:crypto";
 import { TaskToolsRuntime } from "../../packages/agent-adapters/src/task-runtime.ts";
 import { executeTaskTool } from "../../packages/agent-adapters/src/task-tool.ts";
 import { ManagedCliRuntime, startBridge, taskImage } from "./managed-runtime.mts";
-import { baseline, codingPrompt, seedTask, snapshotCandidate, verifyCandidate, createDiff } from "./coding-task.mts";
+import { baseline, codingPrompt, taskExecDescription, seedTask, snapshotCandidate, verifyCandidate, createDiff } from "./coding-task.mts";
 import { assertCodingProfileVerified, codexCodingModel } from "./codex-profile.mts";
 import { claudeFunctionalTestModel, ClaudeFunctionalTestModelGuard } from "@commongrid/agent-adapters/testing/functional-test-models";
 import { BoundedJsonInput, BoundedJsonLines, OperationCancellation, ProviderFailure, RpcLifecycle, TaskCallbackGuard, assertBridgeHealthy, classifyProviderFailure, failureCode, isRecord, validRpcId, validateClaudeStatus, validateClaudeResult, validateCodexIdentity, validateCodexTurn } from "../../packages/agent-adapters/src/session-protocol.ts";
@@ -134,7 +134,7 @@ try {
     await request("initialize",{clientInfo:{name:"commongrid_managed_coding_spike",version:"0.1.0"},capabilities:{experimentalApi:true}});child.stdin.write(JSON.stringify({method:"initialized"})+"\n");
     const account=await request("account/read",{refreshToken:true});validateCodexIdentity(account,"refresh");report.managed_refresh_requested=true;
     const models=await request("model/list",{});if(!isRecord(models)||!Array.isArray(models.data)||!models.data.every((item:unknown)=>isRecord(item)&&typeof item.model==="string"&&item.model.length<=128&&typeof item.hidden==="boolean"))throw new ProviderFailure("protocol");report.available_models=models.data.filter((item:any)=>!item.hidden).map((item:any)=>item.model);assert.ok(models.data.some((item:any)=>item.model===codexCodingModel&&!item.hidden),"fixture_validated_model_unavailable");
-    const started=await request("thread/start",{model:codexCodingModel,modelProvider:"openai",cwd:"/home/node",approvalPolicy:"never",sandbox:"read-only",ephemeral:true,environments:[],baseInstructions:codingPrompt,dynamicTools:[{type:"function",name:"task_exec",description:"Execute argv only in the isolated /task workspace, with no credentials or network. Paths refer to that workspace.",inputSchema:schema}]});
+    const started=await request("thread/start",{model:codexCodingModel,modelProvider:"openai",cwd:"/home/node",approvalPolicy:"never",sandbox:"read-only",ephemeral:true,environments:[],baseInstructions:codingPrompt,dynamicTools:[{type:"function",name:"task_exec",description:taskExecDescription,inputSchema:schema}]});
     if(!isRecord(started)||!isRecord(started.thread))throw new ProviderFailure("protocol");if(started.model!==codexCodingModel)throw new ProviderFailure("model");report.model=codexCodingModel;report.observed_model=codexCodingModel;report.model_verified=true;threadId=started.thread.id;
     if(typeof threadId!=="string"||!threadId||threadId.length>128)throw new ProviderFailure("protocol");
     report.real_model_inference_attempted=true;turnRequested=true;const turn=await request("turn/start",{threadId,input:[{type:"text",text:codingPrompt,text_elements:[]}]});
