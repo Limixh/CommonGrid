@@ -27,7 +27,7 @@ Masaüstü kabuğu Windows'ta Rust, MSVC C++ araçları ve WebView2 ister. İste
 | npm run test:db | Ayrılmış gerçek PostgreSQL; normal DATABASE_URL kullanılmaz |
 | npm run test:ui | Önce install:browsers; tarayıcıda görev/hesap/katkı akışı |
 | npm run test:artifacts | Önce install:trivy; gerçek gizli bilgi tarayıcısı ve dosya/verifier kontrolleri |
-| npm run spike:session-continuity | Yeni hesapsız Docker profilleriyle restart, işlem sahipliği ve cleanup |
+| npm run spike:session-continuity | Yeni hesapsız Docker profilleriyle kalıcı claim, restart, aynı profile yarış ve cleanup |
 | npm run spike:owner-crash | Yeni sentetik profillerde gerçek host Node worker SIGKILL, işlem sahipliği ve açık orphan uzlaştırması; gerçek hesap/model yok |
 | npm run spike:managed-adversarial | Hesapsız Docker saldırı ve kaynak sınırı senaryoları |
 | npm run test:spike | Ayrı Temporal deneme modülünün testleri |
@@ -37,7 +37,7 @@ Gerçek hesabı kullanan komutlar olağan test paketinde çalışmaz. Testte Cod
 
 ## Kod ve değişiklik disiplini
 
-Yeniden kullanılabilir protokol/kota yardımcıları packages/agent-adapters içinde; gerçek hesap/Docker deneylerinin yöneticileri spike içinde kalır. Ürün kodu spike dosyalarını doğrudan içe aktarmamalıdır. Deneme testi ayrı isimle çalışır; npm run check güvenlik regresyonlarını da kapsar.
+Yeniden kullanılabilir protokol/kota ve kalıcı operation claim yardımcıları packages/agent-adapters içinde; gerçek hesap/Docker deneylerinin yöneticileri spike içinde kalır. Ürün kodu spike dosyalarını doğrudan içe aktarmamalıdır. Deneme testi ayrı isimle çalışır; npm run check güvenlik regresyonlarını da kapsar.
 
 Şema değişirse npm run generate çalıştırın; üretilen TS/Go dosyalarını elle düzenlemeyin. İlgili kontrolü geçen her tamamlanmış adım anlamlı bir yerel commit alır. Secret/auth, araç cache'i ve ham loglar commit edilmez; kullanıcı istemedikçe push yapılmaz. Yeni bir bulgu, sonuç kapsamıyla birlikte ayrı rapor/ADR'ye yazılır; geçmiş raporların model veya test sonucu değiştirilmez.
 

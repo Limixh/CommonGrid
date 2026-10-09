@@ -1,0 +1,121 @@
+{
+  "schema_version": "1.0",
+  "purpose": "initial_ci_failure_with_ambiguous_account_test_navigation",
+  "checked_at": "2026-10-09T19:45:00.552Z",
+  "repository": "https://github.com/Limixh/CommonGrid",
+  "head_sha": "bc45262a2abb1119d0f6130b15e610269b782616",
+  "run_id": 37980859367,
+  "run_url": "https://github.com/Limixh/CommonGrid/actions/runs/37980859367",
+  "status": "completed",
+  "conclusion": "failure",
+  "passed_jobs": 10,
+  "failed_jobs": 1,
+  "jobs": [
+    {
+      "name": "cli-session-fixtures",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/37980859367/job/113990698157",
+      "started_at": "2026-10-09T19:31:58Z",
+      "completed_at": "2026-10-09T19:35:05Z"
+    },
+    {
+      "name": "contracts-api-ui",
+      "status": "completed",
+      "conclusion": "failure",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/37980859367/job/113990698383",
+      "started_at": "2026-10-09T19:31:57Z",
+      "completed_at": "2026-10-09T19:33:27Z"
+    },
+    {
+      "name": "artifact-delivery",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/37980859367/job/113990698430",
+      "started_at": "2026-10-09T19:31:58Z",
+      "completed_at": "2026-10-09T19:33:00Z"
+    },
+    {
+      "name": "temporal-fixtures (ubuntu-latest)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/37980859367/job/113990698442",
+      "started_at": "2026-10-09T19:31:58Z",
+      "completed_at": "2026-10-09T19:33:30Z"
+    },
+    {
+      "name": "postgres-domain",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/37980859367/job/113990698447",
+      "started_at": "2026-10-09T19:31:58Z",
+      "completed_at": "2026-10-09T19:33:26Z"
+    },
+    {
+      "name": "desktop-compile (ubuntu-latest)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/37980859367/job/113990698557",
+      "started_at": "2026-10-09T19:31:58Z",
+      "completed_at": "2026-10-09T19:38:08Z"
+    },
+    {
+      "name": "temporal-fixtures (macos-latest)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/37980859367/job/113990698563",
+      "started_at": "2026-10-09T19:32:01Z",
+      "completed_at": "2026-10-09T19:32:48Z"
+    },
+    {
+      "name": "desktop-compile (macos-latest)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/37980859367/job/113990698577",
+      "started_at": "2026-10-09T19:32:01Z",
+      "completed_at": "2026-10-09T19:33:23Z"
+    },
+    {
+      "name": "temporal-fixtures (windows-latest)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/37980859367/job/113990698603",
+      "started_at": "2026-10-09T19:31:58Z",
+      "completed_at": "2026-10-09T19:34:30Z"
+    },
+    {
+      "name": "sandbox-fixtures",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/37980859367/job/113990698607",
+      "started_at": "2026-10-09T19:31:58Z",
+      "completed_at": "2026-10-09T19:32:39Z"
+    },
+    {
+      "name": "desktop-compile (windows-latest)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/37980859367/job/113990698737",
+      "started_at": "2026-10-09T19:31:58Z",
+      "completed_at": "2026-10-09T19:42:17Z"
+    }
+  ],
+  "failure": {
+    "job": "contracts-api-ui",
+    "step": "Run npm run test:ui",
+    "source_file": "tests/ui/account.spec.ts",
+    "line": 120,
+    "passed_tests": 11,
+    "failed_tests": 1,
+    "cause": "Global account button locator matched both the main navigation and the alert action",
+    "correction": "Scope account and contribution navigation clicks to the Main navigation landmark",
+    "correction_commit": "bbcb936522355819a7ef8e30c00a85b6937bcf2b",
+    "local_corrected_tests_passed": 12,
+    "result_not_reclassified": true
+  },
+  "execution_enabled": false,
+  "isolation_gate": "not_evaluated",
+  "real_account_tested": false,
+  "real_model_inference": false,
+  "production_ready": false
+}

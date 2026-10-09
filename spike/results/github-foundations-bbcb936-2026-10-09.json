@@ -1,0 +1,161 @@
+{
+  "runtime_source_commit": "bc45262a2abb1119d0f6130b15e610269b782616",
+  "runtime_source_hashes_match": true,
+  "preceding_ci_attempt": {
+    "head_sha": "bc45262a2abb1119d0f6130b15e610269b782616",
+    "run_id": 37980859367,
+    "run_url": "https://github.com/Limixh/CommonGrid/actions/runs/37980859367",
+    "failed_job": "contracts-api-ui",
+    "failed_step": "Run npm run test:ui",
+    "cause": "Ambiguous global account navigation locator matched both navigation and alert buttons",
+    "result_not_reclassified": true
+  },
+  "schema_version": "1.0",
+  "purpose": "remote_foundations_with_durable_profile_claim_and_cross_platform_process_tests",
+  "checked_at": "2026-10-09T19:47:09.455Z",
+  "repository": "https://github.com/Limixh/CommonGrid",
+  "run_id": 37981596796,
+  "run_url": "https://github.com/Limixh/CommonGrid/actions/runs/37981596796",
+  "head_sha": "bbcb936522355819a7ef8e30c00a85b6937bcf2b",
+  "status": "completed",
+  "conclusion": "success",
+  "jobs": [
+    {
+      "name": "cli-session-fixtures",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/37981596796/job/113993214415",
+      "started_at": "2026-10-09T19:38:32Z",
+      "completed_at": "2026-10-09T19:41:53Z"
+    },
+    {
+      "name": "temporal-fixtures (windows-latest)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/37981596796/job/113993214541",
+      "started_at": "2026-10-09T19:38:32Z",
+      "completed_at": "2026-10-09T19:41:03Z"
+    },
+    {
+      "name": "temporal-fixtures (macos-latest)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/37981596796/job/113993214569",
+      "started_at": "2026-10-09T19:38:35Z",
+      "completed_at": "2026-10-09T19:39:21Z"
+    },
+    {
+      "name": "postgres-domain",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/37981596796/job/113993214572",
+      "started_at": "2026-10-09T19:38:32Z",
+      "completed_at": "2026-10-09T19:39:54Z"
+    },
+    {
+      "name": "artifact-delivery",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/37981596796/job/113993214573",
+      "started_at": "2026-10-09T19:38:32Z",
+      "completed_at": "2026-10-09T19:39:26Z"
+    },
+    {
+      "name": "contracts-api-ui",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/37981596796/job/113993214582",
+      "started_at": "2026-10-09T19:38:32Z",
+      "completed_at": "2026-10-09T19:40:05Z"
+    },
+    {
+      "name": "sandbox-fixtures",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/37981596796/job/113993214686",
+      "started_at": "2026-10-09T19:38:32Z",
+      "completed_at": "2026-10-09T19:39:15Z"
+    },
+    {
+      "name": "temporal-fixtures (ubuntu-latest)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/37981596796/job/113993214718",
+      "started_at": "2026-10-09T19:38:32Z",
+      "completed_at": "2026-10-09T19:39:49Z"
+    },
+    {
+      "name": "desktop-compile (macos-latest)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/37981596796/job/113993214743",
+      "started_at": "2026-10-09T19:38:35Z",
+      "completed_at": "2026-10-09T19:40:09Z"
+    },
+    {
+      "name": "desktop-compile (windows-latest)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/37981596796/job/113993214850",
+      "started_at": "2026-10-09T19:38:32Z",
+      "completed_at": "2026-10-09T19:46:18Z"
+    },
+    {
+      "name": "desktop-compile (ubuntu-latest)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/37981596796/job/113993214942",
+      "started_at": "2026-10-09T19:38:32Z",
+      "completed_at": "2026-10-09T19:44:17Z"
+    }
+  ],
+  "targeted_owned_process_tests": [
+    {
+      "job": "desktop-compile (macos-latest)",
+      "step": "Run node --import tsx --test packages/agent-adapters/test/owned-process.test.ts",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "job": "desktop-compile (windows-latest)",
+      "step": "Run node --import tsx --test packages/agent-adapters/test/owned-process.test.ts",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "job": "desktop-compile (ubuntu-latest)",
+      "step": "Run node --import tsx --test packages/agent-adapters/test/owned-process.test.ts",
+      "status": "completed",
+      "conclusion": "success"
+    }
+  ],
+  "linux_synthetic_claim_steps": [
+    {
+      "name": "Run npm run spike:managed-adversarial",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Run npm run spike:session-continuity",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Run npm run spike:owner-crash",
+      "status": "completed",
+      "conclusion": "success"
+    }
+  ],
+  "execution_enabled": false,
+  "isolation_gate": "not_evaluated",
+  "production_ready": false,
+  "real_account_tested": false,
+  "real_model_inference": false,
+  "scope_limits": [
+    "Exact source commit only; later source changes are not covered",
+    "Owned-process fixtures ran on Windows, macOS and Linux; synthetic durable-claim crash/continuity/adversarial checks ran in Linux Docker",
+    "Daemon-local developer lifecycle ownership only; automatic host/daemon recovery and production phase journal remain pending",
+    "Native compilation is not signed packaged release/auth acceptance",
+    "No actual subscription renewal, real quota/reset/account concurrency, full CLI/tool/login portability or product execution GO is implied"
+  ]
+}

@@ -1,0 +1,232 @@
+{
+  "schema_version": "1.0",
+  "purpose": "durable_daemon_local_profile_ownership_acceptance",
+  "platform": "win32",
+  "container_platform": "linux-x64",
+  "local_date": "2026-10-09",
+  "timezone": "Europe/Istanbul",
+  "checked_at": "2026-10-09T19:32:06.205Z",
+  "source_commit": "bc45262a2abb1119d0f6130b15e610269b782616",
+  "source_sha256": {
+    "packages/agent-adapters/src/operation-lease.ts": "aa232a8bf40525505962b0772199593d6cb3b00a7af1c22a3bee9f95becdc69e",
+    "packages/agent-adapters/test/operation-lease.test.ts": "c0dfcd108b5fdeebf62d90e5f85522e19b4c35a04eb56d93454524dbf7146678",
+    "spike/cli-session/managed-runtime.mts": "7aba07873a7545e092a3cd39e84a4e723f1cd2835c05e7c2f8061464052b8da4",
+    "spike/cli-session/managed-runtime.test.mts": "b3cda3f142de1d0bd5004fa89f577e4590705a62cdef63be56369a9438f35b0e",
+    "spike/cli-session/managed-command-lifecycle.test.mts": "9f9c1659693c11f8e55eaa8ceefeba0edcd1ad297392f721b503c8b5111bee28",
+    "spike/cli-session/managed-session.mts": "68e9d927a11190dcf8ca25228af9fb907ab5893177e7e680769c3dc8e82b5d95",
+    "spike/cli-session/managed-session-acceptance.mts": "23309470b2ee47290283a2e5011bfe4596937495fd3a4f3206842f5e8a100ce9",
+    "spike/cli-session/managed-task.mts": "d9b159afdd992a52b1f24abebe83680ea43a4503996b44491ddbea7895687fe0",
+    "spike/cli-session/managed-adversarial.mts": "ffbb766cf821f7329e8872bea8e75696ab91af3ddd5e1452480b9c8b648eb0f4",
+    "spike/cli-session/managed-boundary.mts": "aabfd6dc079274e8327797a64337d431c8afe6968bef63d79b626a8f2a5db26a",
+    "spike/cli-session/run.mts": "d4c8d21bbeeeb05356e99177a451fc4d83a3e391c1415dbd7404498aa5df812e",
+    "spike/cli-session/managed-continuity.mts": "ff4d0db04a3f084e5d9b903cdd739133361cdc32a3df375e9bb897531dfbd124",
+    "spike/cli-session/managed-owner-crash.mts": "1132d008c56a7f1ee5046035f462a5d9bc21a42b2c46bb6d43761495ff7ddea3",
+    "spike/cli-session/managed-owner-crash-worker.mts": "ce215c885fb56a317864f37f6852e95768e779bbf44aa3ee765da8f73753aea7",
+    "packages/agent-adapters/src/owned-process.ts": "57031ec20608750175810a7afd2489d6eab1d6350187a9eac5175c5cb650a475",
+    "packages/agent-adapters/test/owned-process.test.ts": "b41573f19768f50cb4d3471321bd5767a194b5cfa90da9c1ef44967e93becf96",
+    "packages/agent-adapters/src/task-runtime.ts": "cc5ae5823b149363b8f50bd530f2d140e4acbf7c9bf9e0569739021fcbde0c5f",
+    ".github/workflows/check.yml": "3c74eb4b0c52b7ba85735707055110fc40d028588f602d13040faaf88bf02a51",
+    "package.json": "2aee1752a7202a1c6b85248978b170ebc9b149547e50654c12ea70ff3a85b107"
+  },
+  "source_hash_format": "sha256_of_git_blob_bytes",
+  "node_version": "v22.14.0",
+  "execution_enabled": false,
+  "isolation_gate": "not_evaluated",
+  "production_ready": false,
+  "real_account_tested": false,
+  "real_model_inference": false,
+  "credential_files_copied": false,
+  "paid_api_fallback": false,
+  "synthetic_profiles_only": true,
+  "existing_private_profiles_accessed": false,
+  "success": true,
+  "cleanup_confirmed": true,
+  "durable_f0_operation_identity_accepted": true,
+  "durable_f0_exclusive_profile_claim_accepted": true,
+  "production_phase_journal_accepted": false,
+  "automatic_crash_recovery_accepted": false,
+  "local_check": {
+    "command": "npm run check",
+    "exit_code": 0,
+    "node_tests": 313,
+    "node_suites": {
+      "product_tools": 4,
+      "product_packages": 111,
+      "spike_tools": 9,
+      "spike_fixtures": 189
+    },
+    "failed": 0,
+    "cancelled": 0,
+    "skipped": 0,
+    "schema_generation": "passed",
+    "typecheck": "passed",
+    "go_tests": "passed",
+    "frontend_and_go_build": "passed",
+    "named_fixture_counts": {
+      "operation_lease": 11,
+      "owned_process": 3,
+      "managed_runtime": 33,
+      "command_lifecycle": 10
+    }
+  },
+  "previous_failed_attempts": [
+    {
+      "checked_at": "2026-10-09T19:05:29.029Z",
+      "source_relation": "Before final postdispatch-uncertainty correction",
+      "observed_daemon_state": "unavailable",
+      "success": false,
+      "cleanup_confirmed": false,
+      "providers": {
+        "claude": {
+          "status": "failed",
+          "failed_stage": "fresh_synthetic_prepare",
+          "failure": "managed_prepare_cleanup_unconfirmed",
+          "completed_groups": 0
+        },
+        "codex": {
+          "status": "failed",
+          "failed_stage": "fresh_synthetic_prepare",
+          "failure": "managed_prepare_cleanup_unconfirmed",
+          "completed_groups": 0
+        }
+      },
+      "result_not_reclassified": true
+    }
+  ],
+  "owner_crash": {
+    "checked_at": "2026-10-09T19:13:11.536Z",
+    "success": true,
+    "cleanup_confirmed": true,
+    "providers": {
+      "claude": {
+        "status": "passed",
+        "checks": [
+          "two_separate_host_process_claims_refused_by_durable_profile_ownership",
+          "forced_host_owner_exit_leaves_live_owned_namespace_and_descendant",
+          "new_operation_start_recovery_and_cleanup_preserve_live_orphan",
+          "wrong_operation_refused_and_exact_stopped_operation_removed_with_volumes_retained",
+          "synthetic_private_state_retained_and_stale_cleanup_preserves_successor",
+          "namespace_stop_terminates_orphan_descendant_before_delayed_write"
+        ]
+      },
+      "codex": {
+        "status": "passed",
+        "checks": [
+          "two_separate_host_process_claims_refused_by_durable_profile_ownership",
+          "forced_host_owner_exit_leaves_live_owned_namespace_and_descendant",
+          "new_operation_start_recovery_and_cleanup_preserve_live_orphan",
+          "wrong_operation_refused_and_exact_stopped_operation_removed_with_volumes_retained",
+          "synthetic_private_state_retained_and_stale_cleanup_preserves_successor",
+          "namespace_stop_terminates_orphan_descendant_before_delayed_write"
+        ]
+      }
+    }
+  },
+  "continuity": {
+    "checked_at": "2026-10-09T19:22:39.441Z",
+    "success": true,
+    "cleanup_confirmed": true,
+    "providers": {
+      "claude": {
+        "status": "passed",
+        "checks": [
+          "six_competing_starts_and_cleanup_preserve_incumbent",
+          "wrong_operation_exec_and_bridge_cannot_dispatch",
+          "reference_recovery_refuses_running_owned_namespace",
+          "same_operation_restart_retains_fake_private_state_and_durable_exclusive_claim",
+          "stopped_exact_operation_reconciled_and_stale_cleanup_preserves_successor",
+          "canceled_exec_removes_owned_namespace_descendants_and_preserves_new_operation",
+          "timed_out_exec_removes_owned_namespace_descendants_and_retains_private_volumes",
+          "unexpected_control_exit_observed_and_owned_namespace_explicitly_reconciled",
+          "silent_real_docker_control_has_bounded_readiness_and_explicit_recovery"
+        ]
+      },
+      "codex": {
+        "status": "passed",
+        "checks": [
+          "six_competing_starts_and_cleanup_preserve_incumbent",
+          "wrong_operation_exec_and_bridge_cannot_dispatch",
+          "reference_recovery_refuses_running_owned_namespace",
+          "same_operation_restart_retains_fake_private_state_and_durable_exclusive_claim",
+          "stopped_exact_operation_reconciled_and_stale_cleanup_preserves_successor",
+          "canceled_exec_removes_owned_namespace_descendants_and_preserves_new_operation",
+          "timed_out_exec_removes_owned_namespace_descendants_and_retains_private_volumes",
+          "unexpected_control_exit_observed_and_owned_namespace_explicitly_reconciled",
+          "silent_real_docker_control_has_bounded_readiness_and_explicit_recovery"
+        ]
+      }
+    }
+  },
+  "adversarial": {
+    "checked_at": "2026-10-09T19:12:28.768Z",
+    "success": true,
+    "cleanup_confirmed": true,
+    "providers": {
+      "claude": {
+        "status": "passed",
+        "checks": [
+          "distinct_pid_mount_network_namespaces",
+          "task_uid_caps_readonly_mounts_and_cgroup_limits",
+          "malicious_filesystem_process_fd_env_socket_ptrace_probes",
+          "pid_and_tmpfs_exhaustion_bounded",
+          "unknown_ip_metadata_plaintext_proxy_destinations_denied",
+          "broker_malformed_auth_size_arguments_attempt_scope_denied",
+          "broker_task_result_output_limit",
+          "broker_call_limit_blocks_side_effects",
+          "private_canary_and_process_intact_after_attacks",
+          "deadline_exhaustion_tears_down_task_namespace",
+          "output_exhaustion_tears_down_task_namespace"
+        ]
+      },
+      "codex": {
+        "status": "passed",
+        "checks": [
+          "distinct_pid_mount_network_namespaces",
+          "task_uid_caps_readonly_mounts_and_cgroup_limits",
+          "malicious_filesystem_process_fd_env_socket_ptrace_probes",
+          "pid_and_tmpfs_exhaustion_bounded",
+          "unknown_ip_metadata_plaintext_proxy_destinations_denied",
+          "broker_malformed_auth_size_arguments_attempt_scope_denied",
+          "broker_task_result_output_limit",
+          "broker_call_limit_blocks_side_effects",
+          "private_canary_and_process_intact_after_attacks",
+          "deadline_exhaustion_tears_down_task_namespace",
+          "output_exhaustion_tears_down_task_namespace"
+        ]
+      }
+    }
+  },
+  "remote_ci": {
+    "state": "passed_after_ui_test_locator_correction",
+    "initial_attempt": {
+      "head_sha": "bc45262a2abb1119d0f6130b15e610269b782616",
+      "run_id": 37980859367,
+      "run_url": "https://github.com/Limixh/CommonGrid/actions/runs/37980859367",
+      "failed_job": "contracts-api-ui",
+      "failed_step": "Run npm run test:ui",
+      "cause": "Ambiguous global account navigation locator matched both navigation and alert buttons",
+      "result_not_reclassified": true
+    },
+    "accepted_source_commit": "bbcb936522355819a7ef8e30c00a85b6937bcf2b",
+    "accepted_run_id": 37981596796,
+    "acceptance_record": "github-foundations-bbcb936-2026-10-09.json",
+    "runtime_source_hashes_matched": true
+  },
+  "scope_limits": [
+    "Daemon-local never-started claim and operation identity, integrated into existing F0 developer lifecycle only; product execution remains closed",
+    "Docker name uniqueness excludes cooperating profile consumers; this is not atomic fencing of every Docker mutation or an authority boundary against a host Docker operator",
+    "Manual stopped recovery requires exact operation and lease ID plus operator knowledge that old host work and daemon mutations are quiescent; age, PID and absent namespace are not takeover proof",
+    "Postdispatch nonzero exit plus foreign/absent claim does not prove no delayed create; initial simultaneous losers may remain uncertain. Ambiguous container/volume mutations retain ownership; volume removal has no automatic reconciliation",
+    "Host or daemon loss, automatic recovery, lifecycle-phase journal, retention/GC and packaged production worker adoption remain pending",
+    "Current synthetic tests do not access existing subscribed profiles or establish renewal, quota/reset, real account concurrency or whole-platform portability"
+  ],
+  "ui_test_locator_correction": {
+    "source_commit": "bbcb936522355819a7ef8e30c00a85b6937bcf2b",
+    "changed_file": "tests/ui/account.spec.ts",
+    "product_code_changed": false,
+    "command": "npm run test:ui",
+    "local_passed": 12,
+    "local_failed": 0,
+    "actual_account_or_model_calls": false
+  }
+}

@@ -4,6 +4,9 @@
 
 | Kayıt | Kanıt | Sınır |
 |---|---|---|
+| [github-foundations-bbcb936-2026-10-09.json](github-foundations-bbcb936-2026-10-09.json) | Exact `bbcb936` için 11 başarılı CI işi; üç OS'ta owned-process ve Linux Docker'da kalıcı claim/owner-crash/süreklilik/saldırı kontrolleri | Gerçek hesap/model, doğal yenileme/kota, production faz günlüğü, otomatik recovery veya product GO kabulü değildir |
+| [github-foundations-bc45262-failed-2026-10-09.json](github-foundations-bc45262-failed-2026-10-09.json) | İlk `bc45262` CI koşusunda 10 kontrol geçti; bir UI testi aynı adlı menü/uyarı düğmelerini birlikte seçtiği için başarısız oldu | Başarısız sonuç korunur. Menüyle sınırlandırılan seçici ayrı `bbcb936` commit'inde; düzeltilmiş 12 UI testi yerelde geçti |
+| [durable-profile-ownership-windows-2026-10-09.json](durable-profile-ownership-windows-2026-10-09.json) | `bc45262` kaynağı için 313 Node testi ve genel kontrol; iki sağlayıcıda 6 owner-crash + 9 süreklilik + 11 saldırı grubu, kalıcı claim, ayrı host contender reddi ve cleanup | Yeni sentetik profiller; gerçek hesap/model yok. Daemon içinde geliştirici claim kabulü; faz günlüğü, otomatik recovery, paketlenmiş ürün ve GO bekliyor |
 | `temporal-windows-2026-10-08.json` | Gerçek worker/server restart ve checkpoint replay; eski hash reddi, effect sonrası Activity retry, tek fixture kaydı, deadline ve iptal | SQLite development server ve fixture ledger; production HA/outbox/gerçek doğrulama değil |
 | `cli-routing-windows-2026-10-08.json` | Sekiz sabit kaynak hash'i; Codex 0.157.1 ve Claude native 2.1.293 version/help; Docker erişilebilir | Read-only kaynak/probe; model kataloğu da pin'lidir; gerçek hesap sonucu değildir |
 | `cli-session-windows-2026-10-08.json` | İki değiştirilmemiş resmi Linux CLI binary'siyle ayrı CLI/task namespace'lerinde 20 protocol/tool/sahte auth/control kontrolü ve cleanup | Deterministik model fixture; gerçek auth/task/diff veya tam GO değil; seçili fixture profilleri |
@@ -77,3 +80,5 @@ Yeni Haiku/Luna profilleri sonraki normal gözlemler için giriş yapmış halde
 Araç yolu ve boş yuva bulguları [ADR 0014](../adr/0014-task-routing-and-sparse-verifier.md) içindedir. Önceki Luna adayının eski 32 vakadan geçmesi güncel 34 vaka kabulü sayılmaz; o adayın sonraki reddi korunur. Kullanıcının sonraki devam isteğiyle üretilen ayrı Luna adayı güncel 34 vaka ve patch kabulünü geçti. Haiku'nun 34 vaka replay'i ve Luna'nın yeni gerçek görevi dar görev kabulünü tamamlar; product GO kapalıdır.
 
 Host owner ölümü ve Windows cleanup completion kanıtları [ADR 0015](../adr/0015-host-owner-crash-and-process-cleanup.md) içindedir. Başarılı açık orphan uzlaştırması otomatik production recovery olarak sunulmaz; önceki başarısız genel kontrolün sonucu değiştirilmez.
+
+Kalıcı profil sahipliği ve command boyunca tutulmuş claim sınırı [ADR 0016](../adr/0016-durable-profile-ownership.md) içindedir. `stop()` restart boyunca claim'i tutar; `finishOperation()` namespace cleanup sonrasında kaldırır. Belirsiz create/remove sonucu otomatik takeover izni değildir.

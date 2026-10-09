@@ -16,7 +16,7 @@ Create çağrısı gönderildikten sonra normal bir nonzero client çıkışı v
 
 ## Kabul ve sınır
 
-Güncel test kanıtı ayrı tarihli raporda kaydedilir. Eski sahiplik ve süreç raporları kendi kaynak commit'lerine bağlı olarak korunur.
+[Güncel Windows/Docker kabulü](../results/durable-profile-ownership-windows-2026-10-09.json) `bc45262` kaynağına bağlıdır: 313 Node testi, Go/şema/tip/derlemeleri ve iki sağlayıcıda altışar host owner ölümü, dokuzar süreklilik, on birer saldırı grubu geçti; cleanup doğrulandı. [CLI kaynak hash’leri aynı kalan, arayüz test seçicisi düzeltilmiş kaynağın 11 uzak CI kontrolü](../results/github-foundations-bbcb936-2026-10-09.json) de geçti; süreç fixture'ları üç OS'ta, Docker sahiplik koşuları Linux'ta çalıştı. Eski sahiplik ve süreç raporları kendi kaynak commit'lerine bağlı olarak korunur.
 
 Bu kayıt daemon içinde kalıcı claim sağlar; bütün Docker mutasyonlarına atomik fencing sağlamaz. Otomatik host ölümü tespiti, daemon kaybı sonrası recovery, live takeover, profile garbage collection ve paketlenmiş ürün yaşam döngüsü kabulü tamamlanmadı. Manuel quiescence bilgisi sistemin kendi kanıtı değildir. Gerçek hesap/model, doğal token yenilemesi ve kota davranışı bu sentetik kontrolün kapsamı dışındadır. Uygulama/API çalıştırması `execution_enabled=false`, isolation gate `not_evaluated` kalır.
 
