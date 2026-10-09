@@ -1,6 +1,6 @@
 # F0 test kayıtları
 
-2026-10-08 ve 2026-10-09, Windows x64 / Europe-Istanbul. Yeni 9 Ekim yerel kabul kayıtlarının UTC zamanı 8 Ekim 21:xx'tir. JSON kayıtlarında zamanlar UTC olarak tutulur; 7 Ekim 22:xx UTC, yerel 8 Ekim 01:xx saatidir.
+2026-10-08 ve 2026-10-09, Windows x64 / Europe-Istanbul. JSON kayıtlarında zamanlar UTC olarak tutulur; yerel gün Europe/Istanbul (+03:00) ile belirlenir. Örneğin 8 Ekim 21:xx UTC, yerel 9 Ekim 00:xx; 9 Ekim 08:xx UTC, yerel 9 Ekim 11:xx saatidir.
 
 | Kayıt | Kanıt | Sınır |
 |---|---|---|
@@ -48,6 +48,8 @@
 | [managed-session-delayed-claude-windows-2026-10-09.json](managed-session-delayed-claude-windows-2026-10-09.json) | Aynı Claude profili yaklaşık 11 saat sonra login olmadan status/restart geçti; ayrı Codex kota okuması | Aradaki etkinlik gözlenmedi; token yenilemesi veya kota tükenmesi kanıtı değildir |
 | [luna-routing-foundations-windows-2026-10-09.json](luna-routing-foundations-windows-2026-10-09.json) | `f09a592` argv yönergesi için 284 test ve yerel genel kontrol | Yeni gerçek görev ve sonraki güçlü verifier ayrı kanıttır |
 | [coding-verifier-sparse-foundations-windows-2026-10-09.json](coding-verifier-sparse-foundations-windows-2026-10-09.json) | `70fd7c6` 34 vaka düzeltmesi için 284 test ve yerel genel kontrol | Gerçek Docker kontrolü ayrı; yeni çıkarım veya uzak CI değildir |
+| [github-foundations-338c05c-2026-10-09.json](github-foundations-338c05c-2026-10-09.json) | Run `37906781578`, exact `338c05c` kaynağı için 11 iş completed/success | Daha sonraki kod, gerçek hesap/model, doğal yenileme/kota veya product GO kabulü değildir |
+| [managed-task-luna-accepted-windows-2026-10-09.json](managed-task-luna-accepted-windows-2026-10-09.json) | Aynı profille `338c05c` kaynağında tek gerçek Luna görevi; doğrulanmış model, 3 başarılı callback, değişmiş aday, 34 vaka, gerçek [patch](managed-task-luna-accepted-2026-10-09.patch) roundtrip ve cleanup | Dar görev kabulü; önceki başarısız Luna raporları değişmez. Doğal yenileme, kota, taşınabilirlik veya production kesinti sahipliği kabulü değildir |
 
 Temporal recovery denemesi süreç temizliği değişikliğinden sonra tekrar çalıştırılıp geçti; buradaki kayıt son başarılı denemeden kopyalandı. Ham log/SQLite dosyaları `.local` altında kalır. Kaynaklar Git'e kopyalanmaz; kilit dosyası ile tekrar indirilebilir.
 
@@ -69,4 +71,4 @@ Güncel çalışma sırası [ADR 0012](../adr/0012-go-gate-priority-and-developm
 
 Yeni Haiku/Luna profilleri sonraki normal gözlemler için giriş yapmış halde korunur; önceki Sonnet/Astra profilleri logout durumundadır. Güncel görev, model, cleanup ve checkpoint sınırları [ADR 0013](../adr/0013-current-cheap-model-acceptance.md) içinde; GO verilmedi.
 
-Sonraki araç yolu ve boş yuva bulguları [ADR 0014](../adr/0014-task-routing-and-sparse-verifier.md) içindedir. Luna'nın dosya değişikliği yapması doğrulandı; yeni adayın eski 32 vakadan geçmesi güncel 34 vaka kabulü sayılmaz.
+Araç yolu ve boş yuva bulguları [ADR 0014](../adr/0014-task-routing-and-sparse-verifier.md) içindedir. Önceki Luna adayının eski 32 vakadan geçmesi güncel 34 vaka kabulü sayılmaz; o adayın sonraki reddi korunur. Kullanıcının sonraki devam isteğiyle üretilen ayrı Luna adayı güncel 34 vaka ve patch kabulünü geçti. Haiku'nun 34 vaka replay'i ve Luna'nın yeni gerçek görevi dar görev kabulünü tamamlar; product GO kapalıdır.

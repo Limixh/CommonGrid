@@ -1,0 +1,146 @@
+{
+  "schema_version": "1.0",
+  "platform": "win32",
+  "container_platform": "linux-x64",
+  "local_date": "2026-10-09",
+  "timezone": "Europe/Istanbul",
+  "checked_at": "2026-10-09T09:04:09.007Z",
+  "purpose": "controlled_real_subscription_coding_task_in_isolated_cli",
+  "source_commit": "338c05cd3c9e835a844948b77d6e0e60cc7c8dfa",
+  "source_sha256": {
+    "spike/cli-session/coding-task.mts": "fb399fef796331cd2c2b82847aee16ccab4a3ce8d2668c5fb6d7994d7d447517",
+    "spike/cli-session/managed-task.mts": "9d0edab485e1c0836f14b46d38586342b81a45acab440f61f75b18ecbd129165",
+    "spike/cli-session/managed-runtime.mts": "5f0d5bb236724dab41daeaaf771f333d10a6554f68587f27e0823e977491dcae",
+    "spike/cli-session/codex-profile.mts": "d578b288359951deefa0712ba0c6206e94554d77ac4f46b682e7bdaa62d9eedd",
+    "packages/agent-adapters/testing/functional-test-models.ts": "537e6a9c90a6ca9697c7a99234f6b778abfe1fa026fabbde0330a1118796dd89"
+  },
+  "provider": "codex",
+  "cli_version": "0.157.1",
+  "cli_binary_sha256": "3e2584f3f3829a43a0495011a1cecb2facbe64a2403e2b682351fd9c2983f970",
+  "requested_model": "gpt-6-luna",
+  "observed_model": "gpt-6-luna",
+  "model_verified": true,
+  "real_account_tested": true,
+  "real_model_inference_attempted": true,
+  "model_task_invocations_this_phase": 1,
+  "automatic_model_retry": false,
+  "task_calls": 3,
+  "task_callback_results": [
+    {
+      "outcome": "success",
+      "exit_code": 0,
+      "stdout_bytes": 96,
+      "stderr_bytes": 0
+    },
+    {
+      "outcome": "success",
+      "exit_code": 0,
+      "stdout_bytes": 508,
+      "stderr_bytes": 0
+    },
+    {
+      "outcome": "success",
+      "exit_code": 0,
+      "stdout_bytes": 16,
+      "stderr_bytes": 0
+    }
+  ],
+  "candidate_changed": true,
+  "provider_completion": "completed",
+  "catalog_sha256": "175f81d2f94f5586f1471cceb8483fc4f93845ad9d144b4157c5e0cd97a55c31",
+  "tool_profile": "pinned_catalog_direct_no_multi_agent",
+  "managed_refresh_requested": true,
+  "verifier": {
+    "passed": true,
+    "cases": 34,
+    "json_cases_passed": true,
+    "sparse_cases_passed": true,
+    "candidate_sha256": "b8430f396426a31a2ce92ce5084bd2288579853149ccb9900e78ef56b77ea8ee",
+    "network": "none",
+    "workspace": "read_only",
+    "oracle": "host_private_expected_results",
+    "agent_access": false
+  },
+  "diff": {
+    "patch_file": "managed-task-luna-accepted-2026-10-09.patch",
+    "patch_sha256": "1c23c72c8dcfbaa8ae57c16ea1d10760a358a158552f8776f14a8818d622d3e2",
+    "base_sha256": "84bca9d99599d19fcce52870ca5b12e01f0c65a1b639a6b26de2ecc9c8fe7424",
+    "candidate_sha256": "b8430f396426a31a2ce92ce5084bd2288579853149ccb9900e78ef56b77ea8ee",
+    "applied_candidate_sha256": "b8430f396426a31a2ce92ce5084bd2288579853149ccb9900e78ef56b77ea8ee",
+    "git_apply_check": true,
+    "git_apply_roundtrip": true
+  },
+  "real_coding_verified": true,
+  "candidate_accepted_under_current_verifier": true,
+  "success": true,
+  "cleanup_confirmed": true,
+  "network": {
+    "connected": 13,
+    "denied": 0,
+    "task_calls": 0,
+    "destinations": [
+      "chatgpt.com",
+      "auth.openai.com"
+    ],
+    "denied_destinations": [],
+    "network_errors": [],
+    "control_failure": false
+  },
+  "credential_files_copied": false,
+  "paid_api_fallback": false,
+  "new_login_attempted": false,
+  "logout_attempted": false,
+  "private_profile_reused": true,
+  "private_profile_retained": true,
+  "execution_enabled": false,
+  "isolation_gate": "not_evaluated",
+  "production_ready": false,
+  "scope_limits": [
+    "One normal controlled coding task on the same authenticated isolated official profile, using only the verified cheap test model",
+    "Current independent verifier covers 32 JSON inputs and two real sparse arrays; this is narrow sumIntegers fixture acceptance, not general software verification",
+    "Patch was byte-hashed, checked and actually applied to a separate baseline; applied and exported candidate hashes match",
+    "Prior unchanged/rejected Luna runs retain their original source and narrower outcomes; they were not rewritten",
+    "No raw task argv, stdout/stderr, provider payload, profile identifier or credential content is published",
+    "Authenticated refresh completion is not proof of token rotation, natural expiry, quota reset or account concurrency",
+    "Execution remains closed pending separate continuity, real limits, host/tool and production crash ownership acceptance",
+    "Three additional no-inference isolated order/overflow controls passed on the exact exported candidate; these do not change the 34-case real-task verifier count"
+  ],
+  "additional_order_checks": {
+    "checked_at": "2026-10-09T09:09:56.935Z",
+    "cases": 3,
+    "checks": [
+      "overflow_before_later_invalid_value",
+      "invalid_value_before_later_overflow",
+      "unsafe_running_sum_before_later_cancellation",
+      "exact_candidate_hash_before_and_after"
+    ],
+    "inputs": [
+      [
+        9007199254740991,
+        1,
+        "2"
+      ],
+      [
+        "2",
+        9007199254740991,
+        1
+      ],
+      [
+        9007199254740991,
+        1,
+        -1
+      ]
+    ],
+    "passed": true,
+    "success": true,
+    "cleanup_confirmed": true,
+    "candidate_sha256": "b8430f396426a31a2ce92ce5084bd2288579853149ccb9900e78ef56b77ea8ee",
+    "hash_verified_before_and_after": true,
+    "real_account_tested": false,
+    "real_model_inference": false,
+    "network": "none",
+    "workspace": "read_only",
+    "oracle": "host_private_expected_results",
+    "agent_access": false
+  }
+}

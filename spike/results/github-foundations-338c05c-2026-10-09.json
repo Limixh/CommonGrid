@@ -1,0 +1,112 @@
+{
+  "schema_version": "1.0",
+  "purpose": "remote_foundations_for_committed_source",
+  "checked_at": "2026-10-09T09:05:31.757Z",
+  "repository": "https://github.com/Limixh/CommonGrid",
+  "run_id": 37906781578,
+  "run_url": "https://github.com/Limixh/CommonGrid/actions/runs/37906781578",
+  "head_sha": "338c05cd3c9e835a844948b77d6e0e60cc7c8dfa",
+  "status": "completed",
+  "conclusion": "success",
+  "jobs": [
+    {
+      "name": "cli-session-fixtures",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/37906781578/job/113742044135",
+      "started_at": "2026-10-09T08:44:06Z",
+      "completed_at": "2026-10-09T08:46:29Z"
+    },
+    {
+      "name": "artifact-delivery",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/37906781578/job/113742044405",
+      "started_at": "2026-10-09T08:44:06Z",
+      "completed_at": "2026-10-09T08:44:48Z"
+    },
+    {
+      "name": "sandbox-fixtures",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/37906781578/job/113742044422",
+      "started_at": "2026-10-09T08:44:06Z",
+      "completed_at": "2026-10-09T08:44:54Z"
+    },
+    {
+      "name": "temporal-fixtures (ubuntu-latest)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/37906781578/job/113742044430",
+      "started_at": "2026-10-09T08:44:07Z",
+      "completed_at": "2026-10-09T08:45:41Z"
+    },
+    {
+      "name": "postgres-domain",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/37906781578/job/113742044476",
+      "started_at": "2026-10-09T08:44:06Z",
+      "completed_at": "2026-10-09T08:45:38Z"
+    },
+    {
+      "name": "desktop-compile (macos-latest)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/37906781578/job/113742044546",
+      "started_at": "2026-10-09T08:44:52Z",
+      "completed_at": "2026-10-09T08:46:24Z"
+    },
+    {
+      "name": "desktop-compile (ubuntu-latest)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/37906781578/job/113742044566",
+      "started_at": "2026-10-09T08:44:06Z",
+      "completed_at": "2026-10-09T08:49:38Z"
+    },
+    {
+      "name": "contracts-api-ui",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/37906781578/job/113742044633",
+      "started_at": "2026-10-09T08:45:35Z",
+      "completed_at": "2026-10-09T08:47:05Z"
+    },
+    {
+      "name": "temporal-fixtures (windows-latest)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/37906781578/job/113742044651",
+      "started_at": "2026-10-09T08:45:39Z",
+      "completed_at": "2026-10-09T08:48:09Z"
+    },
+    {
+      "name": "desktop-compile (windows-latest)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/37906781578/job/113742044666",
+      "started_at": "2026-10-09T08:44:58Z",
+      "completed_at": "2026-10-09T08:51:21Z"
+    },
+    {
+      "name": "temporal-fixtures (macos-latest)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/37906781578/job/113742044676",
+      "started_at": "2026-10-09T08:44:53Z",
+      "completed_at": "2026-10-09T08:45:33Z"
+    }
+  ],
+  "execution_enabled": false,
+  "isolation_gate": "not_evaluated",
+  "real_account_tested": false,
+  "real_model_inference": false,
+  "production_ready": false,
+  "scope_limits": [
+    "Exact 338c05c source including explicit argv instructions and the 34-case sparse-array verifier; later changes are not covered",
+    "Official CLI session and isolation use deterministic fixtures; real account/model acceptance is separate",
+    "Native compilation on Windows/macOS/Linux is not packaged auth, signed distribution or production acceptance",
+    "Natural renewal, real quota/reset/concurrency and production crash ownership remain separate acceptance work"
+  ]
+}
