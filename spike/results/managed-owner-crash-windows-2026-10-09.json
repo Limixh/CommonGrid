@@ -1,0 +1,74 @@
+{
+  "schema_version": "1.0",
+  "platform": "win32",
+  "container_platform": "linux-x64",
+  "local_date": "2026-10-09",
+  "timezone": "Europe/Istanbul",
+  "source_commit": "e909b18b772b7b4eac98bcd5fb54d08ac0c5c05d",
+  "source_sha256": {
+    "spike/cli-session/managed-owner-crash.mts": "4fb3001b77a4e6692506e65bc13ad554dfaa3e2f1174b90d9b8e9b35f36d01cf",
+    "spike/cli-session/managed-owner-crash-worker.mts": "41e6ad3459b093ed1129a7d9d335f63ad95ec190735afe1affd38482454b5ec7",
+    "spike/cli-session/managed-runtime.mts": "5f0d5bb236724dab41daeaaf771f333d10a6554f68587f27e0823e977491dcae",
+    "packages/agent-adapters/src/owned-process.ts": "a86f294f760e154824b0cdd95e55735334857dc62613203d6402c0ad82c9639e",
+    "packages/agent-adapters/test/owned-process.test.ts": "2b0eeb4ad3981b4c429e283d278a8a02f5899acf2a46e421b6e53583235e6191",
+    "packages/agent-adapters/src/task-runtime.ts": "cc5ae5823b149363b8f50bd530f2d140e4acbf7c9bf9e0569739021fcbde0c5f",
+    ".github/workflows/check.yml": "3c74eb4b0c52b7ba85735707055110fc40d028588f602d13040faaf88bf02a51",
+    "package.json": "2aee1752a7202a1c6b85248978b170ebc9b149547e50654c12ea70ff3a85b107"
+  },
+  "execution_enabled": false,
+  "isolation_gate": "not_evaluated",
+  "production_ready": false,
+  "credential_files_copied": false,
+  "paid_api_fallback": false,
+  "real_account_tested": false,
+  "real_model_inference": false,
+  "node_version": "v22.14.0",
+  "checked_at": "2026-10-09T09:38:37.254Z",
+  "purpose": "synthetic_host_owner_crash_explicit_recovery",
+  "synthetic_profiles_only": true,
+  "existing_private_profiles_accessed": false,
+  "providers": {
+    "claude": {
+      "status": "passed",
+      "checks": [
+        "forced_host_owner_exit_leaves_live_owned_namespace_and_descendant",
+        "new_operation_start_recovery_and_cleanup_preserve_live_orphan",
+        "wrong_operation_refused_and_exact_stopped_operation_removed_with_volumes_retained",
+        "synthetic_private_state_retained_and_stale_cleanup_preserves_successor",
+        "namespace_stop_terminates_orphan_descendant_before_delayed_write"
+      ],
+      "ownership_receipt_before_start": true
+    },
+    "codex": {
+      "status": "passed",
+      "checks": [
+        "forced_host_owner_exit_leaves_live_owned_namespace_and_descendant",
+        "new_operation_start_recovery_and_cleanup_preserve_live_orphan",
+        "wrong_operation_refused_and_exact_stopped_operation_removed_with_volumes_retained",
+        "synthetic_private_state_retained_and_stale_cleanup_preserves_successor",
+        "namespace_stop_terminates_orphan_descendant_before_delayed_write"
+      ],
+      "ownership_receipt_before_start": true
+    }
+  },
+  "success": true,
+  "cleanup_confirmed": true,
+  "automatic_crash_recovery_accepted": false,
+  "production_profile_lock_accepted": false,
+  "production_operation_journal_accepted": false,
+  "first_fixture_run_before_cleanup_observation_change": {
+    "success": true,
+    "cleanup_confirmed": true,
+    "provider_check_groups": 10,
+    "real_model_inference": false
+  },
+  "scope_limits": [
+    "forced death of a dedicated synthetic Node owner after successful start only",
+    "explicit immutable-ID stop and stopped-operation reconciliation; no automatic live takeover",
+    "no persistent operation journal, production profile lock, host/daemon crash, or lost-create-ID acceptance",
+    "pinned Docker Linux runtime on the current host only",
+    "The live orphan and descendant were positively observed after a dedicated host worker was force-killed; successful explicit reconciliation does not imply automatic teardown",
+    "Delayed-write suppression is measured after the descendant positively acknowledges its armed timer; expected absence is checked separately",
+    "Windows launcher cleanup evidence is distinct from this Docker namespace and descendant acceptance; existing authenticated profiles were never accessed"
+  ]
+}

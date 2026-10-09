@@ -1,0 +1,138 @@
+{
+  "schema_version": "1.0",
+  "purpose": "remote_foundations_with_owner_crash_and_cross_platform_process_tests",
+  "checked_at": "2026-10-09T12:57:03.498Z",
+  "repository": "https://github.com/Limixh/CommonGrid",
+  "run_id": 37913131506,
+  "run_url": "https://github.com/Limixh/CommonGrid/actions/runs/37913131506",
+  "head_sha": "e909b18b772b7b4eac98bcd5fb54d08ac0c5c05d",
+  "status": "completed",
+  "conclusion": "success",
+  "jobs": [
+    {
+      "name": "postgres-domain",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/37913131506/job/113762805656",
+      "started_at": "2026-10-09T09:43:47Z",
+      "completed_at": "2026-10-09T09:45:14Z"
+    },
+    {
+      "name": "temporal-fixtures (ubuntu-latest)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/37913131506/job/113762805755",
+      "started_at": "2026-10-09T09:43:47Z",
+      "completed_at": "2026-10-09T09:45:09Z"
+    },
+    {
+      "name": "desktop-compile (ubuntu-latest)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/37913131506/job/113762805815",
+      "started_at": "2026-10-09T09:43:47Z",
+      "completed_at": "2026-10-09T09:48:14Z"
+    },
+    {
+      "name": "artifact-delivery",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/37913131506/job/113762805835",
+      "started_at": "2026-10-09T09:43:47Z",
+      "completed_at": "2026-10-09T09:44:45Z"
+    },
+    {
+      "name": "sandbox-fixtures",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/37913131506/job/113762805857",
+      "started_at": "2026-10-09T09:44:47Z",
+      "completed_at": "2026-10-09T09:45:28Z"
+    },
+    {
+      "name": "cli-session-fixtures",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/37913131506/job/113762805877",
+      "started_at": "2026-10-09T09:44:35Z",
+      "completed_at": "2026-10-09T09:47:29Z"
+    },
+    {
+      "name": "contracts-api-ui",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/37913131506/job/113762805911",
+      "started_at": "2026-10-09T09:44:35Z",
+      "completed_at": "2026-10-09T09:45:46Z"
+    },
+    {
+      "name": "temporal-fixtures (macos-latest)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/37913131506/job/113762805920",
+      "started_at": "2026-10-09T09:43:49Z",
+      "completed_at": "2026-10-09T09:44:33Z"
+    },
+    {
+      "name": "desktop-compile (macos-latest)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/37913131506/job/113762805958",
+      "started_at": "2026-10-09T09:43:50Z",
+      "completed_at": "2026-10-09T09:45:09Z"
+    },
+    {
+      "name": "desktop-compile (windows-latest)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/37913131506/job/113762805999",
+      "started_at": "2026-10-09T09:43:47Z",
+      "completed_at": "2026-10-09T09:53:17Z"
+    },
+    {
+      "name": "temporal-fixtures (windows-latest)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/37913131506/job/113762806021",
+      "started_at": "2026-10-09T09:43:47Z",
+      "completed_at": "2026-10-09T09:46:03Z"
+    }
+  ],
+  "targeted_owned_process_tests": [
+    {
+      "job": "desktop-compile (ubuntu-latest)",
+      "step": "Run node --import tsx --test packages/agent-adapters/test/owned-process.test.ts",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "job": "desktop-compile (macos-latest)",
+      "step": "Run node --import tsx --test packages/agent-adapters/test/owned-process.test.ts",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "job": "desktop-compile (windows-latest)",
+      "step": "Run node --import tsx --test packages/agent-adapters/test/owned-process.test.ts",
+      "status": "completed",
+      "conclusion": "success"
+    }
+  ],
+  "linux_owner_crash_step": {
+    "name": "Run npm run spike:owner-crash",
+    "status": "completed",
+    "conclusion": "success"
+  },
+  "execution_enabled": false,
+  "isolation_gate": "not_evaluated",
+  "production_ready": false,
+  "real_account_tested": false,
+  "real_model_inference": false,
+  "scope_limits": [
+    "Exact e909b18 source; later changes are not covered",
+    "Owned-process tests ran on Windows, macOS and Linux; synthetic owner-crash Docker acceptance ran in the Linux fixture job",
+    "These process tests are not full CLI/tool/login portability or production profile ownership acceptance",
+    "Native compilation is not signed packaged release/auth acceptance",
+    "No actual subscription renewal, real quota/reset/concurrency or product execution GO is implied"
+  ]
+}
