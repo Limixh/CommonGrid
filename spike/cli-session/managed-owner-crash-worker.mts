@@ -6,10 +6,23 @@ import path from "node:path";
 import { ManagedCliRuntime } from "./managed-runtime.mts";
 
 export async function ownerCrashWorker(args = process.argv.slice(2)) {
-  const [provider, owner] = args;
-  assert.ok(args.length === 2 && (provider === "claude" || provider === "codex") && process.send, "managed_owner_crash_worker_args_invalid");
+  const [provider, owner, mode] = args;
+  assert.ok((args.length === 2 || (args.length === 3 && mode === "contender")) && (provider === "claude" || provider === "codex") && process.send, "managed_owner_crash_worker_args_invalid");
   const runtime = ManagedCliRuntime.restore({ owner, provider });
-  await new Promise<void>((resolve, reject) => process.send!({ kind: "ownership", provider, owner, operation: runtime.operationIdentity().operation }, (error: Error | null) => error ? reject(new Error("managed_owner_crash_ipc_failed")) : resolve()));
+  if (mode === "contender") {
+    try { await runtime.beginOperation(); await runtime.finishOperation(); }
+    catch (error) {
+      if (error instanceof Error && /^(?:managed_profile_busy|profile_lease_busy)$/.test(error.message)) {
+        await new Promise<void>((resolve, reject) => process.send!({ kind: "refused", code: "managed_profile_busy" }, (failure: Error | null) => failure ? reject(failure) : resolve()));
+        process.disconnect?.(); return;
+      }
+      throw error;
+    }
+    throw new Error("managed_owner_crash_contender_acquired");
+  }
+  await runtime.beginOperation();
+  const lease = runtime.leaseIdentity(); assert.ok(lease, "managed_owner_crash_lease_missing");
+  await new Promise<void>((resolve, reject) => process.send!({ kind: "ownership", provider, owner, operation: lease.operation, lease_id: lease.lease_id }, (error: Error | null) => error ? reject(new Error("managed_owner_crash_ipc_failed")) : resolve()));
   await runtime.start();
   const containerId = await runtime.verifyOperation();
   const descendant = "const f=require('node:fs');f.writeFileSync('/home/node/cg-owner-crash-child-ready','synthetic',{flag:'wx',mode:0o600});const tick=()=>f.writeFileSync('/home/node/cg-owner-crash-heartbeat',String(Date.now()),{mode:0o600});let armed=false;tick();setInterval(()=>{tick();if(!armed&&f.existsSync('/home/node/cg-owner-crash-arm')){armed=true;setTimeout(()=>f.writeFileSync('/home/node/cg-owner-crash-late-write','forbidden',{flag:'wx',mode:0o600}),12000);f.writeFileSync('/home/node/cg-owner-crash-child-armed',String(Date.now()),{flag:'wx',mode:0o600});}},100);";
@@ -23,7 +36,7 @@ export async function ownerCrashWorker(args = process.argv.slice(2)) {
     assert.ok(Date.now() < deadline, "managed_owner_crash_child_ready_deadline");
     await new Promise(resolve => setTimeout(resolve, 50));
   }
-  process.send!({ kind: "ready", provider, owner, operation: runtime.operationIdentity().operation, containerId });
+  process.send!({ kind: "ready", provider, owner, operation: lease.operation, lease_id: lease.lease_id, containerId });
   // No live Docker client remains when ready is emitted. The detached Node
   // descendant belongs to the synthetic container and survives owner death.
   await new Promise<void>(() => { setInterval(() => {}, 1000); });

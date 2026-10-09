@@ -27,6 +27,7 @@ const directory = path.join(root, ".local/cli-session", runId);
 await mkdir(directory, { recursive: true });
 const label = `io.commongrid.spike.owner=${runId}`;
 const containers: string[] = [], runtimes: TaskToolsRuntime[] = [], children: ChildProcessWithoutNullStreams[] = [];
+const managedCaches: {runtime:ManagedCliRuntime;container:string}[]=[];
 const report: Record<string, any> = {
   schema_version: "1.0", checked_at: new Date().toISOString(), platform: process.platform,
   purpose: "official_cli_binaries_local_wire_fixture_and_task_tool_routing",
@@ -85,7 +86,7 @@ async function providerTest(provider: "codex" | "claude") {
   const container = `cg-cli-${provider}-${runId}`;
   const token = randomBytes(32).toString("hex"), canary = `CG_FAKE_${randomUUID()}`;
   const cache=provider === "codex"&&process.env.CG_FIXTURE_CODEX_TOOLS_OWNER?ManagedCliRuntime.restore({owner:process.env.CG_FIXTURE_CODEX_TOOLS_OWNER,provider:"codex"}):undefined;
-  if(cache)await cache.verify("volume",cache.toolsVolume);
+  if(cache){managedCaches.push({runtime:cache,container});await cache.beginOperation();await cache.verify("volume",cache.toolsVolume);}
   const setupStart = performance.now();
   report.setup_stage = `${provider}:create`;
   containers.push(container);
@@ -279,10 +280,11 @@ try {
   process.exitCode = 1;
 } finally {
   const failures: unknown[] = [];
+  const removedContainers=new Set<string>();
   for (const child of children) { child.stdin.end(); child.kill(); }
   for (const runtime of runtimes) { try { await runtime.close(); } catch (error) { failures.push(error); } }
   for (const container of containers) {
-    try { await closeCli(container); } catch (error) { failures.push(error); }
+    try { await closeCli(container);removedContainers.add(container); } catch (error) { failures.push(error); }
   }
   try {
     await checked(["info", "--format", "{{.ServerVersion}}"], 30_000);
@@ -295,6 +297,12 @@ try {
   if (!report.cleanup_confirmed) process.exitCode = 1;
   if (!report.success) process.exitCode = 1;
   report.remaining = ["real subscription task execution/diff inside an isolated CLI/auth runtime and token renewal/logout", "all tool/plugin/subagent paths and adversarial transitions", "network allowlist with real providers", "cross-platform and crash recovery", "production API integration and security review"];
+  // The read-only cache mount is still a profile consumer. Do not release its
+  // claim until the fixture container is absent and profile proof is written.
+  for(const cache of managedCaches){
+    if(containers.includes(cache.container)&&!removedContainers.has(cache.container))continue;
+    try{await cache.runtime.finishOperation();}catch{report.cleanup_confirmed=false;report.success=false;process.exitCode=1;}
+  }
   await writeFile(path.join(directory, "report.json"), JSON.stringify(report, null, 2) + "\n");
   console.log(`Official CLI fixture success: ${report.success}; cleanup: ${report.cleanup_confirmed}`);
   console.log(`Report: ${path.join(directory, "report.json")}`);

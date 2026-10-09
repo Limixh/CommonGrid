@@ -12,6 +12,23 @@ import { assertManagedProfileTrust, validateManagedHostTrust, installManagedHost
 
 const owner = randomUUID(), operation = randomUUID(), id = "a".repeat(64);
 const evidence = (changes: Partial<ManagedContainerEvidence> = {}): ManagedContainerEvidence => ({id,owner,operation,running:false,status:"exited",...changes});
+const fixtureLeaseId = "c".repeat(64);
+function installLeaseFixture(runtime: ManagedCliRuntime, invoke: (args:string[], options:{signal?:AbortSignal}) => Promise<string>) {
+  let present = false;
+  const leaseCommands: string[][] = [], allCommands: string[][] = [];
+  const leaseName = `cg-managed-lease-${runtime.owner}`;
+  const leaseEvidence = () => JSON.stringify({id:fixtureLeaseId,name:`/${leaseName}`,owner:runtime.owner,provider:runtime.provider,operation:runtime.operationIdentity().operation,kind:"managed-profile-claim",schema:"1",running:false,status:"created",network:"none",readonly:true,mounts:0,ports:0});
+  (runtime as any).command = async (args:string[], options:{signal?:AbortSignal} = {}) => {
+    allCommands.push(args);
+    if (args[0] === "create" && args.includes(leaseName)) { leaseCommands.push(args); present = true; return fixtureLeaseId; }
+    if (args[0] === "inspect" && [fixtureLeaseId,leaseName].includes(args.at(-1)!)) { leaseCommands.push(args); assert.ok(present,"fixture_lease_absent"); return leaseEvidence(); }
+    if (args.includes(`name=^/${leaseName}$`)) { leaseCommands.push(args); return present ? leaseName : ""; }
+    if (args.includes(`id=${fixtureLeaseId}`)) { leaseCommands.push(args); return present ? fixtureLeaseId : ""; }
+    if (args[0] === "rm" && args.at(-1) === fixtureLeaseId) { leaseCommands.push(args); present = false; return ""; }
+    return invoke(args,options);
+  };
+  return {leaseCommands,allCommands,present:()=>present,removeExternally:()=>{present=false;}};
+}
 test("same profile restoration generates a distinct operation fence", () => {
   const first=ManagedCliRuntime.restore({owner,provider:"codex"}), second=ManagedCliRuntime.restore(first.identity());
   assert.deepEqual(first.identity(),second.identity()); assert.notEqual(first.operationIdentity().operation,second.operationIdentity().operation); assert.equal(first.container,second.container);
@@ -90,6 +107,8 @@ test("pre-aborted start, stop and exec do not dispatch a command", async () => {
   let calls = 0;
   (runtime as any).command = async () => { calls++; throw new Error("unexpected_dispatch"); };
   cancellation.abort();
+  await assert.rejects(() => runtime.beginOperation({signal:cancellation.signal}), /docker_cancelled/);
+  await assert.rejects(() => runtime.finishOperation({signal:cancellation.signal}), /docker_cancelled/);
   await assert.rejects(() => runtime.start({signal:cancellation.signal}), /docker_cancelled/);
   await assert.rejects(() => runtime.stop(false, {signal:cancellation.signal}), /docker_cancelled/);
   await assert.rejects(() => runtime.exec(["node", "-e", ""], 1000, {signal:cancellation.signal}), /docker_cancelled/);
@@ -100,7 +119,7 @@ test("cancelled create reconciles owned ID with a fresh signal and retains volum
   const runtime = ManagedCliRuntime.restore({owner, provider:"codex"}), cancellation = new AbortController();
   let exists = false;
   const commands: string[][] = [], cleanupSignals: AbortSignal[] = [];
-  (runtime as any).command = async (args: string[], options: {signal?:AbortSignal}) => {
+  installLeaseFixture(runtime, async (args: string[], options: {signal?:AbortSignal}) => {
     commands.push(args);
     if (args[0] === "volume") return owner;
     if (args[0] === "create") { exists = true; cancellation.abort(); throw new DockerCommandError("cancelled"); }
@@ -109,7 +128,7 @@ test("cancelled create reconciles owned ID with a fresh signal and retains volum
     if (args[0] === "rm") { assert.deepEqual(args,["rm","--force",id]); exists = false; return ""; }
     if (args.includes(`name=^/${runtime.container}$`)) return exists ? runtime.container : "";
     return "";
-  };
+  });
   await assert.rejects(() => runtime.start({signal:cancellation.signal}), /docker_cancelled/);
   assert.equal(exists, false); assert.ok(cleanupSignals.length > 0);
   assert.ok(commands.some(args => args[0] === "rm"));
@@ -121,19 +140,22 @@ test("lost create ID stays unconfirmed while absent, then resolves only on owned
   const runtime = ManagedCliRuntime.restore({owner, provider:"codex"}), cancellation = new AbortController();
   let lateCreate = false;
   const removed: string[][] = [];
-  (runtime as any).command = async (args: string[]) => {
+  installLeaseFixture(runtime, async (args: string[]) => {
     if (args[0] === "volume") return owner;
     if (args[0] === "create") { cancellation.abort(); throw new DockerCommandError("cancelled"); }
     if (args[0] === "inspect") return JSON.stringify(evidence({operation:runtime.operationIdentity().operation,status:"created"}));
     if (args[0] === "rm") { removed.push(args); lateCreate = false; return ""; }
     return args.includes(`name=^/${runtime.container}$`) && lateCreate ? runtime.container : "";
-  };
+  });
   await assert.rejects(() => runtime.start({signal:cancellation.signal}), /managed_start_cleanup_unconfirmed/);
   await assert.rejects(() => runtime.stop(), /managed_cleanup_unconfirmed/);
   await assert.rejects(() => runtime.start(), /managed_cleanup_unconfirmed/);
+  assert.ok(runtime.leaseIdentity(), "uncertain namespace create must retain its durable claim");
+  await assert.rejects(() => runtime.finishOperation(), /managed_cleanup_unconfirmed/);
   assert.equal(removed.length, 0);
   lateCreate = true; await runtime.stop();
   assert.deepEqual(removed, [["rm","--force",id]]);
+  await runtime.finishOperation();
 });
 
 test("stop cancellation after removal cannot report confirmed cleanup", async () => {
@@ -146,7 +168,7 @@ test("stop cancellation after removal cannot report confirmed cleanup", async ()
 
 test("start refuses an existing same-operation namespace without cleanup", async () => {
   const runtime = ManagedCliRuntime.restore({owner,provider:"codex"}), commands: string[][] = [];
-  (runtime as any).command = async (args: string[]) => { commands.push(args); return args[0] === "volume" ? owner : runtime.container; };
+  installLeaseFixture(runtime, async (args: string[]) => { commands.push(args); return args[0] === "volume" ? owner : runtime.container; });
   await assert.rejects(() => runtime.start(), /managed_profile_busy/);
   assert.ok(!commands.some(args => args[0] === "create" || args[0] === "rm"));
 });
@@ -252,13 +274,14 @@ async function fakeStartedRuntime(trust = undefined as ReturnType<typeof selecte
   const pins = JSON.parse(await readFile(new URL("binaries.lock.json",import.meta.url),"utf8"));
   const bridges = new Map(await Promise.all(["runtime-bridge.mjs","tunnel-wire.mjs","mcp.mjs","task-broker.mjs"].map(async file => [file,sha256(await readFile(new URL(file,import.meta.url)))] as const)));
   let exists = false;
-  (runtime as any).command = async (args:string[]) => {
+  const leaseFixture = installLeaseFixture(runtime, async (args:string[]) => {
     commands.push(args);
     if (args[0] === "volume") return owner;
     if (args[0] === "create") { exists = true; return id; }
     if (args[0] === "inspect") return JSON.stringify(evidence({operation:runtime.operationIdentity().operation,running:true,status:"running"}));
     if (args[0] === "rm") { exists = false; return ""; }
     if (args.includes(`id=${id}`)) return exists ? id : "";
+    if (args.includes(`name=^/${runtime.container}$`)) return exists ? runtime.container : "";
     if (args[0] === "exec") {
       const script = args[4];
       if (script === verifyManagedHostTrustScript) return String(validTrust);
@@ -267,9 +290,103 @@ async function fakeStartedRuntime(trust = undefined as ReturnType<typeof selecte
       return "true";
     }
     return "";
-  };
-  return {runtime,commands};
+  });
+  return {runtime,commands,leaseFixture};
 }
+
+test("lease is acquired before namespace mutation, held through restart, and released last", async () => {
+  const {runtime,leaseFixture} = await fakeStartedRuntime();
+  await runtime.beginOperation(); const receipt = runtime.leaseIdentity(); assert.ok(receipt);
+  await runtime.beginOperation(); await runtime.start();
+  const createLease = leaseFixture.allCommands.findIndex(args => args[0] === "create" && args.includes(`cg-managed-lease-${owner}`));
+  const createNamespace = leaseFixture.allCommands.findIndex(args => args[0] === "create" && args.includes(runtime.container));
+  assert.ok(createLease >= 0 && createLease < createNamespace);
+  await runtime.stop(); assert.deepEqual(runtime.leaseIdentity(),receipt); assert.equal(leaseFixture.present(),true);
+  await runtime.start(); assert.deepEqual(runtime.leaseIdentity(),receipt);
+  assert.equal(leaseFixture.leaseCommands.filter(args => args[0] === "create").length,1);
+  await runtime.finishOperation(); assert.equal(leaseFixture.present(),false);
+  const removals = leaseFixture.allCommands.filter(args => args[0] === "rm");
+  assert.deepEqual(removals.at(-1),["rm",fixtureLeaseId]);
+  assert.ok(removals.slice(0,-1).some(args => args.at(-1) === id));
+  await assert.rejects(() => runtime.start(),/managed_operation_finished/);
+});
+
+test("an uncertain lease create cannot mutate a profile or release on one absent snapshot", async () => {
+  const runtime = ManagedCliRuntime.restore({owner,provider:"codex"});
+  const commands: string[][] = [];
+  (runtime as any).command = async (args:string[]) => {
+    commands.push(args);
+    if (args[0] === "create") throw new DockerCommandError("cancelled");
+    if (args.includes(`name=^/cg-managed-lease-${owner}$`)) return "";
+    throw new Error("fixture_missing");
+  };
+  await assert.rejects(() => runtime.beginOperation());
+  await assert.rejects(() => runtime.beginOperation());
+  await assert.rejects(() => runtime.finishOperation());
+  assert.equal(commands.filter(args => args[0] === "create").length,1);
+  assert.ok(!commands.some(args => ["run","start","exec","rm","volume"].includes(args[0])));
+});
+
+test("losing a lease while its captured namespace exists cannot confirm cleanup or mutate it", async () => {
+  const {runtime,leaseFixture} = await fakeStartedRuntime(); await runtime.start();
+  const receipt = runtime.leaseIdentity(); assert.ok(receipt);
+  leaseFixture.removeExternally(); const before = leaseFixture.allCommands.length;
+  await assert.rejects(() => runtime.stop(),/managed_cleanup_unconfirmed/);
+  await assert.rejects(() => runtime.finishOperation(),/managed_cleanup_unconfirmed/);
+  assert.deepEqual(runtime.leaseIdentity(),receipt);
+  assert.ok(!leaseFixture.allCommands.slice(before).some(args => ["rm","start","exec","volume"].includes(args[0])));
+});
+
+test("an installer that loses its create ID keeps the claim despite absent init listings", async () => {
+  const runtime = ManagedCliRuntime.restore({owner,provider:"claude"});
+  const leaseFixture = installLeaseFixture(runtime, async args => {
+    if (args[0] === "volume") return owner;
+    if (args[0] === "create") throw new DockerCommandError("cancelled");
+    return "";
+  });
+  await assert.rejects(() => runtime.installTrustBundle(),/managed_cleanup_unconfirmed/);
+  assert.ok(runtime.leaseIdentity()); assert.equal(leaseFixture.present(),true);
+  await assert.rejects(() => runtime.finishOperation(),/managed_cleanup_unconfirmed/);
+  assert.ok(!leaseFixture.allCommands.some(args => args[0] === "rm" || (args[0] === "volume" && args[1] === "rm")));
+});
+
+test("an incumbent lease blocks installer and destroy without dispatching mutations", async () => {
+  for (const action of ["install","destroy"] as const) {
+    const runtime = ManagedCliRuntime.restore({owner,provider:"claude"}), commands:string[][]=[];
+    (runtime as any).command = async (args:string[]) => {
+      commands.push(args);
+      if (args[0] === "create") throw new DockerCommandError("failed");
+      if (args.includes(`name=^/cg-managed-lease-${owner}$`)) return `cg-managed-lease-${owner}`;
+      if (args[0] === "inspect") return JSON.stringify({id:fixtureLeaseId,name:`/cg-managed-lease-${owner}`,owner,provider:"claude",operation:randomUUID(),kind:"managed-profile-claim",schema:"1",running:false,status:"created",network:"none",readonly:true,mounts:0,ports:0});
+      throw Error("unexpected_dispatch");
+    };
+    await assert.rejects(() => action === "install" ? runtime.installTrustBundle() : runtime.destroy(),/managed_profile_busy/);
+    assert.ok(!commands.some(args => ["run","start","exec","rm","volume"].includes(args[0])));
+  }
+});
+
+test("manual recovery prevalidates every namespace and refuses absent or live ambiguity", async () => {
+  for (const shape of ["absent","live","foreign_init"] as const) {
+    const runtime = ManagedCliRuntime.restore({owner,provider:"claude"}), commands:string[][]=[];
+    (runtime as any).command = async (args:string[]) => {
+      commands.push(args);
+      if (args[0] === "inspect" && args.at(-1) === fixtureLeaseId) return JSON.stringify({id:fixtureLeaseId,name:`/cg-managed-lease-${owner}`,owner,provider:"claude",operation,kind:"managed-profile-claim",schema:"1",running:false,status:"created",network:"none",readonly:true,mounts:0,ports:0});
+      if (args[0] === "inspect") return JSON.stringify(evidence({id:args.at(-1) === runtime.container ? id : "b".repeat(64),operation:args.at(-1) === runtime.container || shape !== "foreign_init" ? operation : randomUUID(),running:shape === "live",status:shape === "live" ? "running" : "exited"}));
+      if (args.includes(`name=^/${runtime.container}$`)) return shape === "absent" ? "" : runtime.container;
+      if (args.includes(`name=^/cg-managed-init-${owner}$`)) return shape === "foreign_init" ? `cg-managed-init-${owner}` : "";
+      throw Error("unexpected_dispatch");
+    };
+    await assert.rejects(() => runtime.recoverStopped({operation,lease_id:fixtureLeaseId,owner_quiesced:true}));
+    assert.ok(!commands.some(args => args[0] === "rm" || args[0] === "volume"));
+  }
+});
+
+test("manual recovery needs affirmative owner quiescence before Docker dispatch", async () => {
+  const runtime = ManagedCliRuntime.restore({owner,provider:"codex"}); let calls = 0;
+  (runtime as any).command = async () => { calls++; throw Error("unexpected_dispatch"); };
+  await assert.rejects(() => runtime.recoverStopped({operation,lease_id:fixtureLeaseId,owner_quiesced:false} as any));
+  assert.equal(calls,0);
+});
 
 test("ordinary Claude profile starts with bundled roots and no implicit host-root selection", async () => {
   const {runtime,commands} = await fakeStartedRuntime();
@@ -318,20 +435,26 @@ test("explicit public root install publishes selection only after successful off
     await writeFile(pemPath,publicRoot); await writeFile(proofPath,JSON.stringify(trustProof));
     for (const fail of [true,false]) {
       const runtime = ManagedCliRuntime.restore({owner,provider:"claude"}), commands:string[][]=[];
-      (runtime as any).command = async (args:string[]) => {
+      let initExists = false;
+      installLeaseFixture(runtime, async (args:string[]) => {
         commands.push(args);
         if (args[0] === "volume") return owner;
-        if (args[0] === "run" && fail) throw Error("fixture_delivery_failed");
+        if (args[0] === "create") { initExists = true; return id; }
+        if (args[0] === "inspect") return JSON.stringify(evidence({operation:runtime.operationIdentity().operation,status:"created"}));
+        if (args[0] === "start" && fail) throw Error("fixture_delivery_failed");
+        if (args[0] === "rm") { initExists = false; return ""; }
+        if (args.includes(`id=${id}`)) return initExists ? id : "";
         return "";
-      };
+      });
       if (fail) { await assert.rejects(() => runtime.installClaudeHostTrust({pemPath,proofPath}), /fixture_delivery_failed/); assert.equal(runtime.identity().trust,undefined); }
       else { await runtime.installClaudeHostTrust({pemPath,proofPath}); assert.deepEqual(runtime.identity().trust,selectedTrust()); }
-      const run = commands.find(args => args[0] === "run")!;
-      assert.equal(run[run.indexOf("--network")+1],"none");
-      assert.ok(run.includes(installManagedHostTrustScript));
-      assert.equal(run.filter(arg => arg.startsWith("type=volume,")).length,1);
-      assert.ok(run.includes(`type=volume,src=${runtime.toolsVolume},dst=/opt/cg,volume-nocopy`));
-      assert.ok(!run.some(arg => arg.includes(runtime.authVolume)));
+      const create = commands.find(args => args[0] === "create")!;
+      assert.equal(create[create.indexOf("--network")+1],"none");
+      assert.ok(create.includes(installManagedHostTrustScript));
+      assert.equal(create.filter(arg => arg.startsWith("type=volume,")).length,1);
+      assert.ok(create.includes(`type=volume,src=${runtime.toolsVolume},dst=/opt/cg,volume-nocopy`));
+      assert.ok(!create.some(arg => arg.includes(runtime.authVolume)));
+      assert.ok(commands.some(args => args[0] === "start" && args.includes("--attach") && args.at(-1) === id));
     }
   } finally { await rm(pemPath,{force:true}); await rm(proofPath,{force:true}); await rmdir(directory); }
 });

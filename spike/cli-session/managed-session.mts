@@ -31,7 +31,9 @@ export function parseManagedSessionArgs(args:string[]) {
 export async function managedSessionMain(args=process.argv.slice(2)) {
 const {command,provider,owner,hostTrust}=parseManagedSessionArgs(args);
 const directory=path.join(root,".local/managed-session"); await mkdir(directory,{recursive:true});
-let runtime: ManagedCliRuntime;
+let runtime!: ManagedCliRuntime;
+let operationFinalized=false;
+try {
 if(command === "prepare") {
   runtime=await ManagedCliRuntime.prepare(provider,{hostTrust});
   await writeFile(path.join(directory,`${runtime.owner}.json`),JSON.stringify({schema_version:"1.0",...runtime.identity(),created_at:new Date().toISOString(),credential_files_copied:false},null,2)+"\n");
@@ -43,6 +45,10 @@ runtime=ManagedCliRuntime.restore({owner:owner!,provider});
 const saved=JSON.parse(await readFile(path.join(directory,`${runtime.owner}.json`),"utf8")) as SessionIdentity;
 assert.ok(isRecord(saved),"managed_public_manifest_invalid");assert.equal(saved.owner,owner);assert.equal(saved.provider,provider);
 runtime=ManagedCliRuntime.restore({owner:owner!,provider,trust:saved.trust});
+await runtime.beginOperation();
+// The immutable trust selection was loaded before claiming the profile. Reject
+// a changed manifest rather than acting on a stale public trust selection.
+assert.deepEqual(JSON.parse(await readFile(path.join(directory,`${runtime.owner}.json`),"utf8")),saved,"managed_public_manifest_changed");
 if(command === "destroy") {await runtime.destroy();console.log("Owned CLI/auth/tools resources removed; native login unchanged.");return;}
 if(command === "install-trust") {await runtime.installTrustBundle();console.log("Public CA bundle installed from the pinned Node image. TLS verification remains enabled.");return;}
 if(command === "install-host-trust") {
@@ -75,11 +81,18 @@ finally{
   report.network=bridge?.stats;bridge?.close();
   try{await boundedSessionOperation(async signal=>runtime.stop(false,{signal}));report.cleanup_confirmed=true;}catch{report.cleanup_confirmed=false;process.exitCode=1;}
   if(bridge)try{assertBridgeHealthy(bridge.stats);}catch{report.failure??="managed_bridge_control_failed";report.success=false;process.exitCode=1;}
+  operationFinalized=true;
+  try{await boundedSessionOperation(signal=>runtime.finishOperation({signal}));}catch(error){report.cleanup_confirmed=false;report.failure??=failureCode(error);process.exitCode=1;}
   report.success=report.success===true&&report.cleanup_confirmed===true;
   process.off("SIGINT",cancel);process.off("SIGTERM",cancel);
   await writeFile(path.join(directory,`${owner}-${command}.report.json`),JSON.stringify(report,null,2)+"\n");
   console.log(JSON.stringify(report));
 }
 return report;
+}finally{
+  // Includes prepare/install early returns and failed manifest publication.
+  // stop above removes only the namespace; the command releases last.
+  if(runtime&&!operationFinalized)await boundedSessionOperation(async signal=>runtime!.finishOperation({signal}));
+}
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url))managedSessionMain().catch(error=>{console.error(failureCode(error));process.exitCode=1;});

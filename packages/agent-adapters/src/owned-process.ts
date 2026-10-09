@@ -98,9 +98,17 @@ export function runOwnedCommand(command: string, args: string[], options: Comman
     };
     child.stdout!.on("data", collect(stdout)); child.stderr!.on("data", collect(stderr));
     child.on("error", () => { finish(); reject(new CommandError("failed")); });
-    child.on("close", (code) => {
+    child.on("close", (code, signal) => {
       finish();
-      if (!reason) resolve({ code: code ?? 1, stdout: Buffer.concat(stdout).toString("utf8"), stderr: Buffer.concat(stderr).toString("utf8") });
+      if (reason) return;
+      // A missing exit code or signal is client interruption evidence, not a
+      // received nonzero command result. Lease arbitration must retain that
+      // uncertainty even if a foreign claim appears while this client exits.
+      if (code === null || signal !== null) {
+        reject(new CommandError("failed", Promise.resolve({ method: "none", status: "unconfirmed" })));
+        return;
+      }
+      resolve({ code, stdout: Buffer.concat(stdout).toString("utf8"), stderr: Buffer.concat(stderr).toString("utf8") });
     });
   });
 }

@@ -4,8 +4,9 @@ import { open, mkdir, writeFile, rename, unlink } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
+import assert from "node:assert/strict";
 import { ProviderFailure, assertBridgeHealthy, failureCode, isRecord } from "../../packages/agent-adapters/src/session-protocol.ts";
-import { claudeStatus, codexRpc, readCodexQuota } from "./managed-provider-session.mts";
+import { claudeStatus, codexRpc, readCodexQuota, boundedSessionOperation } from "./managed-provider-session.mts";
 
 import { sanitizeQuotaObservation } from "@commongrid/agent-adapters";
 
@@ -69,6 +70,7 @@ export async function runSessionAcceptance(options:AcceptanceOptions,environment
   };
   const report:Record<string,any>={schema_version:"1.0",phase:"F0",production_use:false,commercial_auth_accepted:false,auth_scope:"historical_local_lab_only",purpose:"controlled_real_subscription_session_continuity",provider:options.provider,owner:options.owner,checked_at:new Date(started).toISOString(),credential_files_copied:false,paid_api_fallback:false,execution_enabled:false,isolation_gate:"not_evaluated",real_model_inference_attempted:false,logout_attempted:false,success:false,cleanup_confirmed:false,resumed:!!previous,elapsed_since_first_authenticated_ms:previous?started-Date.parse(previous.first_authenticated_at):0,checkpoint_is_provider_renewal_proof:false,intervening_session_activity_unobserved:!!previous,actual_token_rotation_observed:false,real_provider_expiry_acceptance:"pending",claude_natural_expiry_evidence:options.provider==="claude"?"pending":"not_applicable",claude_force_refresh_supported:false,official_codex_refresh_requested:false,quota_snapshot:{state:"unknown",reason:options.provider==="claude"?"claude_structured_quota_not_verified":"not_requested",windows:[]},quota_exhaustion_verified:false,concurrent_account_usage_verified:false,deadline_ms:deadlineMs,cleanup_deadline_ms:cleanupDeadlineMs,stages:[]};
   let firstAuthenticated=previous?.first_authenticated_at,lastAuthenticated:string|undefined,namespaceAttempted=false;
+  report.checkpoint_is_full_operation_cleanup_proof=false;
   report.quota_observation_is_usage_permission=false;
   const pending=new Set<Promise<unknown>>();
   const bounded=async(operation:()=>Promise<unknown>,signal:AbortSignal)=>{
@@ -116,7 +118,9 @@ export async function runSessionAcceptance(options:AcceptanceOptions,environment
     clearTimeout(timer);options.signal?.removeEventListener("abort",externalAbort);
   }
   const checkpoint:SessionCheckpoint|undefined=report.success&&firstAuthenticated&&lastAuthenticated?{schema_version:"1.0",kind:"managed_session_continuity_checkpoint",provider:options.provider,owner:options.owner,first_authenticated_at:firstAuthenticated,last_authenticated_at:lastAuthenticated,successful_runs:(previous?.successful_runs??0)+1,renewal_observed:false,credential_files_copied:false,execution_enabled:false,isolation_gate:"not_evaluated"}:undefined;
-  return {report,checkpoint};
+  // Returning a bounded result does not mean an ignored cancellation settled.
+  // The upper command must retain ownership while any generic work is pending.
+  return {report,checkpoint,operationsQuiescent:pending.size===0};
 }
 
 async function readPublicJson(filename:string) {
@@ -129,16 +133,22 @@ export async function acceptanceMain(args=process.argv.slice(2)) {
   const directory=path.join(root,".local/managed-session"),checkpointPath=path.join(directory,`${options.owner}-acceptance.checkpoint.json`);
   const manifest=await readPublicJson(path.join(directory,`${options.owner}.json`));
   if(!isRecord(manifest)||manifest.owner!==options.owner||manifest.provider!==options.provider||manifest.credential_files_copied!==false)throw new Error("managed_public_manifest_invalid");
-  let checkpoint:unknown;
-  if(options.resume)checkpoint=await readPublicJson(checkpointPath);
-  else try{await readPublicJson(checkpointPath);throw new Error("managed_checkpoint_exists_use_resume");}catch(error:any){if(error.code!=="ENOENT")throw error;}
   // Runtime loading reads only pinned public manifests; no runtime/auth action
   // occurs when this module is imported by the deterministic fixture suite.
   const {ManagedCliRuntime,startBridge}=await import("./managed-runtime.mts");
   const runtime=ManagedCliRuntime.restore({owner:options.owner,provider:options.provider,trust:manifest.trust});
+  let operationsQuiescent=true;
+  let operationFinalized=false;
   let bridge:Awaited<ReturnType<typeof startBridge>>|undefined;
   const controller=new AbortController(),cancel=()=>controller.abort(new ProviderFailure("canceled"));process.on("SIGINT",cancel);process.on("SIGTERM",cancel);
   try {
+    await runtime.beginOperation({signal:controller.signal});
+    assert.deepEqual(await readPublicJson(path.join(directory,`${options.owner}.json`)),manifest,"managed_public_manifest_changed");
+    // Checkpoints are selected while this entire command owns the profile.
+    let checkpoint:unknown;
+    if(options.resume){const previous=validateSessionCheckpoint(await readPublicJson(checkpointPath),options,Date.now());if(previous.successful_runs===1_000_000)throw new Error("managed_checkpoint_run_limit");checkpoint=previous;}
+    else try{await readPublicJson(checkpointPath);throw new Error("managed_checkpoint_exists_use_resume");}catch(error:any){if(error.code!=="ENOENT")throw error;}
+    operationsQuiescent=false;
     const result=await runSessionAcceptance({...options,checkpoint,signal:controller.signal},{
       start:async signal=>{if(signal.aborted)throw signal.reason;await runtime.start({signal});if(signal.aborted)throw signal.reason;bridge=await startBridge(runtime);if(signal.aborted){bridge.close();throw signal.reason;}},
       stop:async signal=>{bridge?.close();await runtime.stop(false,{signal});},
@@ -147,6 +157,7 @@ export async function acceptanceMain(args=process.argv.slice(2)) {
       ...(options.provider==="codex"?{readQuota:(signal:AbortSignal)=>readCodexQuota(runtime,{signal})}:{}),
       assertHealthy:()=>{if(bridge)assertBridgeHealthy(bridge.stats);},
     });
+    operationsQuiescent=result.operationsQuiescent;
     await mkdir(directory,{recursive:true});
     const reportPath=path.join(directory,`${options.owner}-${randomUUID()}-acceptance.report.json`);
     if(result.checkpoint){
@@ -154,11 +165,23 @@ export async function acceptanceMain(args=process.argv.slice(2)) {
       try{await writeFile(temporary,JSON.stringify(result.checkpoint,null,2)+"\n",{flag:"wx"});await rename(temporary,checkpointPath);}
       finally{await unlink(temporary).catch(()=>{});}
     }
+    // A checkpoint records the authenticated stages and namespace cleanup. The
+    // final observational report also includes durable claim release failure.
+    if(operationsQuiescent){
+      operationFinalized=true;
+      try{await boundedSessionOperation(signal=>runtime.finishOperation({signal}));}
+      catch(error){result.report.cleanup_confirmed=false;result.report.success=false;result.report.failure??=failureCode(error);}
+    }
     await writeFile(reportPath,JSON.stringify(result.report,null,2)+"\n",{flag:"wx"});
     if(!result.report.success)process.exitCode=1;
     console.log(`Managed ${options.provider} session continuity: success=${result.report.success}, cleanup=${result.report.cleanup_confirmed}`);
     console.log(`Report: ${reportPath}`);if(result.checkpoint)console.log(`Checkpoint: ${checkpointPath}`);
     return {reportPath,checkpointPath,...result};
-  }finally{process.off("SIGINT",cancel);process.off("SIGTERM",cancel);}
+  }finally{
+    process.off("SIGINT",cancel);process.off("SIGTERM",cancel);bridge?.close();
+    // Keep the durable claim on uncertainty, even when the namespace currently
+    // looks absent. Late generic work could still create/mutate it.
+    if(operationsQuiescent&&!operationFinalized)await boundedSessionOperation(signal=>runtime.finishOperation({signal}));
+  }
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url))acceptanceMain().catch(error=>{console.error(failureCode(error));process.exitCode=1;});

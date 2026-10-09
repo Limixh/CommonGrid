@@ -16,17 +16,21 @@ for(const provider of ["claude","codex"] as const) {
   const saved=JSON.parse(await readFile(fileURLToPath(new URL(`../../.local/managed-session/${owner}.json`,import.meta.url)),"utf8"));
   assert.equal(saved.owner,owner);assert.equal(saved.provider,provider);
   const runtime=ManagedCliRuntime.restore({owner,provider,trust:saved.trust});
-  const task=await TaskToolsRuntime.create({image:taskImage,cpu:1,memoryMb:256},300_000);
+  let task:TaskToolsRuntime|undefined;
   let bridge:Awaited<ReturnType<typeof startBridge>>|undefined;
   const checks:string[]=[];report.providers[provider]={checks,status:"running"};
   const canary=`CG_PRIVATE_${randomUUID()}`;
   try {
+    await runtime.beginOperation();
+    assert.deepEqual(JSON.parse(await readFile(fileURLToPath(new URL(`../../.local/managed-session/${owner}.json`,import.meta.url)),"utf8")),saved,"managed_public_manifest_changed");
+    task=await TaskToolsRuntime.create({image:taskImage,cpu:1,memoryMb:256},300_000);
     const start=performance.now();await runtime.start();report.providers[provider].warm_cli_start_ms=Math.round(performance.now()-start);
     bridge=await startBridge(runtime,task);
-    const info=JSON.parse(await checked(["inspect",runtime.container]))[0];
-    assert.equal(info.HostConfig.NetworkMode,"none");assert.equal(info.HostConfig.ReadonlyRootfs,true);assert.equal(info.Config.User,"1000:1000");
-    assert.ok(info.Mounts.every((mount:any)=>mount.Type==="volume"));assert.equal(info.Mounts.find((mount:any)=>mount.Destination==="/opt/cg").RW,false);assert.equal(info.Mounts.find((mount:any)=>mount.Destination==="/home/node").Name,runtime.authVolume);checks.push("network_none_no_host_mounts_readonly_tools");
-    const competitor=ManagedCliRuntime.restore(runtime.identity());await assert.rejects(()=>competitor.start());await competitor.stop();
+    const format='{"network_mode":{{json .HostConfig.NetworkMode}},"readonly_rootfs":{{json .HostConfig.ReadonlyRootfs}},"user":{{json .Config.User}},"mounts":[{{range $i, $m := .Mounts}}{{if $i}},{{end}}{"type":{{json $m.Type}},"destination":{{json $m.Destination}},"rw":{{json $m.RW}},"name":{{json $m.Name}}}{{end}}]}';
+    const info=JSON.parse(await checked(["inspect","--format",format,runtime.container]));
+    assert.equal(info.network_mode,"none");assert.equal(info.readonly_rootfs,true);assert.equal(info.user,"1000:1000");
+    assert.ok(info.mounts.every((mount:any)=>mount.type==="volume"));assert.equal(info.mounts.find((mount:any)=>mount.destination==="/opt/cg").rw,false);assert.equal(info.mounts.find((mount:any)=>mount.destination==="/home/node").name,runtime.authVolume);checks.push("network_none_no_host_mounts_readonly_tools");
+    const competitor=ManagedCliRuntime.restore(runtime.identity());try{await assert.rejects(()=>competitor.start());}finally{await competitor.finishOperation();}
     assert.equal((await runtime.exec(["node","-e","console.log('incumbent_alive')"])).stdout.trim(),"incumbent_alive");checks.push("competing_profile_command_cannot_delete_incumbent");
     assert.equal((await runtime.exec(["node","-e",`require('node:fs').writeFileSync('/home/node/cg-private-canary',${JSON.stringify(canary)},{mode:0o600});`])).code,0);
     const isolation=await task.exec(["node","-e","const f=require('node:fs'),n=require('node:net');let denied=false;try{f.readFileSync('/home/node/cg-private-canary')}catch{denied=true}const env=JSON.stringify(process.env)+f.readFileSync('/proc/1/environ','utf8');const s=n.connect({host:'127.0.0.1',port:9877});s.on('connect',()=>{s.destroy();console.log(JSON.stringify({denied,env_absent:!env.includes('CG_TOOL_TOKEN'),proxy_unreachable:false}))});s.on('error',()=>console.log(JSON.stringify({denied,env_absent:!env.includes('CG_TOOL_TOKEN'),proxy_unreachable:true})));s.setTimeout(500,()=>s.destroy());"]);
@@ -45,7 +49,13 @@ for(const provider of ["claude","codex"] as const) {
     const restored=await runtime.exec(["node","-e",`const f=require('node:fs');console.log(f.readFileSync('/home/node/cg-private-canary','utf8')===${JSON.stringify(canary)});f.unlinkSync('/home/node/cg-private-canary');`]);assert.equal(restored.stdout.trim(),"true");checks.push("private_home_survives_cli_restart");
     report.providers[provider].status="passed";report.providers[provider].network=bridge.stats;console.log(`PASS ${provider}: ${checks.length} managed-runtime boundary checks`);
   }catch {report.providers[provider].status="failed";process.exitCode=1;console.log(`FAIL ${provider}: managed-runtime boundary after ${checks.length} checks`);}
-  finally{bridge?.close();try{await runtime.stop();await task.close();}catch{cleanup=false;process.exitCode=1;}}
+  finally{
+    bridge?.close();let taskCleanup=true;
+    try{await task?.close();}catch{taskCleanup=false;cleanup=false;process.exitCode=1;}
+    try{await runtime.stop();}catch{cleanup=false;process.exitCode=1;}
+    // Intermediate restart uses stop; only the upper command finishes.
+    if(taskCleanup)try{await runtime.finishOperation();}catch{cleanup=false;process.exitCode=1;}
+  }
 }
 report.cleanup_confirmed=cleanup;report.success=cleanup&&["claude","codex"].every(p=>report.providers[p].status==="passed");
 await writeFile(path.join(directory,"report.json"),JSON.stringify(report,null,2)+"\n");console.log(`Report: ${path.join(directory,"report.json")}`);

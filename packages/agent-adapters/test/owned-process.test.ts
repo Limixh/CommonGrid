@@ -6,6 +6,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
+import childProcess, { type ChildProcess } from "node:child_process";
+import { syncBuiltinESMExports } from "node:module";
 import { CommandError, runOwnedCommand } from "../src/owned-process.ts";
 
 async function processAlive(pid: number) {
@@ -77,4 +79,33 @@ test("trusted stdin delivery preserves bytes and output remains bounded", async 
   const result = await runOwnedCommand(process.execPath, ["-e", "const a=[];process.stdin.on('data',x=>a.push(x));process.stdin.on('end',()=>console.log(Buffer.concat(a).toString('hex')));"], { stdin: Readable.from([input]) });
   assert.equal(result.stdout.trim(), input.toString("hex"));
   await assert.rejects(runOwnedCommand(process.execPath, ["-e", "process.stdout.write('x'.repeat(100000));setInterval(()=>{},1000);"], { maxBytes: 1024 }), /docker_output_limit/);
+});
+
+test("unexpected signal on an actual owned child rejects instead of normalizing a completed nonzero exit", async () => {
+  const originalSpawn=childProcess.spawn;
+  let captured: ChildProcess | undefined;
+  // Capture only this launch's owned handle. ChildProcess.kill records the
+  // signal portably, including Windows; self-signals have native exit-code
+  // semantics there. Restore the binding before any asynchronous event runs.
+  childProcess.spawn=((...args: Parameters<typeof childProcess.spawn>) => {
+    const child=originalSpawn(...args); captured=child;
+    child.stdout!.once("data",() => child.kill("SIGKILL"));
+    return child;
+  }) as typeof childProcess.spawn;
+  syncBuiltinESMExports();
+  let running: ReturnType<typeof runOwnedCommand>;
+  try {
+    running=runOwnedCommand(process.execPath,["-e","process.stdout.write('ready');setInterval(()=>{},1000);"],{timeoutMs:5000});
+  } finally {
+    childProcess.spawn=originalSpawn; syncBuiltinESMExports();
+  }
+  let failure: CommandError | undefined;
+  await assert.rejects(running!,error => {
+    assert.ok(error instanceof CommandError); assert.equal(error.reason,"failed");
+    failure=error; return true;
+  });
+  assert.deepEqual(await failure!.cleanup,{method:"none",status:"unconfirmed"});
+  assert.ok(captured); assert.equal(captured.exitCode,null); assert.equal(captured.signalCode,"SIGKILL");
+  const completed=await runOwnedCommand(process.execPath,["-e","process.exit(7);"]);
+  assert.equal(completed.code,7,"an actual received nonzero exit remains a command result");
 });

@@ -74,9 +74,15 @@ for (const provider of providers) {
   } catch { evidence.status = "failed"; evidence.failed_stage = stage; process.exitCode = 1; console.log(`FAIL ${provider}: ${stage}`); }
   finally {
     bridge?.close();
+    let taskCleanup=true;
     // Only fresh owner-labeled objects created by this invocation are removed.
-    for (const task of tasks) { try { await task.close(); } catch { cleanup = false; process.exitCode = 1; } }
-    if (runtime) { try { await runtime.destroy(); for (const volume of [runtime.authVolume, runtime.toolsVolume]) assert.ok(!(await checked(["volume", "ls", "--format", "{{.Name}}"])).split(/\r?\n/).includes(volume)); } catch { cleanup = false; process.exitCode = 1; } }
+    for (const task of tasks) { try { await task.close(); } catch { taskCleanup=false;cleanup = false; process.exitCode = 1; } }
+    if (runtime) {
+      try {
+        if(taskCleanup){await runtime.destroy();for (const volume of [runtime.authVolume, runtime.toolsVolume]) assert.ok(!(await checked(["volume", "ls", "--format", "{{.Name}}"])).split(/\r?\n/).includes(volume));}
+        else await runtime.stop(); // Unconfirmed task work retains the durable claim.
+      } catch { cleanup = false; process.exitCode = 1; }
+    }
   }
 }
 report.cleanup_confirmed = cleanup; report.success = cleanup && providers.every(provider => report.providers[provider].status === "passed");

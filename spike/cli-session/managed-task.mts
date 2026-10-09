@@ -46,6 +46,11 @@ export function assertManagedCandidateAccepted(verifier:unknown) {
   if(!isRecord(verifier)||typeof verifier.passed!=="boolean")throw new ProviderFailure("protocol");
   if(!verifier.passed)throw new Error("managed_candidate_rejected");
 }
+export async function settleManagedTaskCallbacks(queue:Promise<void>,deadlineMs=30_000) {
+  let timer:ReturnType<typeof setTimeout>|undefined;
+  try{return await Promise.race([queue.then(()=>true,()=>false),new Promise<boolean>(resolve=>{timer=setTimeout(()=>resolve(false),deadlineMs);})]);}
+  finally{if(timer)clearTimeout(timer);}
+}
 export async function managedTaskMain(args=process.argv.slice(2)) {
 const [provider,owner]=args;assert.ok(provider === "claude" || provider === "codex");
 ManagedCliRuntime.restore({owner,provider}); // Validate UUID before constructing the metadata path.
@@ -64,7 +69,10 @@ const cancel=()=>{operation.cancel();rpc.fail(new ProviderFailure("canceled"));}
 const request=(method:string,params:unknown)=>rpc.request(method,params);
 let lines:ReturnType<typeof createInterface>|undefined;
 let input:BoundedJsonInput|undefined;
+let queue=Promise.resolve();
 try {
+  await runtime.beginOperation();
+  assert.deepEqual(JSON.parse(await readFile(path.join(root,".local/managed-session",`${owner}.json`),"utf8")),saved,"managed_public_manifest_changed");
   const catalog=provider === "codex"?await assertCodingProfileVerified():undefined;
   if(catalog){report.catalog_sha256=catalog.sha256;report.tool_profile="pinned_catalog_direct_no_multi_agent";}
   await runtime.start();
@@ -83,7 +91,7 @@ try {
   child=spawn("docker",["exec","-i",containerId,...args],{windowsHide:true,stdio:["pipe","pipe","pipe"]});
   child.stderr.on("data",()=>{});child.stdin.on("error",()=>rpc.fail(new ProviderFailure("process")));child.stdout.on("error",()=>rpc.fail(new ProviderFailure("process")));child.on("error",()=>rpc.fail(new ProviderFailure("process")));child.on("close",()=>{void queue.finally(()=>rpc.processExit());});
   const decoder=new BoundedJsonLines(4_194_304,1_048_576),callbacks=new TaskCallbackGuard();
-  let threadId:string|undefined,turnId:string|undefined,earlyTurn:unknown,turnRequested=false,queue=Promise.resolve();
+  let threadId:string|undefined,turnId:string|undefined,earlyTurn:unknown,turnRequested=false;
   const completeCodexTurn=(params:unknown)=>{
     if(isRecord(params)&&params.threadId===threadId&&isRecord(params.turn)&&params.turn.id===turnId)report.provider_completion=managedProviderCompletion("codex",params.turn);
     validateCodexTurn(params,threadId!,turnId!);rpc.finish();
@@ -153,13 +161,18 @@ finally {
   rpc.dispose();lines?.close();if(input){child?.stdout.unpipe(input);input.destroy();}child?.stdin.end();child?.kill();if(bridge)report.network=bridge.stats;bridge?.close();
   let taskCleanup=true,runtimeCleanup=true;
   try{if(task)await task.close();}catch{taskCleanup=false;}
+  // A queued tool callback must settle before ownership can be released.
+  const callbacksQuiescent=await settleManagedTaskCallbacks(queue);
+  if(!callbacksQuiescent){report.failure??="managed_task_callback_pending";process.exitCode=1;}
   try{await runtime.stop();}catch{runtimeCleanup=false;}
-  report.cleanup_confirmed=taskCleanup&&runtimeCleanup;if(!report.cleanup_confirmed)process.exitCode=1;
+  if(taskCleanup&&callbacksQuiescent)try{await runtime.finishOperation();}catch(error){runtimeCleanup=false;report.failure??=failureCode(error);}
+  report.cleanup_confirmed=taskCleanup&&callbacksQuiescent&&runtimeCleanup;if(!report.cleanup_confirmed)process.exitCode=1;
   if(bridge)try{assertBridgeHealthy(bridge.stats);}catch{report.failure??="managed_bridge_control_failed";report.success=false;process.exitCode=1;}
   try{operation.assertActive();}catch{report.failure="managed_provider_canceled";report.provider_error_category="canceled";report.success=false;process.exitCode=1;}
   report.success=report.success===true&&report.cleanup_confirmed;
   process.off("SIGINT",cancel);process.off("SIGTERM",cancel);
-  await writeFile(path.join(directory,"report.json"),JSON.stringify(report,null,2)+"\n");console.log(`Managed ${provider} coding: success=${report.success}, cleanup=${report.cleanup_confirmed}`);console.log(`Report: ${path.join(directory,"report.json")}`);
+  await writeFile(path.join(directory,"report.json"),JSON.stringify(report,null,2)+"\n");
+  console.log(`Managed ${provider} coding: success=${report.success}, cleanup=${report.cleanup_confirmed}`);console.log(`Report: ${path.join(directory,"report.json")}`);
 }
 return report;
 }

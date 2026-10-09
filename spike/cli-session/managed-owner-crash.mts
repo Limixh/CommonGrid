@@ -10,15 +10,15 @@ import { ManagedCliRuntime, checked, assertManagedContainerFence, removeManagedO
 import { failureCode } from "../../packages/agent-adapters/src/session-protocol.ts";
 
 type Provider = "claude" | "codex";
-interface Ready { kind: "ready"; provider: Provider; owner: string; operation: string; containerId: string }
+interface Ready { kind: "ready"; provider: Provider; owner: string; operation: string; lease_id: string; containerId: string }
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const pause = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 const evidenceFormat = '{"id":{{json .Id}},"owner":{{json (index .Config.Labels "io.commongrid.spike.owner")}},"operation":{{json (index .Config.Labels "io.commongrid.spike.operation")}},"running":{{json .State.Running}},"status":{{json .State.Status}}}';
 function readyMessage(value: unknown, provider: Provider, owner: string): Ready {
   assert.ok(value && typeof value === "object" && !Array.isArray(value), "managed_owner_crash_worker_protocol");
   const record = value as Record<string, unknown>;
-  assert.deepEqual(Object.keys(record).sort(), ["kind", "provider", "owner", "operation", "containerId"].sort(), "managed_owner_crash_worker_protocol");
-  assert.ok(record.kind === "ready" && record.provider === provider && record.owner === owner && typeof record.operation === "string" && uuid.test(record.operation) && typeof record.containerId === "string" && /^[a-f0-9]{64}$/.test(record.containerId), "managed_owner_crash_worker_protocol");
+  assert.deepEqual(Object.keys(record).sort(), ["kind", "provider", "owner", "operation", "lease_id", "containerId"].sort(), "managed_owner_crash_worker_protocol");
+  assert.ok(record.kind === "ready" && record.provider === provider && record.owner === owner && typeof record.operation === "string" && uuid.test(record.operation) && typeof record.lease_id === "string" && /^[a-f0-9]{64}$/.test(record.lease_id) && typeof record.containerId === "string" && /^[a-f0-9]{64}$/.test(record.containerId), "managed_owner_crash_worker_protocol");
   return record as unknown as Ready;
 }
 async function inspectOwned(receipt: Ready, requireStopped = false) {
@@ -34,20 +34,21 @@ async function ownedProbe(receipt: Ready, script: string) {
   assert.equal((await inspectOwned(receipt)).running, true, "managed_owner_crash_orphan_not_running");
   return checked(["exec", receipt.containerId, "node", "-e", script], 5000);
 }
-function workerReady(child: ChildProcess, provider: Provider, owner: string, onOwnership: () => void) {
+function workerReady(child: ChildProcess, provider: Provider, owner: string, onOwnership: (value:{operation:string;lease_id:string}) => void) {
   return new Promise<Ready>((resolve, reject) => {
-    let operation: string | undefined;
+    let operation: string | undefined, leaseId: string | undefined;
     const finish = () => { clearTimeout(timer); child.off("message", message); child.off("exit", exit); child.off("error", error); };
     const message = (value: unknown) => {
       try {
         if (value && typeof value === "object" && !Array.isArray(value) && (value as Record<string, unknown>).kind === "ownership") {
           const record = value as Record<string, unknown>;
-          assert.deepEqual(Object.keys(record).sort(), ["kind", "provider", "owner", "operation"].sort());
-          assert.ok(!operation && record.provider === provider && record.owner === owner && typeof record.operation === "string" && uuid.test(record.operation));
-          operation = record.operation; onOwnership(); return;
+          assert.deepEqual(Object.keys(record).sort(), ["kind", "provider", "owner", "operation", "lease_id"].sort());
+          assert.ok(!operation && record.provider === provider && record.owner === owner && typeof record.operation === "string" && uuid.test(record.operation) && typeof record.lease_id === "string" && /^[a-f0-9]{64}$/.test(record.lease_id));
+          operation = record.operation; leaseId = record.lease_id; onOwnership({operation,lease_id:leaseId}); return;
         }
         const receipt = readyMessage(value, provider, owner);
         assert.equal(receipt.operation, operation);
+        assert.equal(receipt.lease_id, leaseId);
         finish(); resolve(receipt);
       } catch { finish(); reject(new Error("managed_owner_crash_worker_protocol")); }
     };
@@ -56,6 +57,19 @@ function workerReady(child: ChildProcess, provider: Provider, owner: string, onO
     const timer = setTimeout(() => { finish(); reject(new Error("managed_owner_crash_worker_ready_deadline")); }, 45_000);
     child.on("message", message); child.once("exit", exit); child.once("error", error);
   });
+}
+async function separateProcessRefusal(provider: Provider, owner: string) {
+  const child = spawn(process.execPath, ["--import", "tsx", fileURLToPath(new URL("managed-owner-crash-worker.mts", import.meta.url)), provider, owner, "contender"], { windowsHide: true, stdio: ["ignore", "ignore", "ignore", "ipc"] });
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const finish = () => { clearTimeout(timer); child.off("message", message); child.off("exit", exit); child.off("error", error); };
+      const message = (value: unknown) => { finish(); try { assert.deepEqual(value, { kind: "refused", code: "managed_profile_busy" }); resolve(); } catch { reject(new Error("managed_owner_crash_contender_not_refused")); } };
+      const exit = () => { finish(); reject(new Error("managed_owner_crash_contender_early_exit")); };
+      const error = () => { finish(); reject(new Error("managed_owner_crash_contender_start_failed")); };
+      const timer = setTimeout(() => { finish(); reject(new Error("managed_owner_crash_contender_deadline")); }, 30_000);
+      child.on("message", message); child.once("exit", exit); child.once("error", error);
+    });
+  } finally { await forceWorkerExit(child); }
 }
 async function forceWorkerExit(child: ChildProcess) {
   if (child.exitCode !== null || child.signalCode !== null) return;
@@ -73,20 +87,26 @@ export async function managedOwnerCrashMain(args = process.argv.slice(2)) {
   const providers = args.length ? [...new Set(args)] as Provider[] : ["claude", "codex"] as Provider[];
   const directory = fileURLToPath(new URL(`../../.local/managed-owner-crash/${randomUUID()}/`, import.meta.url));
   await mkdir(directory, { recursive: true });
-  const report: Record<string, any> = { checked_at: new Date().toISOString(), purpose: "synthetic_host_owner_crash_explicit_recovery", synthetic_profiles_only: true, existing_private_profiles_accessed: false, real_account_tested: false, real_model_inference: false, credential_files_copied: false, execution_enabled: false, isolation_gate: "not_evaluated", automatic_crash_recovery_accepted: false, production_profile_lock_accepted: false, providers: {}, cleanup_confirmed: false, scope_limits: ["forced death of a dedicated synthetic Node owner after successful start only", "explicit immutable-ID stop and stopped-operation reconciliation; no automatic live takeover", "no persistent operation journal, production profile lock, host/daemon crash, or lost-create-ID acceptance", "pinned Docker Linux runtime on the current host only"] };
+  const report: Record<string, any> = { checked_at: new Date().toISOString(), purpose: "synthetic_host_owner_crash_durable_claim_explicit_recovery", synthetic_profiles_only: true, existing_private_profiles_accessed: false, real_account_tested: false, real_model_inference: false, credential_files_copied: false, execution_enabled: false, isolation_gate: "not_evaluated", durable_f0_profile_claim_accepted: false, automatic_crash_recovery_accepted: false, production_profile_lock_accepted: false, providers: {}, cleanup_confirmed: false, scope_limits: ["forced death of a dedicated synthetic Node owner after successful start only", "explicit immutable-ID stop and stopped-operation reconciliation with manual owner-quiescence acknowledgment; no automatic live takeover", "daemon-local F0 ownership claim is not a production lifecycle-phase journal; host/daemon crash and real lost-create-ID acceptance remain pending", "pinned Docker Linux runtime on the current host only"] };
   let cleanup = true;
   for (const provider of providers) {
     const checks: string[] = [], evidence: Record<string, any> = { status: "running", checks };
     report.providers[provider] = evidence;
-    let prepared: ManagedCliRuntime | undefined, child: ChildProcess | undefined;
+    let prepared: ManagedCliRuntime | undefined, child: ChildProcess | undefined, currentRuntime: ManagedCliRuntime | undefined, receipt: Ready | undefined;
     let validatedReady = false;
     let stage = "fresh_synthetic_prepare";
     try {
       prepared = await ManagedCliRuntime.prepare(provider);
+      evidence.synthetic_owner = prepared.owner;
+      await prepared.finishOperation();
       stage = "dedicated_owner_ready";
       child = spawn(process.execPath, ["--import", "tsx", fileURLToPath(new URL("managed-owner-crash-worker.mts", import.meta.url)), provider, prepared.owner], { windowsHide: true, stdio: ["ignore", "ignore", "ignore", "ipc"] });
-      const receipt = await workerReady(child, provider, prepared.owner, () => { evidence.ownership_receipt_before_start = true; });
+      receipt = await workerReady(child, provider, prepared.owner, claim => { evidence.ownership_receipt_before_start = true; evidence.synthetic_operation = claim.operation; evidence.synthetic_lease_id = claim.lease_id; });
       validatedReady = true;
+      stage = "separate_process_claim_exclusion";
+      const processClaims = await Promise.allSettled([separateProcessRefusal(provider, prepared.owner), separateProcessRefusal(provider, prepared.owner)]);
+      assert.ok(processClaims.every(result => result.status === "fulfilled"), "managed_owner_crash_process_claim_exclusion_failed");
+      checks.push("two_separate_host_process_claims_refused_by_durable_profile_ownership");
       const heartbeatScript = "console.log(require('node:fs').readFileSync('/home/node/cg-owner-crash-heartbeat','utf8'))";
       const before = Number(await ownedProbe(receipt, heartbeatScript));
       assert.ok(Number.isSafeInteger(before) && before > 0, "managed_owner_crash_heartbeat_invalid");
@@ -100,7 +120,10 @@ export async function managedOwnerCrashMain(args = process.argv.slice(2)) {
       stage = "live_orphan_refuses_takeover";
       const recovery = ManagedCliRuntime.restore(prepared.identity());
       await assert.rejects(() => recovery.start(), /managed_profile_busy/);
-      await assert.rejects(() => recovery.recoverStopped(receipt.operation), /managed_recovery_requires_stopped/);
+      const recoveryReceipt = { operation: receipt.operation, lease_id: receipt.lease_id, owner_quiesced: true as const };
+      await assert.rejects(() => recovery.recoverStopped(recoveryReceipt), /managed_recovery_requires_stopped/);
+      await assert.rejects(() => recovery.installTrustBundle(), /managed_profile_busy/);
+      await assert.rejects(() => recovery.destroy(), /managed_profile_busy/);
       await recovery.stop();
       assert.equal((await inspectOwned(receipt)).running, true);
       checks.push("new_operation_start_recovery_and_cleanup_preserve_live_orphan");
@@ -118,10 +141,14 @@ export async function managedOwnerCrashMain(args = process.argv.slice(2)) {
       assert.equal(await ownedProbe(receipt, "const f=require('node:fs');console.log(Date.now()<Number(f.readFileSync('/home/node/cg-owner-crash-child-armed','utf8'))+12000&&!f.existsSync('/home/node/cg-owner-crash-late-write'))"), "true");
       await checked(["stop", "--time", "1", receipt.containerId], 10_000);
       await inspectOwned(receipt, true);
-      await assert.rejects(() => recovery.recoverStopped(randomUUID()), /managed_operation_mismatch/);
+      await assert.rejects(() => recovery.recoverStopped({ ...recoveryReceipt, operation: randomUUID() }));
+      await assert.rejects(() => recovery.recoverStopped({ ...recoveryReceipt, lease_id: "f".repeat(64) }));
       assert.equal(await absent(receipt.containerId), false);
-      assert.deepEqual(await recovery.recoverStopped(receipt.operation), { recovered_containers: 1, private_volumes_retained: true });
+      const recovered = await recovery.recoverStopped(recoveryReceipt);
+      assert.equal(recovered.recovered_containers, 1); assert.equal(recovered.private_volumes_retained, true);
       assert.equal(await absent(receipt.containerId), true);
+      assert.equal(await absent(receipt.lease_id), true); currentRuntime = recovery;
+      await recovery.beginOperation();
       await recovery.verify("volume", recovery.authVolume); await recovery.verify("volume", recovery.toolsVolume);
       checks.push("wrong_operation_refused_and_exact_stopped_operation_removed_with_volumes_retained");
       stage = "synthetic_state_retained_and_successor_fenced";
@@ -129,12 +156,17 @@ export async function managedOwnerCrashMain(args = process.argv.slice(2)) {
       const canaryScript = "console.log(require('node:fs').readFileSync('/home/node/cg-owner-crash-canary','utf8')==='CG_OWNER_CRASH_SYNTHETIC')";
       assert.equal((await recovery.exec(["node", "-e", canaryScript])).stdout.trim(), "true");
       await recovery.stop();
-      const successor = ManagedCliRuntime.restore(prepared.identity()); await successor.start();
+      const heldLease = recovery.leaseIdentity(); assert.ok(heldLease);
+      await assert.rejects(() => ManagedCliRuntime.restore(prepared!.identity()).start(), /managed_profile_busy/);
+      await recovery.finishOperation();
+      const successor = ManagedCliRuntime.restore(prepared.identity()); currentRuntime = successor; await successor.start();
       const successorId = await successor.verifyOperation();
-      await recovery.stop(); await assert.rejects(() => recovery.exec(["/bin/true"]), /managed_operation_mismatch/);
-      await assert.rejects(() => recovery.recoverStopped(receipt.operation), /managed_operation_mismatch/);
+      await recovery.stop(); await assert.rejects(() => recovery.exec(["/bin/true"]));
+      await recovery.finishOperation();
+      await assert.rejects(() => recovery.recoverStopped(recoveryReceipt));
       await removeManagedOperationContainer(receipt.containerId, receipt.owner, receipt.operation);
       assert.equal(await successor.verifyOperation(), successorId);
+      assert.ok(successor.leaseIdentity(), "managed_owner_crash_successor_lease_missing");
       assert.equal((await successor.exec(["node", "-e", canaryScript])).stdout.trim(), "true");
       checks.push("synthetic_private_state_retained_and_stale_cleanup_preserves_successor");
       stage = "removed_descendant_cannot_write_later";
@@ -158,8 +190,16 @@ export async function managedOwnerCrashMain(args = process.argv.slice(2)) {
       // than race an unresolved creator against volume destruction.
       if (prepared && workerExited) {
         try {
-          await prepared.destroy();
+          if (!currentRuntime && receipt && !await absent(receipt.lease_id)) {
+            const old = await inspectOwned(receipt);
+            if (old.running) await checked(["stop", "--time", "1", receipt.containerId], 10_000);
+            currentRuntime = ManagedCliRuntime.restore(prepared.identity());
+            await currentRuntime.recoverStopped({ operation: receipt.operation, lease_id: receipt.lease_id, owner_quiesced: true });
+          }
+          await currentRuntime?.finishOperation();
+          await ManagedCliRuntime.restore(prepared.identity()).destroy();
           for (const name of [prepared.container, `cg-managed-init-${prepared.owner}`]) assert.equal(await checked(["container", "ls", "--all", "--filter", `name=^/${name}$`, "--format", "{{.Names}}"], 5000), "");
+          assert.equal(await checked(["container", "ls", "--all", "--filter", `name=^/cg-managed-lease-${prepared.owner}$`, "--format", "{{.Names}}"],5000),"");
           for (const volume of [prepared.authVolume, prepared.toolsVolume]) assert.ok(!(await checked(["volume", "ls", "--filter", `name=${volume}`, "--format", "{{.Name}}"], 5000)).split(/\r?\n/).includes(volume));
         } catch { cleanup = false; process.exitCode = 1; }
       }
@@ -167,6 +207,7 @@ export async function managedOwnerCrashMain(args = process.argv.slice(2)) {
   }
   report.cleanup_confirmed = cleanup;
   report.success = cleanup && providers.every(provider => report.providers[provider].status === "passed");
+  report.durable_f0_profile_claim_accepted = report.success;
   await writeFile(path.join(directory, "report.json"), JSON.stringify(report, null, 2) + "\n");
   console.log(`Report: ${path.join(directory, "report.json")}`);
   return report;

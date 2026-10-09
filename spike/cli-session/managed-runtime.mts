@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { dockerCommand, DockerCommandError, TaskToolsRuntime } from "../../packages/agent-adapters/src/task-runtime.ts";
+import { DockerOperationLease, type OperationLeaseIdentity } from "../../packages/agent-adapters/src/operation-lease.ts";
 import { executeTaskTool } from "../../packages/agent-adapters/src/task-tool.ts";
 import { type SubscriptionProvider } from "../../packages/agent-adapters/src/egress-policy.ts";
 import { attachManagedControl } from "./managed-control.mts";
@@ -24,6 +25,7 @@ const operationLabelKey = "io.commongrid.spike.operation";
 const uuidV4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 export interface ManagedContainerEvidence { id: string; owner: string; operation: string; running: boolean; status: string }
 export interface ManagedOperationOptions { signal?: AbortSignal }
+export interface ManagedRecoveryReceipt { operation: string; lease_id: string; owner_quiesced: true }
 function assertActiveSignal(signal?: AbortSignal) { if (signal?.aborted) throw new DockerCommandError("cancelled"); }
 // Explicitly inspect only ownership/state. Never load or retain Config.Env,
 // process command lines, credential files or Docker's full inspect object.
@@ -66,7 +68,7 @@ export async function checked(args: string[], timeoutMs = 30_000, options: Manag
   assertActiveSignal(options.signal);
   const result = await dockerCommand(args,{...options,timeoutMs});
   assertActiveSignal(options.signal);
-  if (result.code !== 0) throw new Error("managed_docker_failed");
+  if (result.code !== 0) throw new Error("docker_failed");
   return result.stdout.trim();
 }
 async function digest(source: string) {
@@ -82,6 +84,14 @@ export class ManagedCliRuntime {
   readonly authVolume: string;
   private readonly initContainer: string;
   private readonly operation = randomUUID();
+  private readonly lease: DockerOperationLease;
+  private mutating = false;
+  private retainedOperations = 0;
+  private readonly uncertainVolumeRemovals = new Set<string>();
+  private finished = false;
+  private readonly uncertainNamespaces = new Set<string>();
+  private readonly ownedNamespaceIds = new Set<string>();
+  private readonly uncertainVolumes = new Set<string>();
   private profileTrust?: Readonly<ManagedProfileTrust>;
   private starting = false;
   // A canceled create client can lose its ID while the daemon is still working.
@@ -95,17 +105,52 @@ export class ManagedCliRuntime {
     this.initContainer = `cg-managed-init-${this.owner}`;
     this.toolsVolume = `cg-managed-tools-${this.owner}`;
     this.authVolume = `cg-managed-auth-${this.owner}`;
+    this.lease = new DockerOperationLease({owner:this.owner,provider:this.provider,operation:this.operation},base.image,(args,options) => this.command(args,options));
   }
   static restore(identity: SessionIdentity) { return new ManagedCliRuntime(identity); }
   identity(): SessionIdentity { return {owner:this.owner,provider:this.provider,...(this.profileTrust ? {trust:{...this.profileTrust}} : {})}; }
   operationIdentity() { return { ...this.identity(), operation: this.operation }; }
+  leaseIdentity(): OperationLeaseIdentity | undefined { return this.lease.snapshot(); }
+  private async mutation<T>(work: () => Promise<T>, requireQuiescence = false) {
+    assert.ok(!this.mutating && (!requireQuiescence || this.retainedOperations === 0), "managed_operation_pending");
+    this.mutating=true;
+    try { return await work(); } finally { this.mutating=false; }
+  }
+  private async beginInternal(options: ManagedOperationOptions = {}) {
+    assert.ok(!this.finished,"managed_operation_finished");
+    try { await this.lease.acquire(options); }
+    catch(error) { if(error instanceof Error && error.message === "operation_lease_profile_busy") throw new Error("managed_profile_busy"); throw error; }
+  }
+  async beginOperation(options: ManagedOperationOptions = {}) {
+    if(this.leaseIdentity()) { assert.ok(!this.finished,"managed_operation_finished"); await this.lease.verify(options); return; }
+    return this.mutation(() => this.beginInternal(options));
+  }
+  async finishOperation(options: ManagedOperationOptions = {}) {
+    return this.mutation(async () => {
+      assertActiveSignal(options.signal);
+      if(!this.leaseIdentity()) { assert.ok(!this.lease.isUncertain(),"managed_cleanup_unconfirmed"); return; }
+      if(await this.lease.exists(options)) await this.stopInternal(options);
+      else await this.confirmCapturedNamespacesAbsent(options);
+      assert.ok(!this.uncertainCreate && this.uncertainNamespaces.size === 0 && this.uncertainVolumes.size === 0 && this.uncertainVolumeRemovals.size === 0,"managed_cleanup_unconfirmed");
+      await this.lease.release(options); this.finished=true;
+    },true);
+  }
+  async retainOperation(options: ManagedOperationOptions = {}) {
+    assert.ok(!this.finished && !this.mutating,"managed_operation_pending"); this.retainedOperations++;
+    try { await this.lease.verify(options); } catch(error) { this.retainedOperations--; throw error; }
+    let released=false; return () => { if(!released) { released=true; this.retainedOperations--; } };
+  }
+  private async ownedCommand(args: string[], options: ManagedOperationOptions = {}) {
+    await this.lease.verify(options); return this.command(args,options);
+  }
   private command(args: string[], options: ManagedOperationOptions = {}) { return checked(args, 30_000, options); }
   private async containerEvidence(name: string, options: ManagedOperationOptions = {}) {
-    const evidence: unknown = JSON.parse(await this.command(["inspect", "--format", evidenceFormat, name], options));
+    const evidence: unknown = JSON.parse(await this.ownedCommand(["inspect", "--format", evidenceFormat, name], options));
     assertManagedContainerFence(evidence, this.owner);
     return evidence;
   }
   async verifyOperation(options: ManagedOperationOptions = {}) {
+    await this.lease.verify(options);
     const evidence = await this.containerEvidence(this.container, options);
     assertManagedContainerFence(evidence, this.owner, this.operation);
     assert.equal(evidence.running, true, "managed_operation_not_running");
@@ -113,9 +158,9 @@ export class ManagedCliRuntime {
   }
   async verify(kind: "container" | "volume", name: string, options: ManagedOperationOptions = {}) {
     const field = kind === "container" ? ".Config.Labels" : ".Labels";
-    assert.equal(await this.command([kind === "container" ? "inspect" : "volume", ...(kind === "container" ? [] : ["inspect"]),"--format",`{{index ${field} "${labelKey}"}}`,name], options),this.owner,"managed_owner_mismatch");
+    assert.equal(await this.ownedCommand([kind === "container" ? "inspect" : "volume", ...(kind === "container" ? [] : ["inspect"]),"--format",`{{index ${field} "${labelKey}"}}`,name], options),this.owner,"managed_owner_mismatch");
   }
-  static async prepare(provider: SubscriptionProvider, options: {hostTrust?: ManagedHostTrustOptions} = {}) {
+  static async prepare(provider: SubscriptionProvider, options: {hostTrust?: ManagedHostTrustOptions; signal?: AbortSignal} = {}) {
     const runtime = new ManagedCliRuntime({owner:randomUUID(),provider});
     if (options.hostTrust !== undefined) assert.equal(provider, "claude", "managed_profile_trust_provider_invalid");
     const extra = options.hostTrust !== undefined ? await readManagedHostTrust(options.hostTrust, runtime.owner) : undefined;
@@ -126,68 +171,108 @@ export class ManagedCliRuntime {
     assert.equal(proof.claude_manifest_signature_verified,true);
     assert.equal(proof.codex_binary_sha256,pins.codex.binary_sha256);
     try {
-      for (const volume of [runtime.toolsVolume,runtime.authVolume]) await checked(["volume","create","--label",`${labelKey}=${runtime.owner}`,volume]);
-      const initId = await checked(["create","--name",runtime.initContainer,"--label",`${labelKey}=${runtime.owner}`,"--label",`io.commongrid.spike.operation=${runtime.operation}`,"--network","none","--read-only","--user","0:0","--cap-drop","ALL","--cap-add","CHOWN","--security-opt","no-new-privileges","--memory","512m","--memory-swap","512m","--pids-limit","32",
-        "--mount",`type=volume,src=${runtime.toolsVolume},dst=/opt/cg,volume-nocopy`,"--mount",`type=volume,src=${runtime.authVolume},dst=/home/node,volume-nocopy`,base.image,"node","-e","setTimeout(()=>process.exit(0),600000)"]);
+      await runtime.beginOperation(options);
+      for(const volume of [runtime.toolsVolume,runtime.authVolume]) {
+        runtime.uncertainVolumes.add(volume);
+        await runtime.ownedCommand(["volume","create","--label",`${labelKey}=${runtime.owner}`,volume],options);
+        await runtime.verify("volume",volume,options); runtime.uncertainVolumes.delete(volume);
+      }
+      runtime.uncertainNamespaces.add(runtime.initContainer);
+      const initId = await runtime.ownedCommand(["create","--name",runtime.initContainer,"--label",`${labelKey}=${runtime.owner}`,"--label",`io.commongrid.spike.operation=${runtime.operation}`,"--network","none","--read-only","--user","0:0","--cap-drop","ALL","--cap-add","CHOWN","--security-opt","no-new-privileges","--memory","512m","--memory-swap","512m","--pids-limit","32",
+        "--mount",`type=volume,src=${runtime.toolsVolume},dst=/opt/cg,volume-nocopy`,"--mount",`type=volume,src=${runtime.authVolume},dst=/home/node,volume-nocopy`,base.image,"node","-e","setTimeout(()=>process.exit(0),600000)"],options);
       assert.match(initId, /^[a-f0-9]{64}$/, "managed_container_id_invalid");
-      const initEvidence = await runtime.containerEvidence(initId);
+      runtime.ownedNamespaceIds.add(initId);
+      const initEvidence = await runtime.containerEvidence(initId,options);
       assertManagedContainerFence(initEvidence, runtime.owner, runtime.operation);
       assert.equal(initEvidence.id, initId, "managed_container_id_mismatch");
-      await checked(["start",initId]);
+      runtime.uncertainNamespaces.delete(runtime.initContainer);
+      await runtime.ownedCommand(["start",initId],options);
       for (const [from,to] of [[source,`/opt/cg/${provider}`],...["runtime-bridge.mjs","tunnel-wire.mjs","mcp.mjs","task-broker.mjs"].map(file => [fileURLToPath(new URL(file,import.meta.url)),`/opt/cg/${file}`])]) {
-        const result = await dockerCommand(["exec","-i",initId,"node","-e","const fs=require('node:fs');const o=fs.createWriteStream(process.argv[1],{flags:'wx',mode:0o555});o.on('error',()=>process.exit(1));process.stdin.pipe(o)",to],{timeoutMs:180_000,stdin:createReadStream(from)});
+        await runtime.lease.verify(options);
+        const result = await dockerCommand(["exec","-i",initId,"node","-e","const fs=require('node:fs');const o=fs.createWriteStream(process.argv[1],{flags:'wx',mode:0o555});o.on('error',()=>process.exit(1));process.stdin.pipe(o)",to],{signal:options.signal,timeoutMs:180_000,stdin:createReadStream(from)});
         assert.equal(result.code,0,"managed_public_delivery_failed");
       }
-      await checked(["exec",initId,"node","-e","require('node:fs').writeFileSync('/opt/cg/ca.pem',require('node:tls').rootCertificates.join('\\n')+'\\n',{flag:'wx',mode:0o444});"]);
+      await runtime.ownedCommand(["exec",initId,"node","-e","require('node:fs').writeFileSync('/opt/cg/ca.pem',require('node:tls').rootCertificates.join('\\n')+'\\n',{flag:'wx',mode:0o444});"],options);
       // Only an explicit selection installs an extra public root. The default
       // profile uses the pinned image's bundled roots on every machine.
-      if (extra) await checked(["exec",initId,"node","-e",installManagedHostTrustScript,"--",extra.pem,JSON.stringify(extra.trust)]);
-      await checked(["exec",initId,"/bin/chmod","0700","/home/node"]);
-      await checked(["exec",initId,"/bin/chown","1000:1000","/home/node"]);
-      await checked(["exec",initId,"/bin/chmod","0555","/opt/cg"]);
-      await runtime.stopOperationContainer(initId);
+      if (extra) await runtime.ownedCommand(["exec",initId,"node","-e",installManagedHostTrustScript,"--",extra.pem,JSON.stringify(extra.trust)],options);
+      await runtime.ownedCommand(["exec",initId,"/bin/chmod","0700","/home/node"],options);
+      await runtime.ownedCommand(["exec",initId,"/bin/chown","1000:1000","/home/node"],options);
+      await runtime.ownedCommand(["exec",initId,"/bin/chmod","0555","/opt/cg"],options);
+      await runtime.stopOperationContainer(initId,options);
       return runtime;
     } catch (error) {
-      try { await runtime.destroy(); }
+      try { await runtime.destroy({signal:AbortSignal.timeout(30_000)}); }
       catch (cleanupError) { throw new AggregateError([error, cleanupError], "managed_prepare_cleanup_unconfirmed"); }
       throw error;
     }
   }
-  async installTrustBundle() {
+  async installTrustBundle(options: ManagedOperationOptions = {}) { return this.mutation(() => this.installTrustBundleInternal(options),true); }
+  private async installTrustBundleInternal(options: ManagedOperationOptions) {
+    await this.beginInternal(options);
     // Repair an already prepared F0 cache from the same pinned image. Never
     // mount auth, use host trust files, disable TLS or update an active profile.
-    assert.equal(await checked(["container","ls","--all","--filter",`name=^/${this.container}$`,"--format","{{.Names}}"]),"","managed_profile_busy");
-    await this.verify("volume",this.toolsVolume);
+    assert.equal(await this.ownedCommand(["container","ls","--all","--filter",`name=^/${this.container}$`,"--format","{{.Names}}"],options),"","managed_profile_busy");
+    await this.verify("volume",this.toolsVolume,options);
     const script="const f=require('node:fs'),bundle=require('node:tls').rootCertificates.join('\\n')+'\\n';if(f.existsSync('/opt/cg/ca.pem')){if(f.readFileSync('/opt/cg/ca.pem','utf8')!==bundle)throw Error('invalid_bundle');}else{f.chmodSync('/opt/cg',0o755);try{f.writeFileSync('/opt/cg/ca.pem',bundle,{flag:'wx',mode:0o444});}finally{f.chmodSync('/opt/cg',0o555);}}";
-    try {await checked(["run","--name",this.initContainer,"--label",`${labelKey}=${this.owner}`,"--label",`io.commongrid.spike.operation=${this.operation}`,"--network","none","--read-only","--user","0:0","--cap-drop","ALL","--security-opt","no-new-privileges","--memory","128m","--pids-limit","16","--mount",`type=volume,src=${this.toolsVolume},dst=/opt/cg,volume-nocopy`,base.image,"node","-e",script]);}finally{await this.stop();}
+    await this.installContainer(["create","--name",this.initContainer,"--label",`${labelKey}=${this.owner}`,"--label",`io.commongrid.spike.operation=${this.operation}`,"--network","none","--read-only","--user","0:0","--cap-drop","ALL","--security-opt","no-new-privileges","--memory","128m","--pids-limit","16","--mount",`type=volume,src=${this.toolsVolume},dst=/opt/cg,volume-nocopy`,base.image,"node","-e",script],undefined,options);
   }
-  async installClaudeHostTrust(options: ManagedHostTrustOptions) {
+  async installClaudeHostTrust(options: ManagedHostTrustOptions, operationOptions: ManagedOperationOptions = {}) { return this.mutation(() => this.installClaudeHostTrustInternal(options,operationOptions),true); }
+  private async installClaudeHostTrustInternal(options: ManagedHostTrustOptions, operationOptions: ManagedOperationOptions) {
     assert.equal(this.provider,"claude");const extra=await readManagedHostTrust(options,this.owner);
     if (this.profileTrust) assert.deepEqual(extra.trust,this.profileTrust,"managed_profile_trust_mismatch");
-    assert.equal(await this.command(["container","ls","--all","--filter",`name=^/${this.container}$`,"--format","{{.Names}}"]),"","managed_profile_busy");await this.verify("volume",this.toolsVolume);
-    try{await this.command(["run","--name",this.initContainer,"--label",`${labelKey}=${this.owner}`,"--label",`io.commongrid.spike.operation=${this.operation}`,"--network","none","--read-only","--user","0:0","--cap-drop","ALL","--security-opt","no-new-privileges","--memory","128m","--pids-limit","16","--mount",`type=volume,src=${this.toolsVolume},dst=/opt/cg,volume-nocopy`,base.image,"node","-e",installManagedHostTrustScript,"--",extra.pem,JSON.stringify(extra.trust)]);}finally{await this.stop();}
+    await this.beginInternal(operationOptions);
+    assert.equal(await this.ownedCommand(["container","ls","--all","--filter",`name=^/${this.container}$`,"--format","{{.Names}}"],operationOptions),"","managed_profile_busy");await this.verify("volume",this.toolsVolume,operationOptions);
+    await this.installContainer(["create","--name",this.initContainer,"--label",`${labelKey}=${this.owner}`,"--label",`io.commongrid.spike.operation=${this.operation}`,"--network","none","--read-only","--user","0:0","--cap-drop","ALL","--security-opt","no-new-privileges","--memory","128m","--pids-limit","16","--mount",`type=volume,src=${this.toolsVolume},dst=/opt/cg,volume-nocopy`,base.image,"node","-e",installManagedHostTrustScript,"--",extra.pem,JSON.stringify(extra.trust)],undefined,operationOptions);
     this.profileTrust = Object.freeze({...extra.trust});
   }
-  async installCodexCodingProfile() {
-    assert.equal(this.provider,"codex");const catalog=await assertCodingProfileVerified();
-    assert.equal(await checked(["container","ls","--all","--filter",`name=^/${this.container}$`,"--format","{{.Names}}"]),"","managed_profile_busy");await this.verify("volume",this.toolsVolume);
+  async installCodexCodingProfile(options: ManagedOperationOptions = {}) { return this.mutation(() => this.installCodexCodingProfileInternal(options),true); }
+  private async installCodexCodingProfileInternal(options: ManagedOperationOptions) {
+    assert.equal(this.provider,"codex");const catalog=await assertCodingProfileVerified(); await this.beginInternal(options);
+    assert.equal(await this.ownedCommand(["container","ls","--all","--filter",`name=^/${this.container}$`,"--format","{{.Names}}"],options),"","managed_profile_busy");await this.verify("volume",this.toolsVolume,options);
     const script="const f=require('node:fs'),catalog=f.readFileSync(0,'utf8');f.chmodSync('/opt/cg',0o755);try{if(f.existsSync('/opt/cg/catalog.json')){if(f.readFileSync('/opt/cg/catalog.json','utf8')!==catalog)throw Error('profile_mismatch');}else f.writeFileSync('/opt/cg/catalog.json',catalog,{flag:'wx',mode:0o444});}finally{f.chmodSync('/opt/cg',0o555);}";
-    try{assert.equal((await dockerCommand(["run","-i","--name",this.initContainer,"--label",`${labelKey}=${this.owner}`,"--label",`io.commongrid.spike.operation=${this.operation}`,"--network","none","--read-only","--user","0:0","--cap-drop","ALL","--security-opt","no-new-privileges","--memory","128m","--pids-limit","16","--mount",`type=volume,src=${this.toolsVolume},dst=/opt/cg,volume-nocopy`,base.image,"node","-e",script],{timeoutMs:30_000,stdin:Readable.from([catalog.value])})).code,0);}finally{await this.stop();}
+    await this.installContainer(["create","-i","--name",this.initContainer,"--label",`${labelKey}=${this.owner}`,"--label",`io.commongrid.spike.operation=${this.operation}`,"--network","none","--read-only","--user","0:0","--cap-drop","ALL","--security-opt","no-new-privileges","--memory","128m","--pids-limit","16","--mount",`type=volume,src=${this.toolsVolume},dst=/opt/cg,volume-nocopy`,base.image,"node","-e",script],Readable.from([catalog.value]),options);
   }
-  async start(options: ManagedOperationOptions = {}) {
+  private async installContainer(args: string[], stdin: Readable | undefined, options: ManagedOperationOptions) {
+    let containerId: string | undefined;
+    await this.lease.verify(options); this.uncertainNamespaces.add(this.initContainer);
+    try {
+      containerId=await this.ownedCommand(args,options);
+      assert.match(containerId,/^[a-f0-9]{64}$/,"managed_container_id_invalid");
+      this.ownedNamespaceIds.add(containerId);
+      const evidence=await this.containerEvidence(containerId,options);
+      assertManagedContainerFence(evidence,this.owner,this.operation);
+      assert.equal(evidence.id,containerId,"managed_container_id_mismatch");
+      this.uncertainNamespaces.delete(this.initContainer);
+      const startArgs=["start","--attach",...(stdin ? ["--interactive"] : []),containerId];
+      if(stdin) {
+        await this.lease.verify(options);
+        const result=await dockerCommand(startArgs,{signal:options.signal,timeoutMs:30_000,stdin});
+        assert.equal(result.code,0,"managed_public_delivery_failed");
+      } else await this.ownedCommand(startArgs,options);
+    } finally {
+      const cleanup={signal:AbortSignal.timeout(30_000)};
+      if(containerId && /^[a-f0-9]{64}$/.test(containerId)) {
+        await this.stopOperationContainer(containerId,cleanup); this.uncertainNamespaces.delete(this.initContainer);
+      } else await this.stopInternal(cleanup);
+    }
+  }
+  async start(options: ManagedOperationOptions = {}) { return this.mutation(() => this.startInternal(options),true); }
+  private async startInternal(options: ManagedOperationOptions = {}) {
+    await this.beginInternal(options);
     assertActiveSignal(options.signal);
     assert.ok(!this.starting, "managed_start_in_progress");
     assert.ok(!this.uncertainCreate, "managed_cleanup_unconfirmed");
     this.starting = true;
     let createDispatched = false, containerId: string | undefined;
-    const invoke = (args: string[]) => this.command(args, options);
+    const invoke = (args: string[]) => this.ownedCommand(args, options);
     try {
     await this.verify("volume",this.authVolume, options); await this.verify("volume",this.toolsVolume, options);
     assert.equal(await invoke(["container", "ls", "--all", "--filter", `name=^/${this.container}$`, "--format", "{{.Names}}"]), "", "managed_profile_busy");
     const trust=this.profileTrust;
     const ca=trust?"/opt/cg/optional-public-ca.pem":"/opt/cg/ca.pem";
     assertActiveSignal(options.signal);
-    createDispatched = true;
+    createDispatched = true; this.uncertainCreate=true;
     containerId = await invoke(["create","--name",this.container,"--label",`${labelKey}=${this.owner}`,"--label",`io.commongrid.spike.operation=${this.operation}`,"--network","none","--read-only","--user","1000:1000","--workdir","/home/node","--cap-drop","ALL","--security-opt","no-new-privileges","--pids-limit","96","--cpus","1","--memory","1024m","--memory-swap","1024m","--init",
       "--mount",`type=volume,src=${this.toolsVolume},dst=/opt/cg,readonly,volume-nocopy`,"--mount",`type=volume,src=${this.authVolume},dst=/home/node,volume-nocopy`,"--tmpfs","/tmp:rw,noexec,nosuid,size=128m",
       "--env","HTTPS_PROXY=http://127.0.0.1:9877","--env","HTTP_PROXY=http://127.0.0.1:9877","--env","ALL_PROXY=http://127.0.0.1:9877","--env","NO_PROXY=127.0.0.1,localhost",
@@ -196,9 +281,11 @@ export class ManagedCliRuntime {
       "--env","CLAUDE_CONFIG_DIR=/home/node/claude","--env","DISABLE_AUTOUPDATER=1","--env","CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1","--env","ENABLE_CLAUDEAI_MCP_SERVERS=false","--env","ENABLE_TOOL_SEARCH=false","--env","CLAUDE_CODE_DISABLE_ARTIFACT=1",
       "--env",`CG_TOOL_TOKEN=${randomBytes(32).toString("hex")}`,base.image,"node","-e","setTimeout(()=>process.exit(0),900000)"]);
     assert.match(containerId, /^[a-f0-9]{64}$/, "managed_container_id_invalid");
+      this.ownedNamespaceIds.add(containerId);
       const evidence = await this.containerEvidence(containerId, options);
       assertManagedContainerFence(evidence, this.owner, this.operation);
       assert.equal(evidence.id, containerId, "managed_container_id_mismatch");
+      this.uncertainCreate=false;
       await invoke(["start",containerId]);
       const hash = await invoke(["exec",containerId,"node","-e",`const fs=require('node:fs'),c=require('node:crypto'),h=c.createHash('sha256');const s=fs.createReadStream('/opt/cg/${this.provider}');s.on('data',b=>h.update(b));s.on('end',()=>console.log(h.digest('hex')));`]);
       assert.equal(hash,this.provider === "claude" ? pins.claude.sha256 : pins.codex.binary_sha256,"managed_binary_tampered");
@@ -217,14 +304,18 @@ export class ManagedCliRuntime {
         if (!containerId && error instanceof DockerCommandError) this.uncertainCreate = true;
         if (containerId !== undefined && !/^[a-f0-9]{64}$/.test(containerId)) this.uncertainCreate = true;
         try {
-          if (containerId && /^[a-f0-9]{64}$/.test(containerId)) await this.stopOperationContainer(containerId, cleanupOptions);
-          else await this.stop(false, cleanupOptions);
+          if (containerId && /^[a-f0-9]{64}$/.test(containerId)) { await this.stopOperationContainer(containerId, cleanupOptions); this.uncertainCreate=false; }
+          else await this.stopInternal(cleanupOptions);
         } catch (cleanupError) { throw new AggregateError([error, cleanupError], "managed_start_cleanup_unconfirmed"); }
       }
       throw error;
     } finally { this.starting = false; }
   }
   async exec(args: string[], timeoutMs = 15_000, options: { signal?: AbortSignal; maxBytes?: number } = {}) {
+    const release=await this.retainOperation(options);
+    try { return await this.execInternal(args,timeoutMs,options); } finally { release(); }
+  }
+  private async execInternal(args: string[], timeoutMs: number, options: { signal?: AbortSignal; maxBytes?: number }) {
     assertActiveSignal(options.signal);
     if (!args.length || args.some(arg => typeof arg !== "string" || arg.includes("\0")) || !Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 600_000 || (options.maxBytes !== undefined && (!Number.isInteger(options.maxBytes) || options.maxBytes < 1 || options.maxBytes > 1_048_576))) throw new Error("managed_exec_arguments_invalid");
     const containerId = await this.verifyOperation(options);
@@ -238,52 +329,91 @@ export class ManagedCliRuntime {
     }
   }
   private async stopOperationContainer(containerId: string, options: ManagedOperationOptions = {}) {
-    await removeManagedOperationContainer(containerId, this.owner, this.operation, args => this.command(args, options), options);
+    await removeManagedOperationContainer(containerId, this.owner, this.operation, args => this.ownedCommand(args, options), options);
+    this.ownedNamespaceIds.delete(containerId);
   }
   async stop(explicitDestroy = false, options: ManagedOperationOptions = {}) {
+    assert.ok(!explicitDestroy,"managed_owner_wide_cleanup_denied");
+    return this.mutation(() => this.stopInternal(options));
+  }
+  private async stopInternal(options: ManagedOperationOptions = {}) {
     assertActiveSignal(options.signal);
+    if(!this.leaseIdentity()) { assert.ok(!this.lease.isUncertain(),"managed_cleanup_unconfirmed"); return; }
+    if(!await this.lease.exists(options)) { await this.confirmCapturedNamespacesAbsent(options); assert.ok(!this.uncertainCreate && this.uncertainNamespaces.size === 0 && this.uncertainVolumes.size === 0 && this.uncertainVolumeRemovals.size === 0,"managed_cleanup_unconfirmed"); return; }
+    await this.lease.verify(options);
     for (const name of [this.container,this.initContainer]) {
-      const listed = await this.command(["container","ls","--all","--filter",`name=^/${name}$`,"--format","{{.Names}}"], options);
-      if (!listed.split(/\r?\n/).includes(name)) continue;
-      const evidence = await this.containerEvidence(name, options);
-      // A competing command using this profile must not delete the incumbent.
-      if(!explicitDestroy&&evidence.operation!==this.operation)continue;
-      await removeManagedContainer(evidence,this.owner,explicitDestroy?undefined:this.operation, false, args => this.command(args, options), options);
-      if (name === this.container && evidence.operation === this.operation) this.uncertainCreate = false;
+      const listed=await this.ownedCommand(["container","ls","--all","--filter",`name=^/${name}$`,"--format","{{.Names}}"],options);
+      if(!listed.split(/\r?\n/).includes(name)) continue;
+      const evidence=await this.containerEvidence(name,options);
+      assertManagedContainerFence(evidence,this.owner,this.operation);
+      await removeManagedContainer(evidence,this.owner,this.operation,false,args => this.ownedCommand(args,options),options);
+      this.ownedNamespaceIds.delete(evidence.id);
+      this.uncertainNamespaces.delete(name);
+      if(name === this.container) this.uncertainCreate=false;
     }
     assertActiveSignal(options.signal);
-    assert.ok(!this.uncertainCreate, "managed_cleanup_unconfirmed");
+    await this.confirmCapturedNamespacesAbsent(options);
+    assert.ok(!this.uncertainCreate && this.uncertainNamespaces.size === 0 && this.uncertainVolumes.size === 0 && this.uncertainVolumeRemovals.size === 0,"managed_cleanup_unconfirmed");
   }
-  async recoverStopped(expectedOperation: string) {
-    assert.ok(uuidV4.test(expectedOperation), "managed_operation_invalid");
-    let recovered = 0;
-    for (const name of [this.container, this.initContainer]) {
-      const listed = await checked(["container","ls","--all","--filter",`name=^/${name}$`,"--format","{{.Names}}"]);
-      if (!listed.split(/\r?\n/).includes(name)) continue;
-      const evidence = await this.containerEvidence(name);
-      await removeManagedContainer(evidence,this.owner,expectedOperation,true); recovered++;
+  private async confirmCapturedNamespacesAbsent(options: ManagedOperationOptions) {
+    for(const id of [...this.ownedNamespaceIds]) {
+      const listed=await this.command(["container","ls","--all","--no-trunc","--filter",`id=${id}`,"--format","{{.ID}}"],options);
+      assertActiveSignal(options.signal);
+      assert.ok(!listed.split(/\r?\n/).includes(id),"managed_cleanup_unconfirmed");
+      this.ownedNamespaceIds.delete(id);
     }
-    // Reference reconciliation only: no profile lock, crash detector, auth
-    // destruction or automatic takeover of another live operation.
-    return { recovered_containers: recovered, private_volumes_retained: true };
   }
-  async destroy() {
-    await this.stop(true);
-    for (const name of [this.authVolume,this.toolsVolume]) {
-      const listed = await checked(["volume","ls","--filter",`name=${name}`,"--format","{{.Name}}"]);
-      if (!listed.split(/\r?\n/).includes(name)) continue;
-      await this.verify("volume",name); await checked(["volume","rm",name]);
-      assert.ok(!(await checked(["volume","ls","--filter",`name=${name}`,"--format","{{.Name}}"])).split(/\r?\n/).includes(name));
-    }
+  async recoverStopped(receipt: ManagedRecoveryReceipt, options: ManagedOperationOptions = {}) {
+    return this.mutation(async () => {
+      assertActiveSignal(options.signal);
+      assert.ok(receipt && typeof receipt === "object" && receipt.owner_quiesced === true,"managed_recovery_quiescence_required");
+      assert.ok(uuidV4.test(receipt.operation),"managed_operation_invalid");
+      assert.ok(!this.leaseIdentity() && !this.lease.isUncertain() && !this.finished,"managed_recovery_claim_conflict");
+      const lease=await DockerOperationLease.inspectReceipt({owner:this.owner,provider:this.provider,operation:receipt.operation,lease_id:receipt.lease_id},base.image,(args,callOptions) => this.command(args,callOptions),options);
+      const invoke=async (args:string[]) => { await lease.verify(options); return this.command(args,options); };
+      const captured:ManagedContainerEvidence[]=[];
+      for(const name of [this.container,this.initContainer]) {
+        const listed=await invoke(["container","ls","--all","--filter",`name=^/${name}$`,"--format","{{.Names}}"]);
+        if(!listed.split(/\r?\n/).includes(name)) continue;
+        const evidence:unknown=JSON.parse(await invoke(["inspect","--format",evidenceFormat,name]));
+        assertManagedContainerFence(evidence,this.owner,receipt.operation,true); captured.push(evidence);
+      }
+      assert.ok(captured.length > 0,"managed_recovery_namespace_absent");
+      for(const evidence of captured) await removeManagedContainer(evidence,this.owner,receipt.operation,true,invoke,options);
+      await lease.release(options);
+      return {recovered_containers:captured.length,private_volumes_retained:true};
+    });
+  }
+  async destroy(options: ManagedOperationOptions = {}) {
+    return this.mutation(async () => {
+      await this.beginInternal(options);
+      assert.ok(this.uncertainVolumeRemovals.size === 0,"managed_cleanup_unconfirmed");
+      for(const name of [...this.uncertainVolumes]) { await this.verify("volume",name,options); this.uncertainVolumes.delete(name); }
+      await this.stopInternal(options);
+      for(const name of [this.authVolume,this.toolsVolume]) {
+        const listed=await this.ownedCommand(["volume","ls","--filter",`name=${name}`,"--format","{{.Name}}"],options);
+        if(!listed.split(/\r?\n/).includes(name)) continue;
+        await this.verify("volume",name,options);
+        this.uncertainVolumeRemovals.add(name);
+        await this.ownedCommand(["volume","rm",name],options);
+        assert.ok(!(await this.ownedCommand(["volume","ls","--filter",`name=${name}`,"--format","{{.Name}}"],options)).split(/\r?\n/).includes(name),"managed_cleanup_unconfirmed");
+        this.uncertainVolumeRemovals.delete(name);
+      }
+      await this.lease.release(options); this.finished=true;
+    },true);
   }
 }
 
 export async function startBridge(runtime: ManagedCliRuntime, task?: TaskToolsRuntime) {
-  const containerId = await runtime.verifyOperation();
+  const release=await runtime.retainOperation();
+  let containerId:string;
+  try { containerId=await runtime.verifyOperation(); } catch(error) { release(); throw error; }
   const child = spawn("docker",["exec","-i",containerId,"node","/opt/cg/runtime-bridge.mjs"],{windowsHide:true,stdio:["pipe","pipe","pipe"]});
   const control = attachManagedControl(child, {provider:runtime.provider, ...(task ? {execute: (arguments_: unknown) => executeTaskTool(task, arguments_)} : {})});
-  try { await control.ready; assert.equal(control.stats.control_failure,false,"managed_bridge_failed"); } catch (error) { control.close(); throw error; }
-  return {stats:control.stats,close:control.close,child:control.child};
+  const close=() => { control.close(); release(); };
+  child.once("close",release);
+  try { await control.ready; assert.equal(control.stats.control_failure,false,"managed_bridge_failed"); release(); } catch (error) { close(); throw error; }
+  return {stats:control.stats,close,child:control.child};
 }
 
 export const taskImage: string = base.image;
