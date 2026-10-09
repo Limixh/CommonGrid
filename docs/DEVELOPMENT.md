@@ -28,6 +28,7 @@ Masaüstü kabuğu Windows'ta Rust, MSVC C++ araçları ve WebView2 ister. İste
 | npm run test:ui | Önce install:browsers; tarayıcıda görev/hesap/katkı akışı |
 | npm run test:artifacts | Önce install:trivy; gerçek gizli bilgi tarayıcısı ve dosya/verifier kontrolleri |
 | npm run spike:session-continuity | Yeni hesapsız Docker profilleriyle restart, işlem sahipliği ve cleanup |
+| npm run spike:owner-crash | Yeni sentetik profillerde gerçek host Node worker SIGKILL, işlem sahipliği ve açık orphan uzlaştırması; gerçek hesap/model yok |
 | npm run spike:managed-adversarial | Hesapsız Docker saldırı ve kaynak sınırı senaryoları |
 | npm run test:spike | Ayrı Temporal deneme modülünün testleri |
 | node scripts/go.mjs vet ./... | Go statik kontrolü |

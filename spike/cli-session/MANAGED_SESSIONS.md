@@ -115,6 +115,12 @@ npm run spike:session-continuity -- codex
 
 UUID gerektirmez; her sağlayıcı için yeni sentetik profile oluşturup sonunda kaldırır. Altı eşzamanlı contender start, yanlış işlem exec/bridge reddi, sahte state restart, durmuş tam işlem uzlaştırması, eski cleanup'ın yeni oturumu koruması, timeout/iptal sonrası alt süreç teardown ve control/readiness arızaları sınanır. Önceki private profiller, gerçek auth ve inference kullanılmaz. `recoverStopped(expectedOperation)` otomatik crash recovery değildir; yalnız doğrulanmış durmuş konteyneri uzlaştırır. Rapor `.local/managed-continuity/<run>/report.json` içindedir.
 
+```powershell
+npm run spike:owner-crash
+```
+
+Bu kontrol yeni sentetik profiller oluşturur ve sandbox'ı yöneten Node sürecini zorla kapatır (`SIGKILL`). Yalnız teste ait, kimlik ve etiketleri doğrulanmış konteynere dokunur. Canlı kalan konteynerin devralınması reddedilir; açıkça durdurulduktan sonra `recoverStopped(expectedOperation)` ile uzlaştırılır. Sahte durumun korunması ve eski işlemin cleanup'ının yeni işlem kaynaklarını silememesi de sınanır. Gerçek credential, API veya inference kullanılmaz; mevcut giriş yapmış profillere erişilmez. Sonuç ve cleanup `.local/managed-owner-crash/<run>/report.json` içinde kaydedilir. Kalıcı işlem kaydı, otomatik profil kilidi ve otomatik production crash recovery kabulü bekler.
+
 Salt okunur resmi hesap kabulü ayrı, açık seçimli geliştirici komutudur:
 
 ```powershell

@@ -36,6 +36,7 @@
     "spike:managed-session": "node --import tsx spike/cli-session/managed-session.mts",
     "spike:session-acceptance": "node --import tsx spike/cli-session/managed-session-acceptance.mts",
     "spike:session-continuity": "node --import tsx spike/cli-session/managed-continuity.mts",
+    "spike:owner-crash": "node --import tsx spike/cli-session/managed-owner-crash.mts",
     "spike:coding-verifier": "node --import tsx spike/cli-session/coding-verifier.mts",
     "spike:managed-boundary": "node --import tsx spike/cli-session/managed-boundary.mts",
     "spike:managed-adversarial": "node --import tsx spike/cli-session/managed-adversarial.mts",
