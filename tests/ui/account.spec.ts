@@ -50,12 +50,12 @@ test("fixture account clearly shows disabled providers without a pretend login",
   await mockAccount(page);
   await page.goto("/");
   await expect(page.locator(".task-card")).toHaveCount(3);
-  await page.getByRole("button", { name: "Hesabım", exact: true }).click();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("button", { name: "Hesabım", exact: true }).click();
   await expect(page.getByText("Hesap bağlantısı hazırlanıyor", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: /ile giriş yap/ })).toHaveCount(0);
   await page.getByRole("button", { name: "Change language" }).click();
   await expect(page.getByText("Account connection is being prepared", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "My contributions", exact: true }).click();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("button", { name: "My contributions", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Sign in to see your contribution records." })).toBeVisible();
 });
 
@@ -67,7 +67,7 @@ test("authenticated database catalog and private receipts clear on successful lo
   await expect(page.getByRole("button", { name: "Görevi başlat", exact: true })).toBeDisabled();
   expect(mocked.receiptsRequested).toEqual([]);
   await page.getByRole("textbox", { name: "Görevlerde ara…" }).fill("private query");
-  await page.getByRole("button", { name: "Katkılarım", exact: true }).click();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("button", { name: "Katkılarım", exact: true }).click();
   await expect(page.getByTestId("account-name")).toHaveText(signedIn.user.display_name);
   await expect(page.locator(".receipt-card")).toContainText("Ayrıldı");
   await page.getByRole("button", { name: "Gönderilen sonuçlar", exact: true }).click();
@@ -94,14 +94,14 @@ test("a valid empty database is distinct from signed-out access", async ({ page 
   await page.goto("/");
   await expect(page.getByText("Henüz paylaşılmış bir görev yok.")).toBeVisible();
   await expect(page.locator(".stats-strip")).toBeVisible();
-  await page.getByRole("button", { name: "Katkılarım", exact: true }).click();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("button", { name: "Katkılarım", exact: true }).click();
   await expect(page.getByText("Bu bölümde henüz katkı kaydın yok.")).toBeVisible();
 });
 
 test("failed logout preserves the account, while expired receipts remove private context", async ({ page }) => {
   const mocked = await mockAccount(page, { authenticated: true, database: true, logoutFail: true });
   await page.goto("/");
-  await page.getByRole("button", { name: "Katkılarım", exact: true }).click();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("button", { name: "Katkılarım", exact: true }).click();
   await expect(page.locator(".receipt-card")).toHaveCount(1);
   await page.getByRole("button", { name: "Çıkış yap", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("Hesabın hâlâ bağlı");
@@ -117,12 +117,12 @@ test("failed logout preserves the account, while expired receipts remove private
 test("account and receipt failures have recoverable loading and retry states", async ({ page }) => {
   const mocked = await mockAccount(page, { authenticated: true, database: true, sessionFail: true, receiptStatus: 503 });
   await page.goto("/");
-  await page.getByRole("button", { name: "Hesabım", exact: true }).click();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("button", { name: "Hesabım", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("Hesap bilgilerine ulaşılamadı");
   mocked.setSessionFail(false);
   await page.getByRole("button", { name: "Tekrar dene", exact: true }).click();
   await expect(page.getByTestId("account-name")).toBeVisible();
-  await page.getByRole("button", { name: "Katkılarım", exact: true }).click();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("button", { name: "Katkılarım", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("Katkı kayıtlarına ulaşılamadı");
   mocked.setReceiptStatus(200);
   await page.getByRole("button", { name: "Tekrar dene", exact: true }).click();
@@ -137,7 +137,7 @@ test("configured provider uses only the fixed same-origin sign-in path", async (
     await route.fulfill({ contentType: "text/html", body: "Sign-in begins" });
   });
   await page.goto("/");
-  await page.getByRole("button", { name: "Hesabım", exact: true }).click();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("button", { name: "Hesabım", exact: true }).click();
   await page.getByRole("button", { name: "GitHub ile giriş yap", exact: true }).click();
   await expect(page).toHaveURL("/api/v1/auth/github/start");
   expect(new URL(requested).pathname).toBe("/api/v1/auth/github/start");
@@ -154,7 +154,7 @@ test("late receipt results cannot return after logout and account views fit mobi
   } });
   await page.setViewportSize({ width: 390, height: 850 });
   await page.goto("/");
-  await page.getByRole("button", { name: "Katkılarım", exact: true }).click();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("button", { name: "Katkılarım", exact: true }).click();
   await expect(page.getByRole("status")).toContainText("Katkı kayıtları yükleniyor");
   await expect.poll(() => started).toBe(true);
   await page.getByRole("button", { name: "Çıkış yap", exact: true }).click();
@@ -170,12 +170,12 @@ test("account and contribution panels remain accessible at desktop and phone wid
   await page.goto("/");
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: width === 1440 ? 1050 : 850 });
-    await page.getByRole("button", { name: "Hesabım", exact: true }).click();
+    await page.getByRole("navigation", { name: "Main navigation" }).getByRole("button", { name: "Hesabım", exact: true }).click();
     await expect(page.getByTestId("account-name")).toHaveText("Ada Yılmaz");
     await expect(page.getByRole("button", { name: "Çıkış yap", exact: true })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await page.screenshot({ path: path.join(process.cwd(), ".local/validation", `account-${width}.png`), fullPage: true });
-    await page.getByRole("button", { name: "Katkılarım", exact: true }).click();
+    await page.getByRole("navigation", { name: "Main navigation" }).getByRole("button", { name: "Katkılarım", exact: true }).click();
     await expect(page.locator(".receipt-card")).toContainText("Ayrıldı");
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await page.screenshot({ path: path.join(process.cwd(), ".local/validation", `contributions-${width}.png`), fullPage: true });
