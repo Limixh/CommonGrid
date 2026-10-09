@@ -12,9 +12,12 @@ const task=await TaskToolsRuntime.create({image:taskImage,cpu:1,memoryMb:256},60
 try {
   assert.equal((await verifyCandidate(baseline)).passed,false);report.checks.push("broken_baseline_rejected");
   assert.equal((await verifyCandidate("process.exit(0);\n")).passed,false);report.checks.push("candidate_exit_zero_cannot_spoof_oracle");
+  const skipHolesCandidate="export function sumIntegers(values) {\n  if (!Array.isArray(values) || !values.every(Number.isSafeInteger)) throw new TypeError('Expected safe integers');\n  let total = 0;\n  for (const value of values) {\n    total += value;\n    if (!Number.isSafeInteger(total)) throw new RangeError('Unsafe sum');\n  }\n  return total;\n}\n";
+  report.sparse_negative_control=await verifyCandidate(skipHolesCandidate);
+  assert.equal(report.sparse_negative_control.cases,34);assert.equal(report.sparse_negative_control.json_cases_passed,true);assert.equal(report.sparse_negative_control.sparse_cases_passed,false);assert.equal(report.sparse_negative_control.passed,false);report.checks.push("every_prevalidation_passes_32_json_cases_but_sparse_arrays_rejected");
   await seedTask(task);await writeCandidate(task,correctCandidate);const source=await snapshotCandidate(task);
   assert.equal(source,correctCandidate);report.checks.push("frozen_bounded_regular_file_snapshot");
-  report.verifier=await verifyCandidate(source);assert.equal(report.verifier.passed,true);report.checks.push("independent_private_oracle_32_cases");
+  report.verifier=await verifyCandidate(source);assert.equal(report.verifier.cases,34);assert.equal(report.verifier.json_cases_passed,true);assert.equal(report.verifier.sparse_cases_passed,true);assert.equal(report.verifier.passed,true);report.checks.push("independent_private_oracle_34_cases_including_sparse_arrays");
   report.diff=await createDiff(source,path.join(directory,"artifact"));report.checks.push("git_apply_check");
   assert.equal(report.diff.applied_candidate_sha256,report.verifier.candidate_sha256);report.checks.push("applied_patch_matches_verified_candidate_hash");
   const literalCandidate="const fixturePaths = 'a/before/sum.mjs and b/after/sum.mjs';\n"+correctCandidate;
