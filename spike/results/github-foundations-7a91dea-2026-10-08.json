@@ -1,0 +1,112 @@
+{
+  "schema_version": "1.0",
+  "purpose": "remote_foundations_for_committed_source",
+  "checked_at": "2026-10-08T20:57:37.874Z",
+  "repository": "https://github.com/Limixh/CommonGrid",
+  "run_id": 37840191064,
+  "run_url": "https://github.com/Limixh/CommonGrid/actions/runs/37840191064",
+  "head_sha": "7a91deafdd3707cec0fc6e4a380d5b37fd1d0799",
+  "status": "completed",
+  "conclusion": "success",
+  "jobs": [
+    {
+      "name": "cli-session-fixtures",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/37840191064/job/113527312659",
+      "started_at": "2026-10-08T20:32:23Z",
+      "completed_at": "2026-10-08T20:34:40Z"
+    },
+    {
+      "name": "artifact-delivery",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/37840191064/job/113527312948",
+      "started_at": "2026-10-08T20:32:23Z",
+      "completed_at": "2026-10-08T20:33:59Z"
+    },
+    {
+      "name": "postgres-domain",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/37840191064/job/113527312986",
+      "started_at": "2026-10-08T20:32:23Z",
+      "completed_at": "2026-10-08T20:33:52Z"
+    },
+    {
+      "name": "contracts-api-ui",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/37840191064/job/113527313014",
+      "started_at": "2026-10-08T20:32:23Z",
+      "completed_at": "2026-10-08T20:34:17Z"
+    },
+    {
+      "name": "desktop-compile (macos-latest)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/37840191064/job/113527313132",
+      "started_at": "2026-10-08T20:34:01Z",
+      "completed_at": "2026-10-08T20:35:25Z"
+    },
+    {
+      "name": "desktop-compile (windows-latest)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/37840191064/job/113527313229",
+      "started_at": "2026-10-08T20:34:01Z",
+      "completed_at": "2026-10-08T20:42:00Z"
+    },
+    {
+      "name": "desktop-compile (ubuntu-latest)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/37840191064/job/113527313344",
+      "started_at": "2026-10-08T20:32:23Z",
+      "completed_at": "2026-10-08T20:36:45Z"
+    },
+    {
+      "name": "temporal-fixtures (windows-latest)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/37840191064/job/113527313362",
+      "started_at": "2026-10-08T20:34:18Z",
+      "completed_at": "2026-10-08T20:37:11Z"
+    },
+    {
+      "name": "temporal-fixtures (macos-latest)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/37840191064/job/113527313422",
+      "started_at": "2026-10-08T20:34:45Z",
+      "completed_at": "2026-10-08T20:35:34Z"
+    },
+    {
+      "name": "temporal-fixtures (ubuntu-latest)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/37840191064/job/113527313552",
+      "started_at": "2026-10-08T20:35:27Z",
+      "completed_at": "2026-10-08T20:37:01Z"
+    },
+    {
+      "name": "sandbox-fixtures",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/37840191064/job/113527313793",
+      "started_at": "2026-10-08T20:35:35Z",
+      "completed_at": "2026-10-08T20:36:12Z"
+    }
+  ],
+  "execution_enabled": false,
+  "isolation_gate": "not_evaluated",
+  "real_account_tested": false,
+  "real_model_inference": false,
+  "production_ready": false,
+  "scope_limits": [
+    "Official CLI, task isolation and session continuity use synthetic fixtures on Linux; no live login or model inference",
+    "Windows, macOS and Linux native compilation is not packaged login, signed distribution or production acceptance",
+    "PostgreSQL, artifacts, UI and Temporal jobs retain the scope of their existing fixture harnesses",
+    "Natural provider renewal, real quota/reset/account concurrency and current live Luna/Haiku acceptance are not established by CI"
+  ]
+}

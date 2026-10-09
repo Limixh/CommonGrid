@@ -1,6 +1,6 @@
 # F0 test kayıtları
 
-2026-10-08, Windows x64 / Europe-Istanbul. JSON kayıtlarında zamanlar UTC olarak tutulur; 7 Ekim 22:xx UTC, yerel 8 Ekim 01:xx saatidir.
+2026-10-08 ve 2026-10-09, Windows x64 / Europe-Istanbul. Yeni 9 Ekim yerel kabul kayıtlarının UTC zamanı 8 Ekim 21:xx'tir. JSON kayıtlarında zamanlar UTC olarak tutulur; 7 Ekim 22:xx UTC, yerel 8 Ekim 01:xx saatidir.
 
 | Kayıt | Kanıt | Sınır |
 |---|---|---|
@@ -35,6 +35,12 @@
 | [go-gate-foundations-windows-2026-10-08.json](go-gate-foundations-windows-2026-10-08.json) | ADR 0012 ürün/deneme testleri, şema/tip/derleme, oturum/limit hata yolları ve açık profile trust kontrolleri geçti | GO vermez; gerçek hesap/model kabulü ayrı kalır |
 | [go-gate-continuity-windows-2026-10-08.json](go-gate-continuity-windows-2026-10-08.json) | Güncel runtime ile iki sağlayıcıda sentetik restart, işlem yarışları ve cleanup geçti | Gerçek yenileme/kota gözlemi veya production recovery değildir |
 | [go-gate-adversarial-windows-2026-10-08.json](go-gate-adversarial-windows-2026-10-08.json) | Güncel runtime ile iki sağlayıcıda sentetik dosya/process/ağ/kaynak sınırı ve cleanup geçti | Gerçek credential/model veya bütün izolasyon yollarının kabulü değildir |
+| [github-foundations-7a91dea-2026-10-08.json](github-foundations-7a91dea-2026-10-08.json) | Resmi GitHub run 37840191064, 7a91dea kaynağında 11 job; Linux fixture/artifact/PostgreSQL/UI, üç OS native compile ve Temporal | Sonraki yerel kodu, packaged auth/dağıtımı veya gerçek provider kabulünü kapsamaz |
+| [managed-task-haiku-windows-2026-10-09.json](managed-task-haiku-windows-2026-10-09.json) | Haiku → claude-haiku-5-5 doğrulandı; gerçek görev, uygulanmış [patch](managed-task-haiku-2026-10-09.patch), 32 verifier örneği ve cleanup geçti | Tek kontrollü görev; doğal yenileme, genel tool/platform veya GO kanıtı değildir |
+| [managed-task-luna-windows-2026-10-09.json](managed-task-luna-windows-2026-10-09.json) | gpt-6-luna doğrulandı; altı callback denemesi, değişmemiş baseline aday ve başarısız verifier; cleanup geçti | Görev kabulü başarısız; komut başarısı ve kök neden bilinmiyor; inference retry yok |
+| [current-cli-acceptance-windows-2026-10-09.json](current-cli-acceptance-windows-2026-10-09.json) | Güncel gerçek görev/oturum sonuçları; Claude checkpoint, Codex refresh deadline ve ayrı quota gözlemi | İlk cleanup=false koşuları korunur; sonraki manuel uzlaştırma geçmişi başarılıya çevirmez; doğal yenileme/kota tükenmesi kabulü değildir |
+| [codex-luna-profile-windows-2026-10-09.json](codex-luna-profile-windows-2026-10-09.json) | Güncel pinned Luna direct-tool envanter fixture kabulü | Mock inference; başarısız gerçek Luna task'ını kabul etmez |
+| [cheap-model-foundations-windows-2026-10-09.json](cheap-model-foundations-windows-2026-10-09.json) | Güncel model doğrulama ve tanı değişikliklerinin yerel genel kontrolü | Sonuç/sayı raporda; doğal provider yenilemesi veya yeni uzak CI kabulü değildir |
 
 Temporal recovery denemesi süreç temizliği değişikliğinden sonra tekrar çalıştırılıp geçti; buradaki kayıt son başarılı denemeden kopyalandı. Ham log/SQLite dosyaları `.local` altında kalır. Kaynaklar Git'e kopyalanmaz; kilit dosyası ile tekrar indirilebilir.
 
@@ -48,8 +54,10 @@ Resmi CLI fixture: `npm run install:cli-fixtures` ve `npm run spike:cli-session`
 
 Managed session komutları `../cli-session/MANAGED_SESSIONS.md` içinde. `coding-verifier-fixture.patch` ve `coding-verifier-literal-fixture.patch` deterministik; `managed-task-claude.patch` ve `managed-task-codex.patch` önceki gerçek AI adaylarının diff'leridir. SHA-256 değerleri ilgili raporlarla kontrol edilebilir. Yayımlanan raporlarda patch yolu yalnız bu dosya adıyla değiştirilir. Private login state, device code, credential hacmi ve makineye özel public CA/proof yayımlanmaz. Public TLS/canary token renewal yerine geçmez. CA/model profili bulguları ADR 0006'da, son sentetik kontrol/lifecycle/artifact kabulü ADR 0007'de kaydedilir.
 
-Hesapsız son paketi tekrar üretmek için `npm run check`, `npm run install:cli-fixtures`, `npm run spike:managed-adversarial` ve `npm run spike:coding-verifier`. Başarılı CLI protokol fixture kayıtları ayrı kalır; sentetik adversarial paket gerçek model çağrısı yapmaz. Eski `.local` Git apply skip hatası dahil başarısız ve kapsamı daha dar ara koşular `.local` altında korunur; burada yalnız son başarılı kanıt yayımlanır.
+Hesapsız son paketi tekrar üretmek için `npm run check`, `npm run install:cli-fixtures`, `npm run spike:managed-adversarial` ve `npm run spike:coding-verifier`. Başarılı CLI protokol fixture kayıtları ayrı kalır; sentetik adversarial paket gerçek model çağrısı yapmaz. Eski `.local` Git apply skip hatası dahil başarısız ve kapsamı daha dar ara koşular `.local` altında korunur; sonraki 2026-10-09 kabulü başarısız Luna görevini de kendi sonucu ile yayımlar.
 
-Oturum sürekliliği için `npm run spike:session-continuity`; eski private profillere dokunmadan yeni sentetik kaynaklar oluşturulur ve kaldırılır. Salt okunur gerçek hesap kabulünün `--real-account [--resume]` sözleşmesi `../cli-session/MANAGED_SESSIONS.md` içindedir; CI'a eklenmez ve bu aşamada çalıştırılmadı. Resume checkpoint veya sayısal quota snapshot, yenileme/tükenme/izin kanıtı değildir. ADR 0008 kapsamı dar tutar.
+Oturum sürekliliği için `npm run spike:session-continuity`; eski private profillere dokunmadan yeni sentetik kaynaklar oluşturulur ve kaldırılır. Salt okunur gerçek hesap kabulünün `--real-account [--resume]` sözleşmesi `../cli-session/MANAGED_SESSIONS.md` içindedir; CI'a eklenmez; 2026-10-09 gerçek status/restart/refresh/quota sonuçları güncel kabul kaydında ayrı tutulur. Resume checkpoint veya sayısal quota snapshot, yenileme/tükenme/izin kanıtı değildir. ADR 0008 kapsamı dar tutar.
 
 Güncel çalışma sırası [ADR 0012](../adr/0012-go-gate-priority-and-development-boundaries.md) ve [GO listesinde](../../docs/GO_GATE.md) tutulur. İndeks tarihli kanıtı korur; yeni sayılar yalnız tamamlanmış raporlardan alınır. İşlev testlerinde Luna/Haiku tercihi eski raporların model alanlarını değiştirmez.
+
+Yeni Haiku/Luna profilleri sonraki normal gözlemler için giriş yapmış halde korunur; önceki Sonnet/Astra profilleri logout durumundadır. Güncel görev, model, cleanup ve checkpoint sınırları [ADR 0013](../adr/0013-current-cheap-model-acceptance.md) içinde; GO verilmedi.

@@ -2,7 +2,11 @@
 
 F0 geliştirici komutlarıdır; gerçek hesap işlemleri CI'a bağlı değildir. Windows native açık oturum ayrı Linux ortamına otomatik geçmez. Auth yalnız resmi CLI tarafından private Docker hacminde yönetilir. Şifre/token/authorization code'u sohbete veya proje dosyasına koymayın.
 
-2026-10-08'de iki yeni resmi giriş ve iki gerçek kodlama görevi geçti: her aday fresh readonly verifier'da 32 örnek ve `git apply --check` geçti. Codex managed refresh isteği ve iki izole profile logout da doğrulandı. Test profilleri artık oturumsuzdur; yeni gerçek görev için resmi login gerekir. Native Windows oturumlarına logout uygulanmadı. Tek kontrollü görev F1 GO değildir.
+2026-10-08'de iki yeni resmi giriş ve iki gerçek kodlama görevi geçti: her aday fresh readonly verifier'da 32 örnek ve `git apply --check` geçti. Codex managed refresh isteği ve iki izole profile logout da doğrulandı. Bu tarihli Sonnet/Astra profilleri logout durumundadır. Native Windows oturumlarına logout uygulanmadı. Tek kontrollü görev F1 GO değildir.
+
+2026-10-09 yerel kabulünde yeni profillerle Haiku gerçek görev/diff/verifier/cleanup geçti; Luna model seçimi doğrulandı fakat aday baseline olarak kaldı ve verifier başarısız oldu. Yeni iki profile normal sonraki gözlemler için giriş yapmış halde tutuluyor; yeniden login/logout yapılmıyor. Haiku bundled roots ile çalıştı, ek host CA seçilmedi. [Güncel sonuç](../results/current-cli-acceptance-windows-2026-10-09.json) ve [ADR 0013](../adr/0013-current-cheap-model-acceptance.md) ayrıntıları sınırlar.
+
+Sonraki managed-task raporlarında `candidate_changed` ve sabit provider completion durumu bulunur. Codex callback'leri yalnız sonuç kategorisi, çıkış kodu ve çıktı byte sayılarıyla kaydedilir; komut ve ham çıktı tutulmaz. Bunlar geçmiş Luna koşusuna geriye dönük eklenmez. Tanı düzeltmesi yerel fixture ile doğrulandı; yeni gerçek model çağrısı yapılmadı.
 
 ## Hazırlık ve giriş
 
@@ -20,7 +24,7 @@ npm run spike:managed-session -- login claude CLAUDE_UUID
 npm run spike:managed-session -- login codex CODEX_UUID
 ```
 
-Claude komutunu **interaktif kullanıcı terminalinde** çalıştırın; CLI'ın verdiği resmi URL/giriş kodu akışını terminalde tamamlayın. Codex komutu resmi device URL ve kısa ömürlü kod gösterir; kullanıcı kendi hesabıyla tarayıcıda tamamlar. Device auth hesap/workspace ayarında kapalıysa resmi OpenAI ayarından etkinleştirmek gerekir. Login komutu başarıyla bitmeden sonraki aynı-provider komutuna geçmeyin. Aynı profile paralel işlem reddedilir.
+Claude komutunu **interaktif kullanıcı terminalinde** çalıştırın; CLI'ın verdiği resmi URL/giriş kodu akışını terminalde tamamlayın. Codex komutu resmi device URL ve kısa ömürlü kod gösterir; kullanıcı kendi hesabıyla tarayıcıda tamamlar. Device auth hesap/workspace ayarında kapalıysa resmi OpenAI ayarından etkinleştirmek gerekir. Login akışı resmi authenticated status ile doğrulanmadan sonraki aynı-provider komutuna geçmeyin. Mevcut geçerli oturumda login gerekli değildir. Aynı profile paralel işlem reddedilir.
 
 ## Codex dar profilini doğrulama
 
@@ -47,13 +51,11 @@ npm run spike:coding-verifier
 npm run spike:managed-task -- claude CLAUDE_UUID
 npm run spike:managed-task -- codex CODEX_UUID
 npm run spike:managed-session -- refresh codex CODEX_UUID
-npm run spike:managed-session -- logout codex CODEX_UUID
-npm run spike:managed-session -- logout claude CLAUDE_UUID
 ```
 
 Boundary sahte canary ve public TLS ile 16 kontrol çalıştırır; gerçek credential içeriği okumaz. Gerçek task yalnız sabit `sumIntegers` kabul görevidir. Oturum yoksa model çağrısından önce durur; ücretli API fallback yapmaz. Yeni işlev testleri Codex için `gpt-6-luna`/low, Claude için `haiku` ister. Native smoke hesabın varsayılan/ilk modelini seçmez; Luna yoksa durur. Claude'un açık fallback seçimi aynı Haiku modelidir. Model/profil bulunması kullanıcı hesabında erişim kanıtı değildir. Önceki Astra/Sonnet gerçek görev raporları tarihli kanıt olarak korunur. Gerçek görev raporu `.local/managed-task/<run>/report.json`, patch `artifact/candidate.patch` olur. Aday yeni readonly/network-none verifier'da kontrol edilir.
 
-Codex `refresh` resmi `account/read {refreshToken:true}` yoludur; token byte'ları okunarak rotation ölçülmez. `logout` yalnız seçili izole profile uygulanır ve resmi status kontrol edilir. Session raporu cleanup sonucunu da içerir. Claude için bir resmi force-refresh komutu iddia edilmez; `refresh claude` bilinçli hata verir. Doğal token expiry ve sonraki gerçek turn/relogin ayrı kabul testi olarak bekler. Host native credential dosyaları bu komutların girdisi değildir.
+Codex `refresh` resmi `account/read {refreshToken:true}` yoludur; token byte'ları okunarak rotation ölçülmez. `logout` yalnız açıkça seçilen izole profile uygulanır ve resmi status kontrol edilir. Normal süreklilik gözlemi için mevcut yeni profillerde logout yapılmaz; gerektiğinde ayrı `npm run spike:managed-session -- logout PROVIDER UUID` komutu kullanılır. Session raporu cleanup sonucunu da içerir. Claude için bir resmi force-refresh komutu iddia edilmez; `refresh claude` bilinçli hata verir. Doğal token expiry ve sonraki gerçek turn/relogin ayrı kabul testi olarak bekler. Host native credential dosyaları bu komutların girdisi değildir.
 
 ## Temizlik ve teknik sınır
 
@@ -112,8 +114,10 @@ npm run spike:session-acceptance -- codex CODEX_UUID --real-account
 npm run spike:session-acceptance -- codex CODEX_UUID --real-account --resume
 ```
 
-Claude için provider `claude` seçilir. Önceden hazırlanmış public profile manifesti ve resmi kullanıcı girişi gerekir; komut kendiliğinden login/logout veya model çağrısı yapmaz. Status → namespace restart → status, Codex için resmi refresh → status → `account/rateLimits/read` sırası uygulanır. Claude için force-refresh/kota metodu varsayılmaz. Import sırasında CLI başlatılmaz; fixture'lar hesap olmadan çalışır. Gerçek hesap komutu CI'a bağlı değildir ve bu aşamada çalıştırılmadı.
+Claude için provider `claude` seçilir. Önceden hazırlanmış public profile manifesti ve resmi kullanıcı girişi gerekir; komut kendiliğinden login/logout veya model çağrısı yapmaz. Status → namespace restart → status, Codex için resmi refresh → status → `account/rateLimits/read` sırası uygulanır. Claude için force-refresh/kota metodu varsayılmaz. Import sırasında CLI başlatılmaz; fixture'lar hesap olmadan çalışır. Gerçek hesap komutu CI'a bağlı değildir. 2026-10-09'da Claude status/restart/status ve checkpoint geçti. Codex aynı status/restart aşamalarını geçti; resmi refresh isteği 30 saniyelik deadline ile başarısız oldu, cleanup doğrulandı. Sonraki gerçek Luna task'ında resmi refresh döndü; bu ayrı sonuç önceki runner başarısızlığını değiştirmez. Ayrı resmi salt okunur Codex quota snapshot'ı başarıyla normalleştirildi; değerler public kayda konmaz.
 
 Checkpoint profile/provider ve zamanlarla bağlı sınırlı metadatadır; credential içermez. Resume aralığı doğal token yenilemesi kanıtı olmaz. Kota `available` değeri bilginin okunabildiğini ifade eder; kullanılabilir bakiye garantisi değildir. Desteklenmeyen/bildirilmeyen bilgiler `unknown` kalır. Deadline/iptal ve cleanup ayrı sınırlar taşır; hâlâ bekleyen işlem varken cleanup kesinleşmiş sayılmaz. Ayrıntılar [ADR 0008](../adr/0008-session-continuity-quota-and-operation-fencing.md) içindedir.
+
+Önceki Docker login/fixture koşularındaki cleanup=false kayıtları korunur; yalnız exact container ID ve sahiplik doğrulamasıyla manuel uzlaştırma orphan kaynaklarını kaldırdı. Auth/tools hacimleri korundu. Sonradan yapılan temizlik önceki koşunun cleanup sonucunu değiştirmez.
 
 Güncel kabul sırası ve geliştirme sınırı [ADR 0012](../adr/0012-go-gate-priority-and-development-boundaries.md) içinde. Önce F0 auth/yenileme ve normal kullanımda kota gözlemleri tamamlanır; kota kasıtlı tüketilmez. Ucuz test modeli kullanılamazsa test durur. Desktop/API `execution_enabled=false`, tam izolasyon kapısı `not_evaluated` kalır.

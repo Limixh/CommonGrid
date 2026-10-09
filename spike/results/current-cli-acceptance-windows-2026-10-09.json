@@ -1,0 +1,194 @@
+{
+  "schema_version": "1.0",
+  "platform": "win32",
+  "local_date": "2026-10-09",
+  "timezone": "Europe/Istanbul",
+  "container_platform": "linux-x64",
+  "source_commit": "b2c28b15375d0e69f0c13c71f3a96c76211136be",
+  "source_sha256": {
+    "spike/cli-session/managed-task.mts": "444b2f358da7cce1c0b032ff924c4d453a326106f623fd7fec99112ce574fa50",
+    "spike/cli-session/managed-runtime.mts": "5f0d5bb236724dab41daeaaf771f333d10a6554f68587f27e0823e977491dcae",
+    "spike/cli-session/managed-provider-session.mts": "27d59c05fff65fb3fc73ce209d59d0ce6825bc5204d7e967917f1d628411285b",
+    "spike/cli-session/managed-session-acceptance.mts": "cd0b94da02cffb51702b696f022ebc3a68b65d0447ac991a712c9fb8d1814a25",
+    "spike/cli-session/binaries.lock.json": "5677d0fd8a192a0ae48ca6e07dae690bba23172de18878761c8c391b98cc2b39",
+    "spike/cli-session/codex-profile.mts": "d578b288359951deefa0712ba0c6206e94554d77ac4f46b682e7bdaa62d9eedd",
+    "packages/agent-adapters/testing/functional-test-models.ts": "537e6a9c90a6ca9697c7a99234f6b778abfe1fa026fabbde0330a1118796dd89"
+  },
+  "execution_enabled": false,
+  "isolation_gate": "not_evaluated",
+  "production_ready": false,
+  "credential_files_copied": false,
+  "paid_api_fallback": false,
+  "checked_at": "2026-10-08T21:14:06.209Z",
+  "purpose": "Current cheap-model tasks and separate official session/quota observations, including failed results",
+  "real_account_tested": true,
+  "real_tasks": {
+    "claude": "managed-task-haiku-windows-2026-10-09.json",
+    "codex": "managed-task-luna-windows-2026-10-09.json"
+  },
+  "both_real_coding_tasks_accepted": false,
+  "developer_task_execution_only": true,
+  "initial_cleanup_failures": {
+    "original_login_cleanup_confirmed": false,
+    "original_fixture_cleanup_confirmed": false,
+    "failure_scope": "Docker command/teardown deadlines; first synthetic fixture failed before any model inference",
+    "exact_owned_resources_reconciled": true,
+    "reconciliation_checked_at": "2026-10-08T21:02:26.823Z",
+    "reconciliation_cleanup_confirmed": true,
+    "private_auth_and_tools_volumes_retained": true,
+    "original_reports_rewritten": false,
+    "root_cause": "not_determined",
+    "automatic_crash_recovery_proven": false
+  },
+  "session_observations": {
+    "claude": {
+      "checked_at": "2026-10-08T21:03:06.647Z",
+      "provider": "claude",
+      "cli": {
+        "provider": "claude",
+        "version": "2.1.293",
+        "binary_sha256": "8968405e26db478af44eabc4635ab5ca557057b702a54460a59c13e1b253e978",
+        "official_binary_modified": false
+      },
+      "success": true,
+      "cleanup_confirmed": true,
+      "real_model_inference_attempted": false,
+      "resumed": false,
+      "logout_attempted": false,
+      "checkpoint_is_provider_renewal_proof": false,
+      "actual_token_rotation_observed": false,
+      "real_provider_expiry_acceptance": "pending",
+      "official_codex_refresh_requested": false,
+      "stages": [
+        {
+          "stage": "namespace_start",
+          "checked_at": "2026-10-08T21:03:06.650Z",
+          "elapsed_ms": 16974,
+          "success": true
+        },
+        {
+          "stage": "initial_authenticated_status",
+          "checked_at": "2026-10-08T21:03:23.624Z",
+          "elapsed_ms": 2030,
+          "success": true,
+          "authenticated": true,
+          "method": "claude.ai"
+        },
+        {
+          "stage": "namespace_stop_for_restart",
+          "checked_at": "2026-10-08T21:03:25.654Z",
+          "elapsed_ms": 2472,
+          "success": true
+        },
+        {
+          "stage": "namespace_restart",
+          "checked_at": "2026-10-08T21:03:28.126Z",
+          "elapsed_ms": 13172,
+          "success": true
+        },
+        {
+          "stage": "restart_authenticated_status",
+          "checked_at": "2026-10-08T21:03:41.298Z",
+          "elapsed_ms": 2294,
+          "success": true,
+          "authenticated": true,
+          "method": "claude.ai"
+        }
+      ]
+    },
+    "codex": {
+      "checked_at": "2026-10-08T21:04:42.856Z",
+      "provider": "codex",
+      "cli": {
+        "provider": "codex",
+        "version": "0.157.1",
+        "binary_sha256": "3e2584f3f3829a43a0495011a1cecb2facbe64a2403e2b682351fd9c2983f970",
+        "official_binary_modified": false
+      },
+      "success": false,
+      "cleanup_confirmed": true,
+      "real_model_inference_attempted": false,
+      "resumed": false,
+      "logout_attempted": false,
+      "checkpoint_is_provider_renewal_proof": false,
+      "actual_token_rotation_observed": false,
+      "real_provider_expiry_acceptance": "pending",
+      "official_codex_refresh_requested": true,
+      "stages": [
+        {
+          "stage": "namespace_start",
+          "checked_at": "2026-10-08T21:04:42.860Z",
+          "elapsed_ms": 14593,
+          "success": true
+        },
+        {
+          "stage": "initial_authenticated_status",
+          "checked_at": "2026-10-08T21:04:57.453Z",
+          "elapsed_ms": 3164,
+          "success": true,
+          "authenticated": true,
+          "method": "chatgpt"
+        },
+        {
+          "stage": "namespace_stop_for_restart",
+          "checked_at": "2026-10-08T21:05:00.617Z",
+          "elapsed_ms": 2195,
+          "success": true
+        },
+        {
+          "stage": "namespace_restart",
+          "checked_at": "2026-10-08T21:05:02.813Z",
+          "elapsed_ms": 12708,
+          "success": true
+        },
+        {
+          "stage": "restart_authenticated_status",
+          "checked_at": "2026-10-08T21:05:15.521Z",
+          "elapsed_ms": 4088,
+          "success": true,
+          "authenticated": true,
+          "method": "chatgpt"
+        },
+        {
+          "stage": "official_codex_refresh_request",
+          "checked_at": "2026-10-08T21:05:19.610Z",
+          "elapsed_ms": 30008,
+          "success": false,
+          "failure": "managed_provider_deadline"
+        }
+      ],
+      "failure": "managed_provider_deadline",
+      "provider_error_category": "deadline"
+    }
+  },
+  "codex_later_task_refresh": {
+    "official_request_returned": true,
+    "report": "managed-task-luna-windows-2026-10-09.json",
+    "previous_refresh_deadline_erased": false,
+    "actual_token_rotation_observed": false
+  },
+  "quota_observation": {
+    "checked_at": "2026-10-08T21:14:06.209Z",
+    "success": true,
+    "cleanup_confirmed": true,
+    "real_model_inference": false,
+    "state": "available",
+    "source": "official_codex_account_rate_limits_read",
+    "normalized_windows_count": 1,
+    "usage_and_reset_values_redacted_for_account_privacy": true,
+    "quota_exhaustion_verified": false,
+    "actual_reset_observed": false,
+    "quota_observation_is_usage_permission": false
+  },
+  "current_private_profiles_retained": true,
+  "natural_renewal_verified": false,
+  "concurrent_account_usage_verified": false,
+  "model_retry_or_expensive_fallback": false,
+  "decision": "NOT_EVALUATED",
+  "remaining": [
+    "Luna real changed candidate and independent verification",
+    "Natural Claude renewal or correctly handled re-login under later normal use",
+    "Provider quota/reset/account concurrency under normal use without deliberate quota consumption",
+    "Real-account portability and production isolation/crash ownership acceptance"
+  ]
+}
