@@ -5,6 +5,9 @@ fn main() {
             "local_cli_check_start",
             "local_cli_check_status",
             "local_cli_check_cancel",
+            "local_managed_profiles_status",
+            "local_managed_profile_create",
+            "local_managed_profile_select",
         ]),
     ))
     .expect("CommonGrid desktop build failed");

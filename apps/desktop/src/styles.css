@@ -1278,3 +1278,13 @@ h1 span {
 .cli-check-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 18px 0; }
 .cli-check-result { display: grid; gap: 10px; padding: 16px; margin-top: 16px; border: 1px solid var(--line); border-radius: 12px; }
 .cli-check-result code { overflow-wrap: anywhere; }
+.managed-profiles-panel .section-heading { flex-wrap: wrap; gap: 12px; }
+.managed-profile-form { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin: 20px 0; }
+.managed-profile-form label { display: grid; gap: 8px; flex: 1 1 180px; }
+.managed-profile-form input, .managed-profile-form select { width: 100%; min-height: 42px; padding: 8px 12px; }
+.managed-profile-list { padding: 0; margin: 18px 0 0; list-style: none; }
+.managed-profile-list li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 0; border-top: 1px solid var(--line); }
+.managed-profile-list li > div { display: grid; gap: 8px; min-width: 0; flex: 1 1 220px; }
+.managed-profile-list strong, .managed-profile-list span { overflow-wrap: anywhere; }
+.managed-profile-list span { color: var(--muted); font-size: 13px; }
+.managed-profile-selected { color: var(--green); font-size: 13px; }

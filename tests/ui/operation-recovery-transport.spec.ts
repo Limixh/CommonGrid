@@ -18,6 +18,7 @@ async function mockNative(page: Page, value: unknown = envelope, deferred = 0, r
     target.isTauri = true;
     target.__operationMock = {calls: [], value, deferred, pending: []};
     target.__TAURI_INTERNALS__ = {invoke: (command, args, options) => {
+      if (command === "local_managed_profiles_status") return Promise.resolve({schema_version: "1.0", availability: "unavailable", revision: 0, profiles: [], selected_profile_id: null});
       if (command === "local_cli_check_status") return Promise.resolve({schema_version: "1.0", availability: "available", operation: null});
       const mock = target.__operationMock;
       mock.calls.push({command, args, options});

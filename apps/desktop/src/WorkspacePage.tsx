@@ -1,0 +1,327 @@
+import { Icon } from "./Icon";
+import type { UIWords } from "./language";
+import type { Settings, Page } from "./ui-types";
+import type { TaskCatalog } from "./useTaskCatalog";
+
+type WorkspacePageProps = { catalog: TaskCatalog; settings: Settings; t: UIWords; setPage: (page: Page) => void };
+
+export function WorkspacePage({ catalog, settings, t, setPage }: WorkspacePageProps) {
+  const { projects, tasks, status, source, setSelected, query, setQuery, type, setType, project, setProject, tab, setTab, strategy, setStrategy, filtered, task, loadCatalog } = catalog;
+  return (
+    <div className="workspace-content">
+      <section className="hero">
+        <div>
+          <div className="eyebrow">
+            <span className="tiny-line" />
+            {t.eyebrow}
+          </div>
+          <h1>
+            {t.hero}
+            <br />
+            <span>{t.hero2}</span>
+          </h1>
+          <p>{t.subtitle}</p>
+        </div>
+        <div className="hero-graphic" aria-hidden="true">
+          <div className="orbit orbit-one" />
+          <div className="orbit orbit-two" />
+          <div className="graph-node gn1">∑</div>
+          <div className="graph-node gn2">{"{ }"}</div>
+          <div className="graph-node gn3">λ</div>
+          <div className="graph-node center-node">
+            <Icon name="grid" size={35} />
+          </div>
+          <div className="graph-node gn4">✓</div>
+          <div className="graph-node gn5">∞</div>
+          <span className="graph-label">COMMON / GRID</span>
+        </div>
+      </section>
+      {status === "ready" && <section className="stats-strip" aria-label="Catalog statistics">
+        {[
+          [projects.length, t.projects, "grid"],
+          [tasks.length, t.contracts, "file"],
+          [2, t.supported, "chip"],
+        ].map(([value, label, icon]) => (
+          <div className="stat" key={String(label)}>
+            <Icon name={String(icon)} size={20} />
+            <strong>{value}</strong>
+            <span>{label}</span>
+          </div>
+        ))}
+        <div className="gate-inline">
+          <Icon name="lock" size={16} />
+          {t.gate}
+        </div>
+      </section>}
+      <div className="workspace-grid">
+        <section className="catalog-panel">
+          <div className="section-heading">
+            <h2>{t.catalogue}</h2>
+            <button
+              className="icon-button"
+              aria-label={t.refresh}
+              onClick={() => void loadCatalog()}
+              disabled={status === "loading"}
+            >
+              <Icon name="refresh" size={17} />
+            </button>
+          </div>
+          <div className="catalog-toolbar">
+            <div className="search-field">
+              <Icon name="search" size={16} />
+              <input
+                aria-label={t.search}
+                placeholder={t.search}
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+            </div>
+            <select
+              aria-label={t.projects}
+              value={project}
+              onChange={(e) => setProject(e.target.value)}
+            >
+              <option value="all">{t.allProjects}</option>
+              {projects.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.title}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div
+            className="filter-tabs"
+            role="group"
+            aria-label="Task type"
+          >
+            {(["all", "lean", "software"] as const).map((k) => (
+              <button
+                className={type === k ? "selected" : ""}
+                key={k}
+                onClick={() => setType(k)}
+              >
+                {t[k]}
+                {status === "ready" && <span>
+                  {
+                    tasks.filter((task) => k === "all" || task.type === k)
+                      .length
+                  }
+                </span>}
+              </button>
+            ))}
+          </div>
+          {status === "unauthorized" ? (
+            <div className="empty-state" role="alert"><p>{t.signInNeeded}</p><button className="secondary-button" onClick={() => setPage("account")}>{t.account}</button></div>
+          ) : status === "error" ? (
+            <div className="empty-state" role="alert">
+              <p>{t.error}</p>
+              <button
+                className="secondary-button"
+                onClick={() => void loadCatalog()}
+              >
+                {t.refresh}
+              </button>
+            </div>
+          ) : status === "loading" ? (
+            <div className="empty-state">{t.checking}…</div>
+          ) : filtered.length === 0 ? (
+            <div className="empty-state">{source === "database" && tasks.length === 0 ? t.databaseEmpty : t.empty}</div>
+          ) : (
+            <div className="task-list">
+              {filtered.map((item) => (
+                <button
+                  key={item.id}
+                  className={
+                    "task-card " +
+                    (task?.id === item.id ? "selected" : "")
+                  }
+                  onClick={() => setSelected(item.id)}
+                  aria-pressed={task?.id === item.id}
+                >
+                  <div className="task-card-top">
+                    <span className={"type-icon " + item.type}>
+                      {item.type === "lean" ? (
+                        "∑"
+                      ) : (
+                        <Icon name="code" size={20} />
+                      )}
+                    </span>
+                    <span className="task-project">
+                      {
+                        projects.find((p) => p.id === item.project_id)
+                          ?.title
+                      }
+                    </span>
+                    <span className="kind-badge">
+                      {item.kind === "plan" ? t.plan : t.solve}
+                    </span>
+                  </div>
+                  <h3>{item.title}</h3>
+                  <p>{item.description}</p>
+                  <div className="task-card-footer">
+                    <span>
+                      <Icon name="clock" size={14} />
+                      {item.environment.time_limit_sec / 60} {t.min}
+                    </span>
+                    <span>
+                      {item.parallelism.mode === "exclusive"
+                        ? t.exclusive
+                        : t.independent}
+                    </span>
+                    <span className="points">
+                      {item.reward_points} {t.points}
+                      <Icon name="arrow" size={15} />
+                    </span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+          {source && <p className="fixture-note">
+            <Icon name="file" size={14} />
+            {source === "database" ? t.databaseNote : t.example}
+          </p>}
+        </section>
+        <aside className="detail-panel">
+          {task ? (
+            <>
+              <div className="detail-kicker">
+                <span>{t.selected}</span>
+                <span>v{task.task_version}</span>
+              </div>
+              <h2>{task.title}</h2>
+              <div className="detail-tabs">
+                <button
+                  className={tab === "overview" ? "selected" : ""}
+                  onClick={() => setTab("overview")}
+                >
+                  {t.detail}
+                </button>
+                <button
+                  className={tab === "contract" ? "selected" : ""}
+                  onClick={() => setTab("contract")}
+                >
+                  {t.contract}
+                </button>
+              </div>
+              {tab === "contract" ? (
+                <pre
+                  className="contract-json"
+                  data-testid="contract-json"
+                >
+                  {JSON.stringify(task, null, 2)}
+                </pre>
+              ) : (
+                <>
+                  <p className="detail-description">{task.prompt}</p>
+                  <label className="field-label" htmlFor="strategy">
+                    {t.strategy}
+                  </label>
+                  <select
+                    id="strategy"
+                    value={strategy}
+                    onChange={(e) => setStrategy(e.target.value)}
+                  >
+                    {task.strategies.map((s) => (
+                      <option value={s.id} key={s.id}>
+                        {s.id}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="strategy-description">
+                    {
+                      task.strategies.find((s) => s.id === strategy)
+                        ?.instructions
+                    }
+                  </p>
+                  <div className="resource-grid">
+                    <span>
+                      CPU
+                      <strong>
+                        {Math.min(task.environment.cpu, settings.cpu)}{" "}
+                        <small>core</small>
+                      </strong>
+                    </span>
+                    <span>
+                      RAM
+                      <strong>
+                        {Math.min(
+                          task.environment.memory_mb,
+                          settings.memoryMb,
+                        ) / 1024}{" "}
+                        <small>GB</small>
+                      </strong>
+                    </span>
+                    <span>
+                      {t.limit}
+                      <strong>
+                        {Math.min(
+                          task.environment.time_limit_sec / 60,
+                          settings.taskMinutes,
+                          settings.dailyMinutes,
+                        )}{" "}
+                        <small>{t.min}</small>
+                      </strong>
+                    </span>
+                  </div>
+                  <h4>{t.milestones}</h4>
+                  <div className="milestone-list">
+                    {task.progress.milestones.map((m) => (
+                      <div key={m.id}>
+                        <span className="milestone-circle" />
+                        <span>
+                          {m.name}
+                          <small>{m.critical ? t.critical : ""}</small>
+                        </span>
+                        <strong>{Math.round(m.weight * 100)}%</strong>
+                      </div>
+                    ))}
+                    {!task.progress.milestones.length && (
+                      <p className="muted-note">{t.noMilestones}</p>
+                    )}
+                  </div>
+                  <h4>{t.files}</h4>
+                  <div className="file-manifest">
+                    {task.workspace.entry_files.map((file) => (
+                      <div key={file}>
+                        <Icon name="file" size={14} />
+                        <code>{file}</code>
+                        <span>
+                          {task.workspace.writable_paths.includes(file)
+                            ? "rw"
+                            : "r"}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+              <div className="contract-hash" title={task.contract_hash}>
+                <Icon name="lock" size={12} />
+                <span>sha256:{task.contract_hash.slice(0, 12)}…</span>
+                <span>v{task.task_version}</span>
+              </div>
+              <div className="start-area">
+                <button className="start-button" disabled>
+                  <Icon name="lock" size={17} />
+                  {t.start}
+                </button>
+                <strong>{t.gate}</strong>
+                <p>{t.gateText}</p>
+                <button
+                  className="text-button"
+                  onClick={() => setPage("agents")}
+                >
+                  {t.inspect}
+                  <Icon name="arrow" size={14} />
+                </button>
+              </div>
+            </>
+          ) : (
+            <p className="empty-state">{t.noSelect}</p>
+          )}
+        </aside>
+      </div>
+    </div>
+  );
+}

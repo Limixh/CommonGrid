@@ -4,6 +4,8 @@
 
 ## Güncel kanıt
 
+Profil adı/ajan seçimi ve seçili profil, native uygulama deposunda kalıcıdır; bunlar henüz CLI hesabına bağlanmamış tercihlerdir. Genel görev veya kimlik doğrulama yetkisi vermez. `App.tsx` katalog, ortam ve katkı ayarları modüllerine ayrıldı. Resmi sağlayıcı oturum kodu ürün paketine taşındı; Codex cihaz kodu için geçici callback hazır, native giriş bağlantısı sıradaki iştir.
+
 `9d9e7ed` kaynağıyla [Windows uygulamasındaki native CLI sürüm kontrolü](../spike/results/native-cli-launcher-node22-windows-2026-10-11.json) kabul edildi. Gerçek WebView2 koşusunda dokuz kontrol geçti: resmi Codex `0.157.1` ve Claude Code `2.1.293` sürümleri, yinelenen istekler, sürüme bağlı iptal, günlük eşleşmesi ve bağımsız Docker kaynak yokluğu. Koşu Node `22.23.3` ve production frontend kullanan debug uygulamayla yapıldı; hesap/model çağrısı yok. Node `22.23.3` ve `22.14.0` için ayrı ayrı 19 paralel Rust testi geçti. Uzun Windows yolları çalışır; belirsiz yol bileşenleri çalıştırmadan önce reddedilir. Kapsam [ADR 0019](../spike/adr/0019-native-owned-cli-version-check.md) içindedir.
 
 [Aynı kaynağın CI koşusunda](../spike/results/github-foundations-9d9e7ed-2026-10-11.json) 11 iş geçti: Windows/macOS/Linux native testleri ve derlemeleri, 377 Node testi, 40 browser UI testi, Go/şema/tip kontrolleri ve derleme. TypeScript ile Rust 107 ortak günlük örneğinde aynı sonucu verdi. Linux'ta 20 resmi CLI protokol kontrolü ve 54 sentetik Docker grubu cleanup doğrulamasıyla geçti. Browser native mock'ları gerçek Windows koşusundan ayrı kanıttır. Önceki Node yol hatası, disk dolması ve Docker'ın kapalı olduğu koşu kendi başarısız sonuçlarıyla [rapor dizininde](../spike/results/README.md) korunur.
@@ -31,7 +33,7 @@ Yeni Haiku/Luna profilleri sonraki normal gözlemler için giriş yapmış halde
 ## Çalışma sırası
 
 1. Native sürüm kontrolünün ardından uygulamada görünür tek bir görev akışını tamamla: profil seçimi → resmi CLI girişi/durumu → onaylı görev → Başlat → ilerleme/iptal → doğrulanmış diff. Mevcut yönetilen CLI, görev araçları, işlem sahipliği ve doğrulayıcıyı kullan. İlk akış kabul edilen ajan/platform/görev kapsamında açılır.
-2. Bu akışı geliştirirken `App.tsx` içindeki katalog ve görev detayını `WorkspacePage`/`useTaskCatalog`, ortam ekranını `EnvironmentPage`, katkı ayarlarını `ContributionSettingsPage` olarak ayır; mevcut arayüz davranışını koru.
+2. `App.tsx` ayrıştırması tamamlandı: katalog ve görev detayı `WorkspacePage`/`useTaskCatalog`, ortam ekranı `EnvironmentPage`, katkı ayarları `ContributionSettingsPage` içinde. Yeni giriş/görev panellerini bu modüllere bağla; mevcut arayüz davranışını koru.
 3. Akışın kendi kimlik izolasyonu, süre sınırı, iptal ve kaynak sahipliği kontrollerini tamamla. Create cevabının kaybı, daemon kesintisi veya belirsiz cleanup durumunda yeni başlangıcı engelle ve manuel inceleme göster; operatör beyanını otomatik durma kanıtı sayma. Doğal kota tükenmesi, üç platformun tümü ve her otomatik recovery yolu, dar kapsamda kabul edilen herhangi bir görevin başlaması için ortak önkoşul değildir. Oturum/limit davranışını normal kullanımda gözle; diğer ajan/platform ve recovery yollarını ayrıca tamamla. Dar kabul tüm v1'e yayılmaz; genel GO durumu değişmez.
 
 Mevcut yaşam döngüsünü tamamlıyoruz; yeni genel altyapı katmanı eklemiyoruz. Kalan v1 fazları [yol haritasında](../implementation_roadmap1.3.md), test komutları [geliştirme rehberinde](DEVELOPMENT.md), gerçek oturum prosedürü [MANAGED_SESSIONS.md](../spike/cli-session/MANAGED_SESSIONS.md) durur.

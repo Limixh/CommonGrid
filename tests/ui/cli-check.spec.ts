@@ -18,6 +18,7 @@ async function mockNative(page: Page, value: unknown = empty, deferred = 0) {
     target.isTauri = true;
     target.__cliMock = {calls: [], value, deferred, pending: [], startDeferred: false, rejected: false};
     target.__TAURI_INTERNALS__ = {invoke: (command, args) => {
+      if (command === "local_managed_profiles_status") return Promise.resolve({schema_version: "1.0", availability: "unavailable", revision: 0, profiles: [], selected_profile_id: null});
       if (command === "local_operation_status") return Promise.resolve({status: "unavailable", reason: "operation_journal_missing", execution_enabled: false, automatic_recovery: false, worker_quiescence: "unknown", daemon_state: "unknown", operations: []});
       const mock = target.__cliMock; mock.calls.push({command, args});
       if (mock.rejected) return Promise.reject(new Error("private/auth/secret"));
@@ -201,8 +202,10 @@ test("automatic observation stops after 420 polls without inventing completion o
   const initial = await page.evaluate(() => (window as MockWindow).__cliMock.calls.length);
   for (let poll = 0; poll < 420; poll++) {
     await page.clock.fastForward(1100);
-    await expect.poll(() => page.evaluate(() => (window as MockWindow).__cliMock.calls.length)).toBe(initial + poll + 1);
-    await expect(panel).toHaveAttribute("aria-busy", "false");
+    await expect.poll(() => page.evaluate(() => ({
+      calls: (window as MockWindow).__cliMock.calls.length,
+      busy: document.querySelector(".cli-check-panel")?.getAttribute("aria-busy"),
+    }))).toEqual({calls: initial + poll + 1, busy: "false"});
   }
   await expect(panel).toContainText("Otomatik güncelleme durdu");
   const calls = await page.evaluate(() => (window as MockWindow).__cliMock.calls);

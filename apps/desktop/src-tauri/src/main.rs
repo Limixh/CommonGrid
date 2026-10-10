@@ -3,6 +3,7 @@ mod launcher;
 mod launcher_process;
 mod operation_journal;
 mod operation_status;
+mod profile_store;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
@@ -25,7 +26,10 @@ fn main() {
             operation_status::local_operation_status,
             launcher::local_cli_check_start,
             launcher::local_cli_check_status,
-            launcher::local_cli_check_cancel
+            launcher::local_cli_check_cancel,
+            profile_store::local_managed_profiles_status,
+            profile_store::local_managed_profile_create,
+            profile_store::local_managed_profile_select
         ])
         .build(application_context())
         .expect("CommonGrid desktop could not start")

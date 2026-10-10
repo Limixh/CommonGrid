@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "local-managed-profiles"
+description = "Read, reserve and select public local profile configuration. No account, credential, CLI, Docker, path or shell access."
+commands.allow = ["local_managed_profiles_status", "local_managed_profile_create", "local_managed_profile_select"]
