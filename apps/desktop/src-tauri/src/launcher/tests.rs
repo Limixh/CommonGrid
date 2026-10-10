@@ -105,6 +105,160 @@ fn terminal(owner: &Launcher) -> Operation {
     }
 }
 const PASS: &str = r#"import{createInterface}from'node:readline';const lines=createInterface({input:process.stdin});lines.once('line',line=>{const b=JSON.parse(line);if(b.type!=='boot'||b.schema_version!=='1.0')process.exit(2);console.log(JSON.stringify({type:'progress',phase:'preparing'}));console.log(JSON.stringify({type:'progress',phase:'checking'}));console.log(JSON.stringify({type:'progress',phase:'cleaning'}));console.log(JSON.stringify({type:'result',outcome:'passed',cli_version:'fixture-cli 1.2.3',error_code:null,cleanup:'verified'}));lines.close();process.stdin.destroy();});"#;
+#[cfg(windows)]
+fn assert_owned_pass(root: &Path, entry: &Path, home: &Path) {
+    fn capture(stream: impl Read + Send + 'static) -> mpsc::Receiver<Vec<u8>> {
+        let (sender, receiver) = mpsc::sync_channel(1);
+        thread::spawn(move || {
+            let mut bytes = Vec::new();
+            let _ = stream.take(8192).read_to_end(&mut bytes);
+            let _ = sender.send(bytes);
+        });
+        receiver
+    }
+    let mut owned = OwnedWorker::spawn(&root.join(node_name()), entry, home).unwrap();
+    let stdout = capture(owned.child.stdout.take().unwrap());
+    let stderr = capture(owned.child.stderr.take().unwrap());
+    let mut input = owned.child.stdin.take().unwrap();
+    writeln!(input, "{}", serde_json::json!({"type":"boot","schema_version":"1.0","request_id":ID,"provider":"codex","journal_root":home.join("journal"),"assets_root":root})).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let exit = loop {
+        if let Some(exit) = owned.poll().unwrap() {
+            break Some(exit);
+        }
+        if Instant::now() >= deadline {
+            owned.terminate();
+            let stop_deadline = Instant::now() + Duration::from_secs(2);
+            let mut exit = None;
+            while Instant::now() < stop_deadline {
+                exit = owned.poll().unwrap();
+                if exit.is_some() {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(10));
+            }
+            break exit;
+        }
+        thread::sleep(Duration::from_millis(10));
+    };
+    drop(input);
+    drop(owned);
+    let output = stdout.recv_timeout(Duration::from_secs(1)).unwrap();
+    let errors = stderr.recv_timeout(Duration::from_secs(1)).unwrap();
+    assert!(
+        exit.is_some_and(|status| status.success()),
+        "synthetic Node entry failed: exit={exit:?}, stderr={}",
+        String::from_utf8_lossy(&errors)
+    );
+    assert!(errors.is_empty(), "unexpected synthetic Node stderr");
+    let output = std::str::from_utf8(&output).unwrap();
+    let frames = output
+        .lines()
+        .map(|line| serde_json::from_str::<Frame>(line).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(frames.len(), 4, "incomplete synthetic output: {output}");
+    assert!(matches!(
+        frames.last(),
+        Some(Frame::Result {
+            outcome: Outcome::Passed,
+            cleanup: Cleanup::Verified,
+            cli_version: Some(version),
+            error_code: None,
+        }) if version == "fixture-cli 1.2.3"
+    ));
+}
+
+#[test]
+fn invalid_worker_resources_are_denied_before_home_creation() {
+    let fixture = Fixture::new();
+    let root = fixture.resources(PASS);
+    let directory_entry = root.join("directory-entry");
+    fs::create_dir(&directory_entry).unwrap();
+    let home = fixture.directory.join("denied-home");
+    for (node, entry) in [
+        (PathBuf::from(node_name()), root.join("worker.mjs")),
+        (root.join(node_name()), PathBuf::from("worker.mjs")),
+        (root.join("missing-node"), root.join("worker.mjs")),
+        (root.join(node_name()), root.join("missing-worker.mjs")),
+        (root.join(node_name()), directory_entry),
+    ] {
+        assert!(OwnedWorker::spawn(&node, &entry, &home).is_err());
+        assert!(!home.exists());
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn canonical_windows_entry_and_long_path_run_in_owned_worker() {
+    use std::os::windows::ffi::OsStrExt;
+    use std::path::{Component, Prefix};
+    let fixture = Fixture::new();
+    let root = fixture.resources(PASS);
+    let canonical = fs::canonicalize(root.join("worker.mjs")).unwrap();
+    assert!(
+        matches!(canonical.components().next(), Some(Component::Prefix(prefix)) if matches!(prefix.kind(), Prefix::VerbatimDisk(_)))
+    );
+    assert_owned_pass(&root, &canonical, &fixture.directory.join("canonical-home"));
+    let mut long_directory = root.clone();
+    while long_directory.as_os_str().encode_wide().count() < 280 {
+        long_directory.push("long-entry-component");
+    }
+    fs::create_dir_all(&long_directory).unwrap();
+    let long_entry = long_directory.join("worker.mjs");
+    fs::write(&long_entry, PASS).unwrap();
+    let long_entry = fs::canonicalize(long_entry).unwrap();
+    assert_owned_pass(&root, &long_entry, &fixture.directory.join("long-home"));
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_entry_prefixes_preserve_unc_and_reject_device_namespaces() {
+    use crate::launcher_process::windows_node_entry_path;
+    use std::os::windows::ffi::OsStrExt;
+    assert_eq!(
+        windows_node_entry_path(Path::new(r"\\?\UNC\server\share\folder\worker.mjs")).unwrap(),
+        PathBuf::from(r"\\server\share\folder\worker.mjs")
+    );
+    assert!(windows_node_entry_path(Path::new(r"\\?\GLOBALROOT\Device\worker.mjs")).is_err());
+    assert!(windows_node_entry_path(Path::new(r"\\.\Device\worker.mjs")).is_err());
+    for entry in [
+        r"D:\folder.\worker.mjs",
+        r"\\?\D:\folder \worker.mjs",
+        r"\\server.\share\worker.mjs",
+        r"\\?\UNC\server\share \worker.mjs",
+    ] {
+        assert!(windows_node_entry_path(Path::new(entry)).is_err());
+    }
+    let fixture = Fixture::new();
+    let root = fixture.resources(PASS);
+    let trailing_entry = root.join("worker.mjs.");
+    fs::write(&trailing_entry, PASS).unwrap();
+    let home = fixture.directory.join("ambiguous-home");
+    assert!(OwnedWorker::spawn(&root.join(node_name()), &trailing_entry, &home).is_err());
+    assert!(!home.exists());
+    for long in [false, true] {
+        let mut base = root.clone();
+        if long {
+            while base.as_os_str().encode_wide().count() < 280 {
+                base.push("long-entry-component");
+            }
+        }
+        for ambiguous in ["directory.", "directory "] {
+            let directory = base.join(ambiguous);
+            fs::create_dir_all(&directory).unwrap();
+            let entry = directory.join("worker.mjs");
+            fs::write(&entry, PASS).unwrap();
+            let ordinary = std::env::temp_dir()
+                .join(fixture.directory.file_name().unwrap())
+                .join(entry.strip_prefix(&fixture.directory).unwrap());
+            for entry in [&entry, &ordinary] {
+                assert!(OwnedWorker::spawn(&root.join(node_name()), entry, &home).is_err());
+                assert!(!home.exists());
+            }
+        }
+    }
+}
+
 #[test]
 fn protocol_rejects_unknown_fields_and_invalid_terminal_claims() {
     assert!(valid_result(
@@ -279,6 +433,7 @@ fn a_result_before_cleaning_cannot_claim_passed() {
 #[test]
 fn linked_worker_home_and_config_are_rejected_before_spawn() {
     let fixture = Fixture::new();
+    let root = fixture.resources(PASS);
     let target = Fixture::new();
     let home = fixture.directory.join("home");
     fs::create_dir(&home).unwrap();
@@ -298,12 +453,7 @@ fn linked_worker_home_and_config_are_rejected_before_spawn() {
     {
         std::os::unix::fs::symlink(&target.directory, &linked).unwrap();
     }
-    assert!(OwnedWorker::spawn(
-        &fixture.directory.join(node_name()),
-        &fixture.directory.join("worker.mjs"),
-        &home
-    )
-    .is_err());
+    assert!(OwnedWorker::spawn(&root.join(node_name()), &root.join("worker.mjs"), &home).is_err());
     assert!(!home.join("tmp").exists());
     assert_eq!(fs::read_dir(&target.directory).unwrap().count(), 0);
     assert!(!safe_ancestors(&linked));

@@ -94,13 +94,74 @@ fn docker_directory() -> Option<PathBuf> {
     })
 }
 
+#[cfg(windows)]
+pub(crate) fn windows_node_entry_path(path: &Path) -> io::Result<PathBuf> {
+    use std::os::windows::ffi::OsStrExt;
+    use std::path::{Component, Prefix};
+    let mut components = path.components();
+    let Some(Component::Prefix(prefix)) = components.next() else {
+        return Err(io::Error::other("unsafe_worker_entry"));
+    };
+    // Rust may retain verbatim semantics for a long complete path while Node
+    // resolves shorter ordinary prefixes. Reject Win32-ambiguous endings at
+    // every length, including ordinary entries and UNC server/share names.
+    let unambiguous = |value: &std::ffi::OsStr| {
+        !value
+            .encode_wide()
+            .last()
+            .is_some_and(|last| last == b'.' as u16 || last == b' ' as u16)
+    };
+    if components
+        .clone()
+        .any(|part| matches!(part, Component::Normal(value) if !unambiguous(value)))
+        || matches!(prefix.kind(), Prefix::UNC(server, share) | Prefix::VerbatimUNC(server, share) if !unambiguous(server) || !unambiguous(share))
+    {
+        return Err(io::Error::other("unsafe_worker_entry"));
+    }
+    // Node 22.23.3 cannot resolve a verbatim Windows entry argument. Translate
+    // only drive/UNC prefixes, retaining the lossless path components, including
+    // long tails. Device/volume namespaces have no supported ordinary form.
+    // This conversion alone does not authorize the path: spawn verifies that
+    // its ordinary spelling resolves to the same validated canonical file.
+    let mut entry = match prefix.kind() {
+        Prefix::VerbatimDisk(drive) => PathBuf::from(format!("{}:\\", char::from(drive))),
+        Prefix::VerbatimUNC(server, share) => {
+            let mut unc = PathBuf::from(r"\\");
+            unc.push(server);
+            unc.push(share);
+            unc
+        }
+        Prefix::Verbatim(_) | Prefix::DeviceNS(_) => {
+            return Err(io::Error::other("unsafe_worker_entry"));
+        }
+        _ => return Ok(path.to_path_buf()),
+    };
+    entry.extend(components.filter(|part| !matches!(part, Component::RootDir)));
+    Ok(entry)
+}
+
 impl OwnedWorker {
     pub fn spawn(node: &Path, worker: &Path, home: &Path) -> io::Result<Self> {
-        if !node.parent().is_some_and(safe_ancestors)
+        if !regular(node)
+            || !regular(worker)
+            || !node.parent().is_some_and(safe_ancestors)
             || !worker.parent().is_some_and(safe_ancestors)
         {
             return Err(io::Error::other("unsafe_worker_resources"));
         }
+        #[cfg(windows)]
+        let entry = {
+            let entry = windows_node_entry_path(worker)?;
+            if !regular(&entry)
+                || !entry.parent().is_some_and(safe_ancestors)
+                || fs::canonicalize(&entry)? != fs::canonicalize(worker)?
+            {
+                return Err(io::Error::other("unsafe_worker_entry"));
+            }
+            entry
+        };
+        #[cfg(not(windows))]
+        let entry = worker;
         // Preflight all existing children before creating any new directories.
         for name in ["docker", "tmp", "config", "data", "cache"] {
             let target = home.join(name);
@@ -122,7 +183,7 @@ impl OwnedWorker {
         }
         let mut command = Command::new(node);
         command
-            .arg(worker)
+            .arg(entry)
             .current_dir(home)
             .env_clear()
             .env("HOME", home)
