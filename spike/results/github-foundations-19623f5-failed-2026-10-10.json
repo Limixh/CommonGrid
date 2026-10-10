@@ -1,0 +1,212 @@
+{
+  "schema_version": "1.0",
+  "purpose": "preserve_native_context_macOS_compile_failure",
+  "checked_at": "2026-10-10T11:15:34.435Z",
+  "repository": "https://github.com/Limixh/CommonGrid",
+  "run_id": 38046754371,
+  "run_url": "https://github.com/Limixh/CommonGrid/actions/runs/38046754371",
+  "head_sha": "19623f514a79b28067185b1fb137248768e1a5bd",
+  "attempt": 1,
+  "status": "completed",
+  "conclusion": "failure",
+  "jobs": [
+    {
+      "name": "sandbox-fixtures",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/38046754371/job/114197728546",
+      "started_at": "2026-10-10T10:58:25Z",
+      "completed_at": "2026-10-10T10:59:03Z",
+      "acceptance_steps": []
+    },
+    {
+      "name": "desktop-compile (windows-latest)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/38046754371/job/114197728662",
+      "started_at": "2026-10-10T10:58:27Z",
+      "completed_at": "2026-10-10T11:12:27Z",
+      "acceptance_steps": [
+        {
+          "name": "Run node --import tsx --test packages/agent-adapters/test/owned-process.test.ts packages/agent-adapters/test/operation-journal.test.ts",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run npm run test:native",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run node scripts/native.mjs build --no-bundle",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "name": "desktop-compile (macos-latest)",
+      "status": "completed",
+      "conclusion": "failure",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/38046754371/job/114197728694",
+      "started_at": "2026-10-10T10:58:28Z",
+      "completed_at": "2026-10-10T10:59:15Z",
+      "acceptance_steps": [
+        {
+          "name": "Run node --import tsx --test packages/agent-adapters/test/owned-process.test.ts packages/agent-adapters/test/operation-journal.test.ts",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run npm run test:native",
+          "status": "completed",
+          "conclusion": "failure"
+        },
+        {
+          "name": "Run node scripts/native.mjs build --no-bundle",
+          "status": "completed",
+          "conclusion": "skipped"
+        }
+      ]
+    },
+    {
+      "name": "artifact-delivery",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/38046754371/job/114197728696",
+      "started_at": "2026-10-10T10:58:25Z",
+      "completed_at": "2026-10-10T10:59:23Z",
+      "acceptance_steps": []
+    },
+    {
+      "name": "desktop-compile (ubuntu-latest)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/38046754371/job/114197728710",
+      "started_at": "2026-10-10T10:58:25Z",
+      "completed_at": "2026-10-10T11:05:31Z",
+      "acceptance_steps": [
+        {
+          "name": "Run node --import tsx --test packages/agent-adapters/test/owned-process.test.ts packages/agent-adapters/test/operation-journal.test.ts",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run npm run test:native",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run node scripts/native.mjs build --no-bundle",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "name": "cli-session-fixtures",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/38046754371/job/114197728711",
+      "started_at": "2026-10-10T10:58:25Z",
+      "completed_at": "2026-10-10T11:01:52Z",
+      "acceptance_steps": [
+        {
+          "name": "Run npm run spike:cli-session",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run npm run spike:managed-adversarial",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run npm run spike:session-continuity",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run npm run spike:owner-crash",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "name": "temporal-fixtures (ubuntu-latest)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/38046754371/job/114197728715",
+      "started_at": "2026-10-10T10:58:25Z",
+      "completed_at": "2026-10-10T11:00:00Z",
+      "acceptance_steps": []
+    },
+    {
+      "name": "temporal-fixtures (macos-latest)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/38046754371/job/114197728727",
+      "started_at": "2026-10-10T10:58:28Z",
+      "completed_at": "2026-10-10T10:59:09Z",
+      "acceptance_steps": []
+    },
+    {
+      "name": "postgres-domain",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/38046754371/job/114197728735",
+      "started_at": "2026-10-10T10:58:25Z",
+      "completed_at": "2026-10-10T10:59:49Z",
+      "acceptance_steps": []
+    },
+    {
+      "name": "temporal-fixtures (windows-latest)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/38046754371/job/114197728796",
+      "started_at": "2026-10-10T10:58:25Z",
+      "completed_at": "2026-10-10T11:00:35Z",
+      "acceptance_steps": []
+    },
+    {
+      "name": "contracts-api-ui",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/38046754371/job/114197728804",
+      "started_at": "2026-10-10T10:58:25Z",
+      "completed_at": "2026-10-10T11:00:14Z",
+      "acceptance_steps": [
+        {
+          "name": "Run npm run check",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run npm run test:ui",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    }
+  ],
+  "successful_jobs": 10,
+  "failed_jobs": [
+    {
+      "name": "desktop-compile (macos-latest)",
+      "steps": [
+        "Run npm run test:native"
+      ]
+    }
+  ],
+  "real_account_tested": false,
+  "real_model_inference": false,
+  "scope_limits": [
+    "Exact source only; three-platform native unit/ACL mock runtime and native compile jobs are distinct from real Windows WebView2 acceptance",
+    "Synthetic Docker/CLI fixture responses only; no actual subscription, refresh, quota or account-concurrency inference",
+    "Native CLI task launcher, installer/signing/account login and automatic recovery remain separate acceptance work"
+  ],
+  "observed_cause": "Rust compiler duplicate _EMBED_INFO_PLIST at operation_status.rs generate_context macro expansion",
+  "followup_fix_commit": "bed8be2b8f065eff10618fa2e9dfb5ff661cca51",
+  "result_not_reclassified": true
+}

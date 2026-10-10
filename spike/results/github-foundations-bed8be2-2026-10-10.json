@@ -1,0 +1,373 @@
+{
+  "schema_version": "1.0",
+  "purpose": "remote_foundations_with_native_operation_journal_bridge",
+  "checked_at": "2026-10-10T11:18:11.708Z",
+  "repository": "https://github.com/Limixh/CommonGrid",
+  "run_id": 38047041303,
+  "run_url": "https://github.com/Limixh/CommonGrid/actions/runs/38047041303",
+  "head_sha": "bed8be2b8f065eff10618fa2e9dfb5ff661cca51",
+  "attempt": 1,
+  "status": "completed",
+  "conclusion": "success",
+  "jobs": [
+    {
+      "name": "sandbox-fixtures",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/38047041303/job/114198547528",
+      "started_at": "2026-10-10T11:03:11Z",
+      "completed_at": "2026-10-10T11:03:49Z",
+      "acceptance_steps": []
+    },
+    {
+      "name": "desktop-compile (windows-latest)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/38047041303/job/114198547676",
+      "started_at": "2026-10-10T11:03:12Z",
+      "completed_at": "2026-10-10T11:18:05Z",
+      "acceptance_steps": [
+        {
+          "name": "Run node --import tsx --test packages/agent-adapters/test/owned-process.test.ts packages/agent-adapters/test/operation-journal.test.ts",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run npm run test:native",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run node scripts/native.mjs build --no-bundle",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "name": "desktop-compile (macos-latest)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/38047041303/job/114198547683",
+      "started_at": "2026-10-10T11:03:14Z",
+      "completed_at": "2026-10-10T11:05:01Z",
+      "acceptance_steps": [
+        {
+          "name": "Run node --import tsx --test packages/agent-adapters/test/owned-process.test.ts packages/agent-adapters/test/operation-journal.test.ts",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run npm run test:native",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run node scripts/native.mjs build --no-bundle",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "name": "postgres-domain",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/38047041303/job/114198547698",
+      "started_at": "2026-10-10T11:03:11Z",
+      "completed_at": "2026-10-10T11:04:20Z",
+      "acceptance_steps": []
+    },
+    {
+      "name": "desktop-compile (ubuntu-latest)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/38047041303/job/114198547720",
+      "started_at": "2026-10-10T11:03:11Z",
+      "completed_at": "2026-10-10T11:11:46Z",
+      "acceptance_steps": [
+        {
+          "name": "Run node --import tsx --test packages/agent-adapters/test/owned-process.test.ts packages/agent-adapters/test/operation-journal.test.ts",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run npm run test:native",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run node scripts/native.mjs build --no-bundle",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "name": "temporal-fixtures (windows-latest)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/38047041303/job/114198547729",
+      "started_at": "2026-10-10T11:03:11Z",
+      "completed_at": "2026-10-10T11:05:01Z",
+      "acceptance_steps": []
+    },
+    {
+      "name": "contracts-api-ui",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/38047041303/job/114198547730",
+      "started_at": "2026-10-10T11:03:12Z",
+      "completed_at": "2026-10-10T11:04:46Z",
+      "acceptance_steps": [
+        {
+          "name": "Run npm run check",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run npm run test:ui",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "name": "temporal-fixtures (macos-latest)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/38047041303/job/114198547744",
+      "started_at": "2026-10-10T11:03:14Z",
+      "completed_at": "2026-10-10T11:03:53Z",
+      "acceptance_steps": []
+    },
+    {
+      "name": "cli-session-fixtures",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/38047041303/job/114198547806",
+      "started_at": "2026-10-10T11:03:12Z",
+      "completed_at": "2026-10-10T11:06:40Z",
+      "acceptance_steps": [
+        {
+          "name": "Run npm run spike:cli-session",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run npm run spike:managed-adversarial",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run npm run spike:session-continuity",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run npm run spike:owner-crash",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "name": "temporal-fixtures (ubuntu-latest)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/38047041303/job/114198547827",
+      "started_at": "2026-10-10T11:03:11Z",
+      "completed_at": "2026-10-10T11:04:19Z",
+      "acceptance_steps": []
+    },
+    {
+      "name": "artifact-delivery",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/38047041303/job/114198547994",
+      "started_at": "2026-10-10T11:03:12Z",
+      "completed_at": "2026-10-10T11:04:10Z",
+      "acceptance_steps": []
+    }
+  ],
+  "successful_jobs": 11,
+  "failed_jobs": [],
+  "real_account_tested": false,
+  "real_model_inference": false,
+  "scope_limits": [
+    "Exact source only; three-platform native unit/ACL mock runtime and native compile jobs are distinct from real Windows WebView2 acceptance",
+    "Synthetic Docker/CLI fixture responses only; no actual subscription, refresh, quota or account-concurrency inference",
+    "Native CLI task launcher, installer/signing/account login and automatic recovery remain separate acceptance work"
+  ],
+  "local_native_evidence": "native-operation-status-windows-2026-10-10.json",
+  "local_source_hashes_match": true,
+  "native_test_platforms": 3,
+  "shared_native_contract_cases_per_platform": 107,
+  "linux_synthetic_cli_and_docker": {
+    "cli-session": {
+      "run_id": "aae8bccf-094b-49c6-8fb2-afcec946d4fb",
+      "checked_at": "2026-10-10T11:03:37.564Z",
+      "success": true,
+      "cleanup_confirmed": true,
+      "providers": {
+        "claude": {
+          "status": "passed",
+          "group_count": 10,
+          "checks": [
+            "official_binary_version",
+            "real_cli_wire_request",
+            "native_file_command_tools_absent",
+            "task_tool_roundtrip",
+            "task_workspace_written",
+            "fake_auth_inaccessible_to_task",
+            "control_unreachable_to_task",
+            "canary_unchanged",
+            "wrong_control_token_denied",
+            "attempt_selection_denied"
+          ]
+        },
+        "codex": {
+          "status": "passed",
+          "group_count": 10,
+          "checks": [
+            "official_binary_version",
+            "real_cli_wire_request",
+            "native_file_command_tools_absent",
+            "task_tool_roundtrip",
+            "task_workspace_written",
+            "fake_auth_inaccessible_to_task",
+            "control_unreachable_to_task",
+            "canary_unchanged",
+            "wrong_control_token_denied",
+            "attempt_selection_denied"
+          ]
+        }
+      }
+    },
+    "managed-owner-crash": {
+      "run_id": "58d2f2a5-80cf-49f4-8240-dd1a48e5c057",
+      "checked_at": "2026-10-10T11:05:48.310Z",
+      "success": true,
+      "cleanup_confirmed": true,
+      "providers": {
+        "claude": {
+          "status": "passed",
+          "group_count": 7,
+          "checks": [
+            "two_separate_host_process_claims_refused_by_durable_profile_ownership",
+            "forced_host_owner_exit_leaves_live_owned_namespace_and_descendant",
+            "phase_journal_preserves_exact_ownership_receipts_after_host_owner_death",
+            "new_operation_start_recovery_and_cleanup_preserve_live_orphan",
+            "wrong_operation_refused_and_exact_stopped_operation_removed_with_volumes_retained",
+            "synthetic_private_state_retained_and_stale_cleanup_preserves_successor",
+            "namespace_stop_terminates_orphan_descendant_before_delayed_write"
+          ],
+          "journal_durability": "file_and_directory_synced"
+        },
+        "codex": {
+          "status": "passed",
+          "group_count": 7,
+          "checks": [
+            "two_separate_host_process_claims_refused_by_durable_profile_ownership",
+            "forced_host_owner_exit_leaves_live_owned_namespace_and_descendant",
+            "phase_journal_preserves_exact_ownership_receipts_after_host_owner_death",
+            "new_operation_start_recovery_and_cleanup_preserve_live_orphan",
+            "wrong_operation_refused_and_exact_stopped_operation_removed_with_volumes_retained",
+            "synthetic_private_state_retained_and_stale_cleanup_preserves_successor",
+            "namespace_stop_terminates_orphan_descendant_before_delayed_write"
+          ],
+          "journal_durability": "file_and_directory_synced"
+        }
+      }
+    },
+    "managed-continuity": {
+      "run_id": "a6f721f8-2d87-4942-8049-4c6b051b58fb",
+      "checked_at": "2026-10-10T11:04:17.266Z",
+      "success": true,
+      "cleanup_confirmed": true,
+      "providers": {
+        "claude": {
+          "status": "passed",
+          "group_count": 9,
+          "checks": [
+            "six_competing_starts_and_cleanup_preserve_incumbent",
+            "wrong_operation_exec_and_bridge_cannot_dispatch",
+            "reference_recovery_refuses_running_owned_namespace",
+            "same_operation_restart_retains_fake_private_state_and_durable_exclusive_claim",
+            "stopped_exact_operation_reconciled_and_stale_cleanup_preserves_successor",
+            "canceled_exec_removes_owned_namespace_descendants_and_preserves_new_operation",
+            "timed_out_exec_removes_owned_namespace_descendants_and_retains_private_volumes",
+            "unexpected_control_exit_observed_and_owned_namespace_explicitly_reconciled",
+            "silent_real_docker_control_has_bounded_readiness_and_explicit_recovery"
+          ]
+        },
+        "codex": {
+          "status": "passed",
+          "group_count": 9,
+          "checks": [
+            "six_competing_starts_and_cleanup_preserve_incumbent",
+            "wrong_operation_exec_and_bridge_cannot_dispatch",
+            "reference_recovery_refuses_running_owned_namespace",
+            "same_operation_restart_retains_fake_private_state_and_durable_exclusive_claim",
+            "stopped_exact_operation_reconciled_and_stale_cleanup_preserves_successor",
+            "canceled_exec_removes_owned_namespace_descendants_and_preserves_new_operation",
+            "timed_out_exec_removes_owned_namespace_descendants_and_retains_private_volumes",
+            "unexpected_control_exit_observed_and_owned_namespace_explicitly_reconciled",
+            "silent_real_docker_control_has_bounded_readiness_and_explicit_recovery"
+          ]
+        }
+      }
+    },
+    "managed-adversarial": {
+      "run_id": "d9c60cb0-03d1-4286-ad8e-0d6d4af35005",
+      "checked_at": "2026-10-10T11:03:48.915Z",
+      "success": true,
+      "cleanup_confirmed": true,
+      "providers": {
+        "claude": {
+          "status": "passed",
+          "group_count": 11,
+          "checks": [
+            "distinct_pid_mount_network_namespaces",
+            "task_uid_caps_readonly_mounts_and_cgroup_limits",
+            "malicious_filesystem_process_fd_env_socket_ptrace_probes",
+            "pid_and_tmpfs_exhaustion_bounded",
+            "unknown_ip_metadata_plaintext_proxy_destinations_denied",
+            "broker_malformed_auth_size_arguments_attempt_scope_denied",
+            "broker_task_result_output_limit",
+            "broker_call_limit_blocks_side_effects",
+            "private_canary_and_process_intact_after_attacks",
+            "deadline_exhaustion_tears_down_task_namespace",
+            "output_exhaustion_tears_down_task_namespace"
+          ]
+        },
+        "codex": {
+          "status": "passed",
+          "group_count": 11,
+          "checks": [
+            "distinct_pid_mount_network_namespaces",
+            "task_uid_caps_readonly_mounts_and_cgroup_limits",
+            "malicious_filesystem_process_fd_env_socket_ptrace_probes",
+            "pid_and_tmpfs_exhaustion_bounded",
+            "unknown_ip_metadata_plaintext_proxy_destinations_denied",
+            "broker_malformed_auth_size_arguments_attempt_scope_denied",
+            "broker_task_result_output_limit",
+            "broker_call_limit_blocks_side_effects",
+            "private_canary_and_process_intact_after_attacks",
+            "deadline_exhaustion_tears_down_task_namespace",
+            "output_exhaustion_tears_down_task_namespace"
+          ]
+        }
+      }
+    }
+  },
+  "linux_protocol_checks": 20,
+  "linux_managed_docker_groups": 54,
+  "preceding_failed_run": {
+    "run_id": 38046754371,
+    "head_sha": "19623f514a79b28067185b1fb137248768e1a5bd",
+    "evidence": "github-foundations-19623f5-failed-2026-10-10.json",
+    "result_not_reclassified": true,
+    "fixed_cause": "Duplicate macOS _EMBED_INFO_PLIST from two generate_context expansions; bed8be2 shares one context expansion between main and ACL test"
+  }
+}

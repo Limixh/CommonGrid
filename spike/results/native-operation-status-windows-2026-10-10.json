@@ -1,0 +1,271 @@
+{
+  "schema_version": "1.0",
+  "purpose": "native_desktop_read_only_operation_journal_acceptance",
+  "checked_at": "2026-10-10T11:05:15.918Z",
+  "source_commit": "bed8be2b8f065eff10618fa2e9dfb5ff661cca51",
+  "source_tree": "092a479a4bcd8d96bdbb758a6fbb23a6d9f56884",
+  "source_hash_algorithm": "SHA-256 over canonical Git blob bytes",
+  "source_hashes": {
+    ".github/workflows/check.yml": "9eed33c2a74e0802a3c6508d8dd5d0ee2a674eba3d27eb68cfd78fd8262001c6",
+    ".gitignore": "9866408a33d17d034a30b713a522a7b6fef665413822cd793f2937132aa82ffe",
+    "apps/desktop/package.json": "8ec840c8a04a58206b048ba7235b039a165fa61e5fb17e97549f376e65f46fa7",
+    "apps/desktop/src-tauri/Cargo.lock": "5567adeec273a5d1bac2defb1159a01190e19189e969ab2f6eb071c3a6de9171",
+    "apps/desktop/src-tauri/Cargo.toml": "41567c2a7ddd2b672f4f4a336489619144510946b0a16f45c0138d0885879794",
+    "apps/desktop/src-tauri/build.rs": "6f4d15763b2b693eb5c041638c83f8861fcb318d12758b1d6a93168872a821f4",
+    "apps/desktop/src-tauri/capabilities/operation-status.json": "f7bf340e78577c4d00f23fc12e0e050aa1019e1d5ce40c16258618b3637cf611",
+    "apps/desktop/src-tauri/permissions/local-operation-status.toml": "4df5438269f1e6f69d98d44d1a0e499d3e14800b20e3a13cada9b689224f1b3a",
+    "apps/desktop/src-tauri/src/main.rs": "ba753070cd080e8582f773ba9222af589370b3d642da8f4ce7ac086056eee7e9",
+    "apps/desktop/src-tauri/src/operation_journal.rs": "1ead5b927e65bd0a5b87259357fc159f25741eb792912565a78f20a9fe9c809f",
+    "apps/desktop/src-tauri/src/operation_journal/tests.rs": "22a43884fca66f5415fc40bea97dbcf7876ce7af60f7ce4ec5a48e92329e3d72",
+    "apps/desktop/src-tauri/src/operation_status.rs": "7e6c40104f2f9377979262214bc4bd09d15913e57801b8f14363ef7e12499945",
+    "apps/desktop/src/OperationRecoveryPanel.tsx": "c82d4dff77c53d0f1d9f7991c6beb2b64894a83a37d7ea5c0248a186ea164f13",
+    "apps/desktop/src/operation-status-client.ts": "11c668a842acbd489392104c35b9304fb71f841e81c0fea9814bd4dcebf548ad",
+    "apps/desktop/vite.config.ts": "d37e2e89518328ed67a1a460451d2772fde0d62425ad72a8dacc20b48e974fe5",
+    "docs/DEVELOPMENT.md": "de7a5defd56ad2488ba635ccc5712932119dcae4ce221fa5c5840cb4a82881c2",
+    "package-lock.json": "bb437fd8bd12a380cbc149881e652d93805b9ccbd180c76b9c4c1c4e7ef30da8",
+    "package.json": "66e59e5e8cbf43b8a04404b2e61cd490196702442dd6efdcd38bf54f5c43a141",
+    "packages/agent-adapters/test/fixtures/operation-journal-contract.json": "2e35b405bc2f8b40f0d60e1e33bafd33d1b9b79c1b67ae0ce7fded0d30892ac4",
+    "packages/agent-adapters/test/operation-journal-contract.test.ts": "6361ce638e3aa68bde7626881bf04d0ddb2141945d67b09fda45a07585c4766e",
+    "packages/agent-adapters/testing/generate-operation-journal-contract.ts": "12d12dd4aa15cacdfd6718e8c707f89106b55a39c61aa64c179ef0ba631fc2a5",
+    "packages/agent-adapters/testing/operation-journal-contract.ts": "7bab378b0fe07815646fea4342733770b55356ab764536ff4c37a6861201c871",
+    "packages/task-schema/src/index.ts": "f612de086d6614df42b6f6c05350152aa204b8d1f3b4af28f56f1d3cb67059b7",
+    "packages/task-schema/src/validators.generated.d.ts": "7e4b99cd596b01cc6e2cd7b1b1d2e03a015a0f76078b4cb25b25fe951b735123",
+    "packages/task-schema/src/validators.generated.js": "ba0ccd44de1f109ea20fb8b375d2fa34db053ee61ea14b7665371b3b4934f423",
+    "packages/task-schema/test/standalone-validators.test.ts": "ef03bb30c9decf3f1c7f8113ddfb5079c94f692a2098f21607445a6e82b91353",
+    "scripts/generate.mjs": "7776d661fb5af00eaed32927598fbce8bdc4177bf619e725e9035c926886434f",
+    "scripts/native-journal-smoke.mts": "e68cfe6017f7e94dcae076ad013a9692f8290d0b6ad0c0380e6c8170e3658b93",
+    "scripts/native.mjs": "83b4371901fd88195bcc2dc713eb49080cffe4ba14a92bc3f02a63eb79c3e089",
+    "scripts/rust.mjs": "0718d2d9e961a74bf9774e00386dcfa321ba0fb4d810997ae0657cd32bb35a91",
+    "spike/adr/0018-native-operation-journal-status.md": "b406ee85082a1b22495310eeb5f7d43ffbb01da62c3c487caf478635d3ac0069",
+    "tests/ui/operation-recovery-transport.spec.ts": "708a079fc6ae89b6213327a94743b8ebb02f84602f75c1491b6912edbf51e122",
+    "tests/ui/operation-recovery.spec.ts": "f1889b75a23b5f10e6e69cb5d1e09324460c27e1df9a91b781040c609c471ee6",
+    "apps/desktop/src-tauri/tauri.conf.json": "217a820d45633cfdc5d7b1ad8a972084b14b703b684f88ee8cad3bb25e91142b"
+  },
+  "host": {
+    "os": "Windows",
+    "arch": "x64",
+    "node": "v22.14.0",
+    "rust": "1.99.0",
+    "tauri": "2.12.1",
+    "tauri_js_api": "2.12.2"
+  },
+  "local_check": {
+    "command": "npm run check",
+    "tested_source_commit": "19623f514a79b28067185b1fb137248768e1a5bd",
+    "node_go_frontend_unchanged_in_native_context_fix": true,
+    "exit_code": 0,
+    "node_tests": 357,
+    "node_groups": [
+      4,
+      140,
+      9,
+      204
+    ],
+    "node_failures": 0,
+    "node_cancelled": 0,
+    "node_skipped": 0,
+    "go_tests": true,
+    "schema_generated_check": true,
+    "typechecks": true,
+    "web_and_go_builds": true,
+    "source_secret_review": {
+      "files": 33,
+      "findings": []
+    },
+    "diff_check": true
+  },
+  "contract": {
+    "shared_cases": 107,
+    "available_cases": 21,
+    "blocked_cases": 85,
+    "unavailable_cases": 1,
+    "typescript_writer_reader_expected_projection_match": true,
+    "rust_exact_projection_match": true,
+    "native_tests": {
+      "command": "npm run test:native",
+      "tested_source_commit": "bed8be2b8f065eff10618fa2e9dfb5ff661cca51",
+      "locked": true,
+      "passed": 7,
+      "failed": 0,
+      "ignored": 0,
+      "includes_windows_junction_and_bounds_tests": true,
+      "acl_scope": "Actual generated app manifest and capability with Tauri mock runtime; origin/window/path/body restrictions tested against an isolated synthetic store"
+    }
+  },
+  "ui": {
+    "command": "npm run test:ui",
+    "passed": 24,
+    "failed": 0,
+    "real_local_api_launch": true,
+    "native_transport_cases": 9,
+    "native_transport_scope": "Chromium IPC mocks; distinct from real Windows WebView2 smoke",
+    "native_and_developer_store_separation": true,
+    "native_error_http_fallback": false
+  },
+  "packaged_windows": {
+    "command": "npm run test:native-smoke",
+    "tested_source_commit": "bed8be2b8f065eff10618fa2e9dfb5ff661cca51",
+    "exit_code": 0,
+    "run_id": "abc8bf21-459b-451e-95b5-b8af0408446d",
+    "schema_version": "1.0",
+    "checked_at": "2026-10-10T11:03:50.107Z",
+    "purpose": "real_windows_webview2_packaged_asset_native_journal_smoke",
+    "success": true,
+    "ui_checks_passed": true,
+    "checks": [
+      "packaged_native_missing_store_reported_unavailable",
+      "typescript_fixture_verified_through_real_native_ipc",
+      "real_packaged_ui_revision_bound_inspect_request",
+      "real_native_rejects_caller_path_arguments_and_preserves_catalog_bytes",
+      "malformed_native_catalog_hides_rows_and_stale_request_without_http_fallback"
+    ],
+    "fixture_store": "isolated_app_directories_override_at_build_time",
+    "default_user_app_store_accessed": false,
+    "real_native_ipc": true,
+    "mocked_native_ipc": false,
+    "real_account_tested": false,
+    "real_model_inference": false,
+    "developer_http_endpoint_requests": 0,
+    "process_cleanup": {
+      "method": "windows_taskkill",
+      "status": "termination_reported",
+      "helperExitCode": 0
+    },
+    "scope_limits": [
+      "Trusted smoke-only build configuration points to a new synthetic app store; shipped configuration is unchanged",
+      "Read-only native journal bridge; CLI task launcher and automatic recovery are separate work",
+      "Termination helper observation does not independently prove every WebView descendant is absent"
+    ],
+    "visual_review": true,
+    "binary_scope": "Debug unbundled native executable with production frontend assets; isolated build-only appDirectoriesOverride and hidden main window",
+    "font_acceptance": "DM Sans returned nonempty loaded FontFace results in real WebView2; assets remain same-origin",
+    "production_browser_without_native_presence_tested": false
+  },
+  "schema_csp": {
+    "runtime_schema_compilation_removed": true,
+    "shipped_csp_unchanged_from_baseline": true,
+    "schema_source_unchanged_from_baseline": true,
+    "standalone_schemas": 4,
+    "standalone_regression_tests": 4,
+    "string_codegen_forbidden_child_public_api_tests": 47,
+    "exact_runtime_result_and_error_parity": true,
+    "post_acceptance_normalization": "Generator terminal blank line normalized before commit; regenerated and drift-checked. Rebuilt frontend retained index-Bc0jFhH6.js content hash from accepted native build"
+  },
+  "prior_attempts": [
+    {
+      "run_id": "a6ce267c-1a40-4474-a043-faf6feac0a7a",
+      "schema_version": "1.0",
+      "checked_at": "2026-10-10T10:43:22.700Z",
+      "purpose": "real_windows_webview2_packaged_asset_native_journal_smoke",
+      "success": false,
+      "ui_checks_passed": false,
+      "checks": [],
+      "fixture_store": "isolated_app_directories_override_at_build_time",
+      "default_user_app_store_accessed": false,
+      "real_native_ipc": false,
+      "mocked_native_ipc": false,
+      "real_account_tested": false,
+      "real_model_inference": false,
+      "developer_http_endpoint_requests": 0,
+      "process_cleanup": {
+        "method": "windows_taskkill",
+        "status": "termination_reported",
+        "helperExitCode": 0
+      },
+      "scope_limits": [
+        "Trusted smoke-only build configuration points to a new synthetic app store; shipped configuration is unchanged",
+        "Read-only native journal bridge; CLI task launcher and automatic recovery are separate work",
+        "Termination helper observation does not independently prove every WebView descendant is absent"
+      ],
+      "source_scope": "Uncommitted implementation before standalone schema fix",
+      "observed_cause": "Real WebView2 page error reported CSP unsafe-eval rejection during Ajv schema compilation; React root remained empty",
+      "accepted": false
+    },
+    {
+      "run_id": "f1d01528-cf5b-4dd0-a02f-ffc84bd8e80d",
+      "schema_version": "1.0",
+      "checked_at": "2026-10-10T10:55:02.684Z",
+      "purpose": "real_windows_webview2_packaged_asset_native_journal_smoke",
+      "success": false,
+      "ui_checks_passed": false,
+      "checks": [
+        "packaged_native_missing_store_reported_unavailable",
+        "typescript_fixture_verified_through_real_native_ipc",
+        "real_packaged_ui_revision_bound_inspect_request"
+      ],
+      "fixture_store": "isolated_app_directories_override_at_build_time",
+      "default_user_app_store_accessed": false,
+      "real_native_ipc": true,
+      "mocked_native_ipc": false,
+      "real_account_tested": false,
+      "real_model_inference": false,
+      "developer_http_endpoint_requests": 0,
+      "process_cleanup": {
+        "method": "windows_taskkill",
+        "status": "termination_reported",
+        "helperExitCode": 0
+      },
+      "scope_limits": [
+        "Trusted smoke-only build configuration points to a new synthetic app store; shipped configuration is unchanged",
+        "Read-only native journal bridge; CLI task launcher and automatic recovery are separate work",
+        "Termination helper observation does not independently prove every WebView descendant is absent"
+      ],
+      "source_scope": "After product fix, before smoke harness correction",
+      "observed_cause": "Harness attempted to delete Tauri nonconfigurable isTauri marker; native remained present and its valid journal was shown. Removed invalid simulation and exercised actual argument denial instead",
+      "accepted": false
+    }
+  ],
+  "pre_context_share_acceptance": {
+    "run_id": "cc43415f-e980-4b7a-a782-98db1033a377",
+    "tested_source_commit": "19623f514a79b28067185b1fb137248768e1a5bd",
+    "schema_version": "1.0",
+    "checked_at": "2026-10-10T10:56:49.159Z",
+    "purpose": "real_windows_webview2_packaged_asset_native_journal_smoke",
+    "success": true,
+    "ui_checks_passed": true,
+    "checks": [
+      "packaged_native_missing_store_reported_unavailable",
+      "typescript_fixture_verified_through_real_native_ipc",
+      "real_packaged_ui_revision_bound_inspect_request",
+      "real_native_rejects_caller_path_arguments_and_preserves_catalog_bytes",
+      "malformed_native_catalog_hides_rows_and_stale_request_without_http_fallback"
+    ],
+    "fixture_store": "isolated_app_directories_override_at_build_time",
+    "default_user_app_store_accessed": false,
+    "real_native_ipc": true,
+    "mocked_native_ipc": false,
+    "real_account_tested": false,
+    "real_model_inference": false,
+    "developer_http_endpoint_requests": 0,
+    "process_cleanup": {
+      "method": "windows_taskkill",
+      "status": "termination_reported",
+      "helperExitCode": 0
+    },
+    "scope_limits": [
+      "Trusted smoke-only build configuration points to a new synthetic app store; shipped configuration is unchanged",
+      "Read-only native journal bridge; CLI task launcher and automatic recovery are separate work",
+      "Termination helper observation does not independently prove every WebView descendant is absent"
+    ]
+  },
+  "native_context_portability": {
+    "fix_commit": "bed8be2b8f065eff10618fa2e9dfb5ff661cca51",
+    "problem": "Duplicate _EMBED_INFO_PLIST generated in main and ACL test made the first macOS native test binary fail to compile",
+    "change": "Share one generate_context expansion via application_context; real generated ACL and test-only app data override remain in place",
+    "remote_acceptance": "Separate GitHub report"
+  },
+  "real_accounts_called": false,
+  "real_model_inference": false,
+  "paid_api_fallback": false,
+  "docker_runtime_changed": false,
+  "docker_suites_rerun_locally": false,
+  "scope_limits": [
+    "Native bridge reads only the app-owned managed-operation-journal; developer .local catalog is separate and no migration occurs",
+    "Native CLI launcher and writing real task operations into the app store are the next increment",
+    "No installer/signing, packaged account login, native remote navigation attack or release bundle acceptance",
+    "Windows process-crash durability remains the recorded scope; power/disk/daemon crash and automatic recovery remain separate",
+    "Hostile local filesystem replacement, suffix rollback and compromised same-origin app code are not covered",
+    "Windows taskkill success is observed cleanup completion; not independent proof that every WebView descendant is absent",
+    "Remote three-platform CI is recorded separately when complete"
+  ]
+}
