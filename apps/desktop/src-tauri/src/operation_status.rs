@@ -169,7 +169,7 @@ mod tests {
         // Use generated application ACL, not mock_context (which has no ACL).
         // Only this test context overrides app directories; production keeps the
         // real app-owned location and accepts no override through IPC or env.
-        let mut context = tauri::generate_context!();
+        let mut context = crate::application_context();
         context.config_mut().app.app_directories_override = Some(
             tauri::utils::config::AppDirectoriesOverride::Root(store.0.clone()),
         );
