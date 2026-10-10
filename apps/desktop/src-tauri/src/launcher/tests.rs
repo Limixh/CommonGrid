@@ -1,4 +1,5 @@
 use super::*;
+use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 use tauri::{
     ipc::{CallbackFn, InvokeResponseBody},
     test::{get_ipc_response, mock_builder, MockRuntime, INVOKE_KEY},
@@ -6,6 +7,7 @@ use tauri::{
     WebviewWindowBuilder,
 };
 const ID: &str = "c9cd1d28-006f-48f1-85d5-fc9430a7ae23";
+static FIXTURE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 struct TestOwner(Arc<Launcher>);
 impl std::ops::Deref for TestOwner {
     type Target = Arc<Launcher>;
@@ -30,12 +32,13 @@ impl Fixture {
         let directory = fs::canonicalize(std::env::temp_dir())
             .unwrap()
             .join(format!(
-                "cg-launcher-{}-{}",
+                "cg-launcher-{}-{}-{}",
                 std::process::id(),
                 std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap()
-                    .as_nanos()
+                    .as_nanos(),
+                FIXTURE_SEQUENCE.fetch_add(1, AtomicOrdering::Relaxed)
             ));
         fs::create_dir(&directory).unwrap();
         Self { directory }
