@@ -1,0 +1,130 @@
+{
+  "schema_version": "1.0",
+  "purpose": "preserve_initial_failed_ci_attempt_before_same_source_retry",
+  "checked_at": "2026-10-10T09:58:48.427Z",
+  "repository": "https://github.com/Limixh/CommonGrid",
+  "run_id": 38042727659,
+  "run_url": "https://github.com/Limixh/CommonGrid/actions/runs/38042727659",
+  "head_sha": "e7c8c881181e97515e80b3e23c2633c6577f7f55",
+  "attempt": 1,
+  "status": "completed",
+  "conclusion": "failure",
+  "jobs": [
+    {
+      "name": "postgres-domain",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/38042727659/job/114186036328",
+      "started_at": "2026-10-10T09:49:08Z",
+      "completed_at": "2026-10-10T09:50:33Z"
+    },
+    {
+      "name": "desktop-compile (windows-latest)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/38042727659/job/114186036373",
+      "started_at": "2026-10-10T09:49:09Z",
+      "completed_at": "2026-10-10T09:57:11Z"
+    },
+    {
+      "name": "cli-session-fixtures",
+      "status": "completed",
+      "conclusion": "failure",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/38042727659/job/114186036406",
+      "started_at": "2026-10-10T09:49:08Z",
+      "completed_at": "2026-10-10T09:50:01Z"
+    },
+    {
+      "name": "temporal-fixtures (ubuntu-latest)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/38042727659/job/114186036422",
+      "started_at": "2026-10-10T09:49:08Z",
+      "completed_at": "2026-10-10T09:50:40Z"
+    },
+    {
+      "name": "temporal-fixtures (macos-latest)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/38042727659/job/114186036435",
+      "started_at": "2026-10-10T09:49:11Z",
+      "completed_at": "2026-10-10T09:49:57Z"
+    },
+    {
+      "name": "contracts-api-ui",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/38042727659/job/114186036439",
+      "started_at": "2026-10-10T09:49:07Z",
+      "completed_at": "2026-10-10T09:50:42Z"
+    },
+    {
+      "name": "artifact-delivery",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/38042727659/job/114186036450",
+      "started_at": "2026-10-10T09:49:08Z",
+      "completed_at": "2026-10-10T09:50:06Z"
+    },
+    {
+      "name": "temporal-fixtures (windows-latest)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/38042727659/job/114186036460",
+      "started_at": "2026-10-10T09:49:07Z",
+      "completed_at": "2026-10-10T09:51:27Z"
+    },
+    {
+      "name": "desktop-compile (ubuntu-latest)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/38042727659/job/114186036499",
+      "started_at": "2026-10-10T09:49:08Z",
+      "completed_at": "2026-10-10T09:54:53Z"
+    },
+    {
+      "name": "desktop-compile (macos-latest)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/38042727659/job/114186036544",
+      "started_at": "2026-10-10T09:49:10Z",
+      "completed_at": "2026-10-10T09:50:45Z"
+    },
+    {
+      "name": "sandbox-fixtures",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/38042727659/job/114186036574",
+      "started_at": "2026-10-10T09:49:07Z",
+      "completed_at": "2026-10-10T09:49:43Z"
+    }
+  ],
+  "failed_fixture": {
+    "success": false,
+    "cleanup_confirmed": true,
+    "real_account_tested": false,
+    "real_model_inference": false,
+    "error": "fixture_docker_failed",
+    "failed_operation": {
+      "operation": "exec",
+      "exit_code": 134,
+      "stage": "codex:version"
+    },
+    "stage_label_stale": true,
+    "codex_version_probe_passed": true,
+    "codex_fixture_turn_completed": true,
+    "exact_post_turn_check_unknown": true,
+    "post_turn_native_exec_exit_code": 134,
+    "resource_pressure_cause_not_established": true
+  },
+  "original_result_not_reclassified": true,
+  "same_source_retry_requested": true,
+  "execution_enabled": false,
+  "automatic_recovery": false,
+  "isolation_gate": "not_evaluated",
+  "scope_limits": [
+    "First attempt has ten successful jobs and one failed CLI protocol fixture; later success does not change this failed observation",
+    "The report setup_stage remains codex:version after successful version and fixture turn; it does not locate the failing post-turn command",
+    "No real account/model or product GO acceptance"
+  ]
+}

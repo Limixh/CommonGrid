@@ -1,0 +1,247 @@
+{
+  "schema_version": "1.0",
+  "purpose": "managed_operation_phase_journal_and_read_only_developer_recovery_acceptance",
+  "checked_at": "2026-10-10T10:05:27.375Z",
+  "source_commit": "e7c8c881181e97515e80b3e23c2633c6577f7f55",
+  "source_tree": "ba9e8898ae877c3e9c98aa02b98440c5bf12cb76",
+  "source_hash_algorithm": "SHA-256 over canonical Git blob bytes",
+  "source_hashes": {
+    ".github/workflows/check.yml": "cef5e66db64d5d4cee9d59f6a18c8fb906c1fd4b9f6d112063140e716d41675a",
+    "apps/desktop/operation-status-server.ts": "dd6ade2ad54478ba18f149f57a7e4af9e91274708fcebd3d7e42232c98088f2a",
+    "apps/desktop/package.json": "c0799ea078af28a584adeadeced06bf7269d86a8eed4714c85b0696b2666063f",
+    "apps/desktop/src/App.tsx": "a75584749da505bf2f3c169de6699f270d7cf3eca4e7d3df67167ac8c00c8d5a",
+    "apps/desktop/src/OperationRecoveryPanel.tsx": "2ac17190903e6e170ba6cf2217593be0e58801317fffc1b724e4b4533097d870",
+    "apps/desktop/src/styles.css": "1dd633e7f79e2288fad120d6482499696285f3f06282add54adbcf62416101e5",
+    "apps/desktop/vite.config.ts": "cc345c10e4103a1c52dc017566c5a8e8fbc92aacbac50320ecf1adbbf27ed9a9",
+    "package-lock.json": "c313e64db48b169a847aad51cf1090f04edd9f00dedde60661abcec41e230213",
+    "packages/agent-adapters/package.json": "04f8aca2a53482b76133fb7181f367d4737f4cadfe7e40782e4ddb090fe112d9",
+    "packages/agent-adapters/src/operation-journal-types.ts": "843e3d8ede9f77e49c8d625c3be6f7084b85939059e300f90753c11dddd42829",
+    "packages/agent-adapters/src/operation-journal.ts": "b63cbb7157806520ee7e96c16ce92c4bcee6f8af28bc9c2eb46188f473e6ad67",
+    "packages/agent-adapters/src/operation-recovery.ts": "ceabf6eb011a0487eb7a933b9a86f0dc29c5bb1733afd3a37a0789fc17e9b3c5",
+    "packages/agent-adapters/test/operation-journal.test.ts": "955ef8d00a4afcc85dc5903e247d6430b983d890a22f84ba6691d198bb736375",
+    "packages/agent-adapters/test/operation-recovery.test.ts": "ddeed7993b264dadbc039a9d2fe2610f7a54ae82bc80b6d707977eea47ecbe86",
+    "spike/cli-session/managed-command-lifecycle.test.mts": "e85de4d5ef2cb6c19e0c8c29647b7b7b40f31fb0d87e05e2b5ff1c8c9a3cd5cd",
+    "spike/cli-session/managed-continuity.mts": "5b4aaf128c755032bd5693f807c1a564dc23f4ec3cfb306ac745042281e27ae8",
+    "spike/cli-session/managed-operation-journal.test.mts": "9cba60ffa88cb0695e1722914813f87753f088714125f92371efe4c371cc9b14",
+    "spike/cli-session/managed-owner-crash.mts": "ce0266060a076cac28853226f23a66c979f4ee53225e8fd4041f2ad11414bd57",
+    "spike/cli-session/managed-provider-session.mts": "0962fd01b586c4617970d5d4e3900a7cdf7449299e2d41a754d2b33a8a87d061",
+    "spike/cli-session/managed-provider-session.test.mts": "bdc9efc1ea48a424c023b19ec38fdbc1e2ce3d8da068c2aa745b3f64f5739638",
+    "spike/cli-session/managed-runtime.mts": "87267d69b724001bb3f705da592260134923dbb0d8fd0c6697d68e4d1ea993d9",
+    "spike/cli-session/managed-runtime.test.mts": "06ed7bf6ad3fa0897f2c2c0297ede7cfa8a7b614398e85b3d3a7f18b2da1b3a8",
+    "spike/cli-session/managed-session-acceptance.mts": "21bc082b7b14b4c2d97febe61a2364b9500a5ec6ee13c6cf52502d1358f93e44",
+    "spike/cli-session/managed-session.mts": "8b64a6452ffc1f8acf8f1f5f0119207686357bf742cb3bcdd71a4a3cc96c9f53",
+    "spike/cli-session/managed-task.mts": "2b26417d9a1f6fa59cf628d39b7bc0d0f5665be3efbf175c8c4129eb23e934bf",
+    "tests/ui/operation-recovery.spec.ts": "fb98e29e40c62abb47c5daa10c99e780312821b9bd6ef75938346121b8ed57d8"
+  },
+  "host": {
+    "os": "Windows",
+    "arch": "x64",
+    "node": "v22.14.0",
+    "docker_server": "29.8.2"
+  },
+  "local_check": {
+    "command": "npm run check",
+    "exit_code": 0,
+    "node_tests": 351,
+    "node_groups": [
+      4,
+      134,
+      9,
+      204
+    ],
+    "node_failures": 0,
+    "node_cancelled": 0,
+    "node_skipped": 0,
+    "go_tests": true,
+    "schema_generated_check": true,
+    "typechecks": true,
+    "web_and_go_builds": true,
+    "windows_file_symlink_test": "file symlink assertion unavailable due EPERM; directory junction rejection exercised"
+  },
+  "ui": {
+    "command": "node scripts/ui-tests.mjs test",
+    "passed": 15,
+    "failed": 0,
+    "new_recovery_cases": 3,
+    "desktop_and_390px_visual_review": true,
+    "real_local_api_launch": true,
+    "journal_observations": "mocked endpoint fixtures for UI cases"
+  },
+  "docker": {
+    "owner-crash": {
+      "run_id": "d1979f59-7028-4907-b27f-7bb6053facbc",
+      "checked_at": "2026-10-10T09:40:38.761Z",
+      "success": true,
+      "cleanup_confirmed": true,
+      "providers": {
+        "claude": {
+          "status": "passed",
+          "group_count": 7,
+          "checks": [
+            "two_separate_host_process_claims_refused_by_durable_profile_ownership",
+            "forced_host_owner_exit_leaves_live_owned_namespace_and_descendant",
+            "phase_journal_preserves_exact_ownership_receipts_after_host_owner_death",
+            "new_operation_start_recovery_and_cleanup_preserve_live_orphan",
+            "wrong_operation_refused_and_exact_stopped_operation_removed_with_volumes_retained",
+            "synthetic_private_state_retained_and_stale_cleanup_preserves_successor",
+            "namespace_stop_terminates_orphan_descendant_before_delayed_write"
+          ],
+          "journal_durability": "process_crash",
+          "journal_revision_after_owner_death": 25
+        },
+        "codex": {
+          "status": "passed",
+          "group_count": 7,
+          "checks": [
+            "two_separate_host_process_claims_refused_by_durable_profile_ownership",
+            "forced_host_owner_exit_leaves_live_owned_namespace_and_descendant",
+            "phase_journal_preserves_exact_ownership_receipts_after_host_owner_death",
+            "new_operation_start_recovery_and_cleanup_preserve_live_orphan",
+            "wrong_operation_refused_and_exact_stopped_operation_removed_with_volumes_retained",
+            "synthetic_private_state_retained_and_stale_cleanup_preserves_successor",
+            "namespace_stop_terminates_orphan_descendant_before_delayed_write"
+          ],
+          "journal_durability": "process_crash",
+          "journal_revision_after_owner_death": 25
+        }
+      },
+      "scope_limits": [
+        "forced death of a dedicated synthetic Node owner after successful start only",
+        "explicit immutable-ID stop and stopped-operation reconciliation with manual owner-quiescence acknowledgment; no automatic live takeover",
+        "journal persists intent and captured IDs across host-process death; it does not prove owner quiescence, current daemon state, Windows power-loss persistence or automatic recovery",
+        "daemon loss and real interrupted-create lost-ID acceptance remain pending",
+        "pinned Docker Linux runtime on the current host only"
+      ]
+    },
+    "continuity": {
+      "run_id": "c69624df-76e8-40a1-8f65-855ea5f64b91",
+      "checked_at": "2026-10-10T09:47:41.188Z",
+      "success": true,
+      "cleanup_confirmed": true,
+      "providers": {
+        "claude": {
+          "status": "passed",
+          "group_count": 9,
+          "checks": [
+            "six_competing_starts_and_cleanup_preserve_incumbent",
+            "wrong_operation_exec_and_bridge_cannot_dispatch",
+            "reference_recovery_refuses_running_owned_namespace",
+            "same_operation_restart_retains_fake_private_state_and_durable_exclusive_claim",
+            "stopped_exact_operation_reconciled_and_stale_cleanup_preserves_successor",
+            "canceled_exec_removes_owned_namespace_descendants_and_preserves_new_operation",
+            "timed_out_exec_removes_owned_namespace_descendants_and_retains_private_volumes",
+            "unexpected_control_exit_observed_and_owned_namespace_explicitly_reconciled",
+            "silent_real_docker_control_has_bounded_readiness_and_explicit_recovery"
+          ]
+        },
+        "codex": {
+          "status": "passed",
+          "group_count": 9,
+          "checks": [
+            "six_competing_starts_and_cleanup_preserve_incumbent",
+            "wrong_operation_exec_and_bridge_cannot_dispatch",
+            "reference_recovery_refuses_running_owned_namespace",
+            "same_operation_restart_retains_fake_private_state_and_durable_exclusive_claim",
+            "stopped_exact_operation_reconciled_and_stale_cleanup_preserves_successor",
+            "canceled_exec_removes_owned_namespace_descendants_and_preserves_new_operation",
+            "timed_out_exec_removes_owned_namespace_descendants_and_retains_private_volumes",
+            "unexpected_control_exit_observed_and_owned_namespace_explicitly_reconciled",
+            "silent_real_docker_control_has_bounded_readiness_and_explicit_recovery"
+          ]
+        }
+      },
+      "scope_limits": [
+        "same-profile runtime commands only; real provider concurrency/quotas not accepted",
+        "explicit stopped-operation reconciliation requires validated zero-pending old journal and manual owner-quiescence acknowledgment; automatic crash detection/recovery not accepted",
+        "runtime journal does not accept packaged native launch, Windows power-loss persistence or automatic recovery",
+        "host/daemon failure during cleanup still requires ownership-verified reconciliation",
+        "pinned Linux Docker host setup only"
+      ]
+    },
+    "adversarial": {
+      "run_id": "6d4fb9f4-bac5-43c0-98f9-fd339fd2afe9",
+      "checked_at": "2026-10-10T09:58:31.792Z",
+      "success": true,
+      "cleanup_confirmed": true,
+      "providers": {
+        "claude": {
+          "status": "passed",
+          "group_count": 11,
+          "checks": [
+            "distinct_pid_mount_network_namespaces",
+            "task_uid_caps_readonly_mounts_and_cgroup_limits",
+            "malicious_filesystem_process_fd_env_socket_ptrace_probes",
+            "pid_and_tmpfs_exhaustion_bounded",
+            "unknown_ip_metadata_plaintext_proxy_destinations_denied",
+            "broker_malformed_auth_size_arguments_attempt_scope_denied",
+            "broker_task_result_output_limit",
+            "broker_call_limit_blocks_side_effects",
+            "private_canary_and_process_intact_after_attacks",
+            "deadline_exhaustion_tears_down_task_namespace",
+            "output_exhaustion_tears_down_task_namespace"
+          ]
+        },
+        "codex": {
+          "status": "passed",
+          "group_count": 11,
+          "checks": [
+            "distinct_pid_mount_network_namespaces",
+            "task_uid_caps_readonly_mounts_and_cgroup_limits",
+            "malicious_filesystem_process_fd_env_socket_ptrace_probes",
+            "pid_and_tmpfs_exhaustion_bounded",
+            "unknown_ip_metadata_plaintext_proxy_destinations_denied",
+            "broker_malformed_auth_size_arguments_attempt_scope_denied",
+            "broker_task_result_output_limit",
+            "broker_call_limit_blocks_side_effects",
+            "private_canary_and_process_intact_after_attacks",
+            "deadline_exhaustion_tears_down_task_namespace",
+            "output_exhaustion_tears_down_task_namespace"
+          ]
+        }
+      },
+      "scope_limits": [
+        "pinned Linux x86-64 Docker image only",
+        "synthetic canaries; no real credential extraction test",
+        "workspace volume has no disk quota",
+        "memory/CPU limits inspected, not OOM/CPU stress acceptance",
+        "Docker daemon/kernel/host compromise not evaluated",
+        "provider extension paths not exhaustively evaluated"
+      ]
+    }
+  },
+  "total_docker_groups": 54,
+  "early_development_journals": {
+    "preserved": true,
+    "archived_operation_count": 42,
+    "previous_reader_status": "blocked",
+    "previous_reader_reason": "operation_journal_invalid",
+    "claims_present_before_archive": 0,
+    "previous_results_not_reclassified": true
+  },
+  "existing_private_profiles_accessed": false,
+  "real_account_tested": false,
+  "real_model_inference": false,
+  "credential_files_copied": false,
+  "execution_enabled": false,
+  "automatic_recovery": false,
+  "isolation_gate": "not_evaluated",
+  "product_go": "NOT_EVALUATED",
+  "scope_limits": [
+    "Windows host-process crash persistence; Windows power-loss and daemon/disk-loss recovery unaccepted",
+    "Read-only developer UI; packaged native launcher/status bridge and automatic recovery remain pending",
+    "Manual stopped recovery requires validated zero-pending old operation journal, immutable receipts, stopped recorded namespaces and explicit operator quiescence; does not automatically close old journal",
+    "App-owned filesystem assumption; hash chain has no suffix-rollback/head-anchor detection or native protection against malicious local path replacement",
+    "Synthetic profiles only; no provider refresh/quota/account-concurrency inference"
+  ],
+  "post_acceptance_observation": {
+    "checked_at": "2026-10-10T10:07:07.952Z",
+    "managed_profile_claim_containers": 0,
+    "journal_catalog_status": "available",
+    "journal_operations": 44,
+    "recorded_complete": 22,
+    "needs_review": 22,
+    "worker_quiescence": "unknown",
+    "daemon_state": "unknown",
+    "nonterminal_records_do_not_imply_live_resources_or_cleanup_permission": true
+  }
+}
