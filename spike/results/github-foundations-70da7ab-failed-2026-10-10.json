@@ -1,0 +1,245 @@
+{
+  "schema_version": "1.0",
+  "purpose": "preserve_native_launcher_ci_failure",
+  "checked_at": "2026-10-10T18:21:35.636Z",
+  "repository": "https://github.com/Limixh/CommonGrid",
+  "run_id": 38074553666,
+  "run_url": "https://github.com/Limixh/CommonGrid/actions/runs/38074553666",
+  "head_sha": "70da7abcc7eff552f5cbf0e016224fec159ec05a",
+  "attempt": 1,
+  "status": "completed",
+  "conclusion": "failure",
+  "jobs": [
+    {
+      "name": "sandbox-fixtures",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/38074553666/job/114278683366",
+      "started_at": "2026-10-10T18:08:09Z",
+      "completed_at": "2026-10-10T18:08:46Z",
+      "acceptance_steps": []
+    },
+    {
+      "name": "temporal-fixtures (ubuntu-latest)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/38074553666/job/114278683482",
+      "started_at": "2026-10-10T18:08:10Z",
+      "completed_at": "2026-10-10T18:09:43Z",
+      "acceptance_steps": []
+    },
+    {
+      "name": "artifact-delivery",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/38074553666/job/114278683498",
+      "started_at": "2026-10-10T18:08:09Z",
+      "completed_at": "2026-10-10T18:08:56Z",
+      "acceptance_steps": []
+    },
+    {
+      "name": "contracts-api-ui",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/38074553666/job/114278683515",
+      "started_at": "2026-10-10T18:08:09Z",
+      "completed_at": "2026-10-10T18:10:20Z",
+      "acceptance_steps": [
+        {
+          "name": "Run npm run check",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run npm run test:ui",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "name": "postgres-domain",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/38074553666/job/114278683521",
+      "started_at": "2026-10-10T18:08:10Z",
+      "completed_at": "2026-10-10T18:09:38Z",
+      "acceptance_steps": []
+    },
+    {
+      "name": "cli-session-fixtures",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/38074553666/job/114278683535",
+      "started_at": "2026-10-10T18:08:09Z",
+      "completed_at": "2026-10-10T18:11:33Z",
+      "acceptance_steps": [
+        {
+          "name": "Run npm run spike:cli-session",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run npm run spike:managed-adversarial",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run npm run spike:session-continuity",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run npm run spike:owner-crash",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "name": "desktop-compile (macos-latest)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/38074553666/job/114278683540",
+      "started_at": "2026-10-10T18:08:12Z",
+      "completed_at": "2026-10-10T18:10:20Z",
+      "acceptance_steps": [
+        {
+          "name": "Run node --import tsx --test packages/agent-adapters/test/owned-process.test.ts packages/agent-adapters/test/operation-journal.test.ts",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run npm run test:native",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run node scripts/native.mjs build --no-bundle",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "name": "desktop-compile (ubuntu-latest)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/38074553666/job/114278683549",
+      "started_at": "2026-10-10T18:08:10Z",
+      "completed_at": "2026-10-10T18:16:41Z",
+      "acceptance_steps": [
+        {
+          "name": "Run node --import tsx --test packages/agent-adapters/test/owned-process.test.ts packages/agent-adapters/test/operation-journal.test.ts",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run npm run test:native",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run node scripts/native.mjs build --no-bundle",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "name": "temporal-fixtures (windows-latest)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/38074553666/job/114278683574",
+      "started_at": "2026-10-10T18:08:09Z",
+      "completed_at": "2026-10-10T18:10:33Z",
+      "acceptance_steps": []
+    },
+    {
+      "name": "desktop-compile (windows-latest)",
+      "status": "completed",
+      "conclusion": "failure",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/38074553666/job/114278683601",
+      "started_at": "2026-10-10T18:08:10Z",
+      "completed_at": "2026-10-10T18:15:08Z",
+      "acceptance_steps": [
+        {
+          "name": "Run node --import tsx --test packages/agent-adapters/test/owned-process.test.ts packages/agent-adapters/test/operation-journal.test.ts",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run npm run test:native",
+          "status": "completed",
+          "conclusion": "failure"
+        },
+        {
+          "name": "Run node scripts/native.mjs build --no-bundle",
+          "status": "completed",
+          "conclusion": "skipped"
+        }
+      ]
+    },
+    {
+      "name": "temporal-fixtures (macos-latest)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Limixh/CommonGrid/actions/runs/38074553666/job/114278683634",
+      "started_at": "2026-10-10T18:08:12Z",
+      "completed_at": "2026-10-10T18:08:51Z",
+      "acceptance_steps": []
+    }
+  ],
+  "successful_jobs": 10,
+  "failed_jobs": [
+    {
+      "name": "desktop-compile (windows-latest)",
+      "steps": [
+        "Run npm run test:native"
+      ]
+    }
+  ],
+  "real_account_tested": false,
+  "real_model_inference": false,
+  "scope_limits": [
+    "Exact source; three-OS native unit/generated ACL/process fixture and builds are distinct from actual Windows UI acceptance.",
+    "Official CLI fixture responses and synthetic Docker scenarios do not use subscribed inference.",
+    "Managed login/trusted task admission, installer signing and automatic ambiguous-mutation recovery are separate work."
+  ],
+  "result_not_reclassified": true,
+  "observed_windows_failure": {
+    "passed": 13,
+    "failed": 3,
+    "checks": [
+      "owned fixture version/idempotency",
+      "owned descendant startup",
+      "cancel/shutdown"
+    ],
+    "observed": "Synthetic worker returned needs_review; descendant ready marker and preparing phase were not observed.",
+    "result_not_reclassified": true
+  },
+  "local_controlled_reproduction": {
+    "node_version": "22.23.3",
+    "archive_sha256": "2b0ff57b049cda1bbcea2240eec20467018713c1efe1f7360c2681859b90ed71",
+    "parallel_native_units": {
+      "passed": 13,
+      "failed": 3
+    },
+    "same_owned_process_environment_and_worker": true,
+    "changed_variable": "Node entry argument path format",
+    "verbatim_absolute_entry": {
+      "exit_code": 1,
+      "error_code": "EISDIR",
+      "observed": "Node main entry realpath attempted to lstat D:"
+    },
+    "ordinary_absolute_entry": {
+      "exit_code": 0,
+      "valid_passed_frames": true,
+      "stderr_bytes": 0
+    },
+    "accounts_accessed": false,
+    "model_calls": false,
+    "resource_backups_restored_byte_for_byte": true,
+    "scope": "The local controlled reproduction proves the entry-path incompatibility for this Node version; CI exposed matching failed fixtures, not raw worker stderr."
+  }
+}

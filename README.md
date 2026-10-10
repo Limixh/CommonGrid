@@ -33,4 +33,4 @@ Bu komut ürün testlerini, ayrı deneme testlerini, tip kontrollerini ve derlem
 
 [Güncel durum ve kabul listesi](docs/GO_GATE.md) tamamlanan işleri ve kalan kanıtları gösterir. Test sayıları README'de tekrarlanmaz; sonuçlar [tarihli raporlarda](spike/results/README.md) tutulur. Önceki geliştirme kayıtları [arşivdedir](docs/DEVELOPMENT_HISTORY.md).
 
-Ürün kodu `apps/`, `packages/` ve `services/` altında; kabul denemeleri `spike/` altındadır. Sıradaki iş, yönetilen CLI girişini ve doğrulanmış görev seçimini native başlatıcıya bağlamak; oturum sürekliliği ve limit davranışı normal kullanımda izlenir.
+Ürün kodu `apps/`, `packages/` ve `services/` altında; kabul denemeleri `spike/` altındadır. Sıradaki iş, uygulamada profil seçimi, resmi CLI girişi, görev başlatma/iptal ve doğrulanmış sonucu görme akışını tamamlamak. Bu akış geliştirilirken `App.tsx` katalog, ortam ve katkı ayarları modüllerine ayrılır.

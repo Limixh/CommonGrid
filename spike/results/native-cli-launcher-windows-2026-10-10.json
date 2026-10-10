@@ -1,0 +1,380 @@
+{
+  "schema_version": "1.0",
+  "purpose": "native_owned_official_cli_version_lifecycle_acceptance",
+  "checked_at": "2026-10-10T18:02:37.468Z",
+  "source_commit": "3412e3f2b6d819a519cc276ad42a95b26c5a426f",
+  "source_tree": "4bdd203488bc8824ed67a710246dda52eea4b587",
+  "source_hash_algorithm": "SHA-256 over canonical Git blob bytes",
+  "source_hashes": {
+    ".github/workflows/check.yml": "9eed33c2a74e0802a3c6508d8dd5d0ee2a674eba3d27eb68cfd78fd8262001c6",
+    ".gitignore": "c267b798d389019428d7c9d37cffbbe04793922721e3a1badc91022b7ad0ef56",
+    "README.md": "7068f70b1b92c2ec464effa3ae58bcd81308f4b86db73fc2b2dec0fb59d162d8",
+    "apps/desktop/native-worker/cli-check.ts": "b835b0e6e7fcbf03a6acf7a6f41671608ab8d942792090957f9e7448ffc3b8fb",
+    "apps/desktop/native-worker/entry.ts": "92615aac389189cd63ad5cb8584b3d52cc48511bb9db34efff688e83023b12b9",
+    "apps/desktop/src-tauri/Cargo.lock": "95933d8a9309284671918df4bd397daeee0ea54b1478598786e9263938f92b72",
+    "apps/desktop/src-tauri/Cargo.toml": "daf123aee7fa0b3340e3a30802b74cda7d720bdad871e2d013d4a50093aa96ba",
+    "apps/desktop/src-tauri/build.rs": "b7092f1427eadaf7bfd7c728e6c7b0dd0f8baa0d5df38f71ad21e885e75a465a",
+    "apps/desktop/src-tauri/capabilities/cli-check.json": "c7ed2189b0fffce111260c88c84470a2f845d36f996fd8872a1df274ad954999",
+    "apps/desktop/src-tauri/permissions/local-cli-check.toml": "76578811418ecdc121cf88b2e752759f97a6d684e3ccd14388597aad36a7083d",
+    "apps/desktop/src-tauri/src/launcher.rs": "05c836da9f02a8e847c543dd3a4cb6aed39243da3fa02bbd3fe04c3782c81cf2",
+    "apps/desktop/src-tauri/src/launcher/tests.rs": "36e90de57db7b5a41c1b7df72119c585b2dc9fe1bd5d5eb83aae76a694218661",
+    "apps/desktop/src-tauri/src/launcher_process.rs": "151289b6090b361f9fa3306ea631e9d625c8df0216f3b134819778758f8e3d6e",
+    "apps/desktop/src-tauri/src/main.rs": "ad41257c24565947f1d8da363e278d3e2699e92e5490cfb236b3d4b42edff8c9",
+    "apps/desktop/src-tauri/src/operation_journal.rs": "1ead5b927e65bd0a5b87259357fc159f25741eb792912565a78f20a9fe9c809f",
+    "apps/desktop/src-tauri/src/operation_status.rs": "7e6c40104f2f9377979262214bc4bd09d15913e57801b8f14363ef7e12499945",
+    "apps/desktop/src-tauri/tauri.conf.json": "838507b6eb430e14eb8eeb6a597142c615ca77154cb1a0d81743c34e431cc05b",
+    "apps/desktop/src/App.tsx": "cdbb803d3e5ab21ec27158c09e6414cb9c5f178604d2d5cdfc43883a3b5ccde4",
+    "apps/desktop/src/CliCheckPanel.tsx": "f41fb2bca0116870aa5c7b8709080782b5effd2edac43e3e164d953243d48d82",
+    "apps/desktop/src/cli-check-client.ts": "bfcd0f533fb364e59326b33a70ad7b1a2a04e24ce7ff9b92f9aff3f49272003f",
+    "apps/desktop/src/styles.css": "453c36d33d909135c65d54b3f67c7a6963d813a0f2a6648b023e00fd8d708e7a",
+    "docs/DEVELOPMENT.md": "d7c877cdfb1b111854927683bf92fab9469c2b726ca6babc4144f7f3d766b72e",
+    "docs/GO_GATE.md": "be348a2bf6dcad4c141db0b675e93315524f7d92aae0074f76d9dfa38ad70a7b",
+    "package-lock.json": "4aff14f90896d63a76636f6ed05bb705a039a0eef9ac9e1a99b3a53b86023850",
+    "package.json": "73e0eee1e8e26c26fdd79888559d186ac13fe686306b0dfdcc7c577b9b6d5142",
+    "packages/agent-adapters/package.json": "aabb4dbc5432da78e816c270fc6656278ec281148b2c77614f4bad045a8ac7a2",
+    "packages/agent-adapters/runtime-assets/mcp.mjs": "6d8b9b301bba83aa08cda22d9547adec50065993bcabac57ffd890b63d11049e",
+    "packages/agent-adapters/runtime-assets/native-cli-assets.lock.json": "dc6fcaa40d6a0f17442b0545c1092638674674511d547a3959b37c2d68ca7d36",
+    "packages/agent-adapters/runtime-assets/runtime-bridge.mjs": "c6a19e63ac164ddbf3fd2707e268b469a2078212a2819e005a272f7d817380bc",
+    "packages/agent-adapters/runtime-assets/task-broker.mjs": "501da6243f92641fde8e81d6f7c0c1717c3b706077573d4063ef92a11556b190",
+    "packages/agent-adapters/runtime-assets/tunnel-wire.mjs": "21139c8b3629a28b59bf286b7ba969cb9a56b7eebc82920e40ed68f403168cbc",
+    "packages/agent-adapters/src/cli-check-protocol.ts": "28e63d62d9051f6fed154d6adf38203f54ce69e42b2e61c306fbe4bb361cabda",
+    "packages/agent-adapters/src/managed-control.ts": "3d9f9c806b2d3a99a0ccde8fb8e056407b260fbbc3e9b2bf280c0ce78150a933",
+    "packages/agent-adapters/src/managed-runtime.ts": "92dafffa40c3c6075566e103bc9e534289d751030d31e5df90c217da43c50c25",
+    "packages/agent-adapters/src/managed-trust.ts": "6a742f4adb75df9ff9dae4faf60cbbc3b4aa490a3a14538a87b32ceb1cc1f841",
+    "packages/agent-adapters/src/operation-journal.ts": "b63cbb7157806520ee7e96c16ce92c4bcee6f8af28bc9c2eb46188f473e6ad67",
+    "packages/agent-adapters/src/operation-lease.ts": "aa232a8bf40525505962b0772199593d6cb3b00a7af1c22a3bee9f95becdc69e",
+    "packages/agent-adapters/src/owned-process.ts": "e83fae50d87eb6c938bf5c0a0e0b170baad5e263bf0dbadde7480057405cf184",
+    "packages/agent-adapters/test/cli-check-protocol.test.ts": "2b2b6de238568ea51f321c3ff2510cd8467afab5196e2b7d52ae83861d5cbe39",
+    "packages/agent-adapters/test/managed-runtime.test.ts": "8adc95bd3ef82cba5e04792883d377cd851183c7007f2590b04bfd069cf2d9a8",
+    "packages/agent-adapters/test/native-cli-worker.test.ts": "2ccc3330dbdac8b6e376214beae7dfda9b530cd0916afc2fc4817301f7f5b185",
+    "packages/agent-adapters/test/owned-process-supervised.test.ts": "37be8a596d195be942a4d8a0e3e11eedba1cb81e2cc4fb294868fb636a542cf2",
+    "scripts/native-cli-smoke.mts": "e21916e5f510a42c5040f5b4dc0e405c37b74e75bd46ccabfb68707bebf9b075",
+    "scripts/native-launcher-assets.mjs": "78769c4c80c57bf5ea47f59d569b4624f3f4113669aed792da8865b2e6955c87",
+    "scripts/native.mjs": "f7e2cf0e0cee2250aef1d2e4d8a5e34803f0025935cb8a3719cba0543e1febec",
+    "scripts/rust.mjs": "6b515ddaece7b0453792ae0e637544f02364d5ae801e272a6769b522b6217ca1",
+    "scripts/test/task-broker.test.mjs": "fe50215b2304d4bf887b002d481923925e950a751370990baa79599bc571d8ef",
+    "scripts/test/tunnel-wire.test.mjs": "dadc8972bde76b9af523720e7cd72742c33c026c58b59baa1e7a345f2db7bb4b",
+    "spike/adr/0019-native-owned-cli-version-check.md": "b9bec49cb709ca95bad7a3a66076389007fb663f387b5ecd3f02de2110b76150",
+    "spike/cli-session/managed-control.mts": "9a5d0b462d0787e89c46ef563cee524bdd449d185921122f0fb3a7a186fb1f39",
+    "spike/cli-session/managed-control.test.mts": "56316cf7fe04dc509bce65d0387311ac207623400976ef1931691b1af672eaf7",
+    "spike/cli-session/managed-operation-journal.test.mts": "efb2873b306d357e14a7f1608fa80e83fd57bf604aa1042e5dc27c50d485cb97",
+    "spike/cli-session/managed-runtime.mts": "a43b4f6d67462792c9f9af66fd45b143637f2d28e692202eca5475f49b95a008",
+    "spike/cli-session/managed-runtime.test.mts": "6a4aee1d33b7bb3914d9d2ef45d5447de5c0928968f9dc859a6a0fe2abe188fe",
+    "spike/cli-session/managed-trust.mts": "345b52b987fa8737564ef508c02ef7ea0a5124b22025c6379a5d24999784fb9c",
+    "spike/cli-session/run.mts": "c2a744bbab811132b913ef253ab9db3366186d15cce5dd15220d988a70e343b8",
+    "tests/ui/cli-check.spec.ts": "1719349f096855d1e21c5c19f0723dcf38a13fca6a31c61d1cda59f0d89fcaab",
+    "tests/ui/operation-recovery-transport.spec.ts": "d832660b60f75ea6becb3823f7b8ca5d483c4f0c2e62d8ffe7e30eaf75b4c0c1",
+    "tsconfig.json": "eaa1586d652fbff123994148a2ffbdb7da3a6fa683c1ebc08be5218333730b5d"
+  },
+  "host": {
+    "os": "Windows",
+    "arch": "x64",
+    "node": "v22.14.0",
+    "docker": "29.8.2",
+    "runtime_platform": "Linux/amd64 Docker engine"
+  },
+  "local_check": {
+    "command": "npm run check",
+    "exit_code": 0,
+    "node_tests": 377,
+    "node_groups": [
+      4,
+      160,
+      9,
+      204
+    ],
+    "failures": 0,
+    "generated_types_web_and_go_build": "passed",
+    "go_tests": "passed"
+  },
+  "browser_ui": {
+    "command": "npm run test:ui",
+    "tests": 40,
+    "failures": 0,
+    "native_ipc": "mocked; distinct from actual Windows evidence"
+  },
+  "native_units": {
+    "command": "npm run test:native",
+    "tests": 16,
+    "failures": 0,
+    "execution": "default parallel Rust harness",
+    "shared_journal_cases": 107,
+    "generated_acl": true,
+    "owned_descendant_fixture": true
+  },
+  "native_windows": {
+    "schema_version": "1.0",
+    "checked_at": "2026-10-10T18:01:04.009Z",
+    "purpose": "real_windows_native_official_cli_version_lifecycle",
+    "success": true,
+    "ui_checks_passed": true,
+    "checks": [
+      "real_packaged_ui_exposes_native_cli_check",
+      "real_native_commands_reject_untrusted_path_and_argv_without_launch",
+      "official_codex_version_through_native_owned_worker_and_verified_cleanup",
+      "codex_native_duplicate_request_idempotent_and_conflicting_provider_denied",
+      "official_claude_version_through_native_owned_worker_and_verified_cleanup",
+      "claude_native_duplicate_request_idempotent_and_conflicting_provider_denied",
+      "real_native_revision_bound_cancel_finishes_with_verified_cleanup",
+      "app_owned_journal_matches_node_projection_and_no_owned_docker_resources_remain",
+      "native_cli_check_has_no_developer_http_fallback"
+    ],
+    "outcomes": [
+      {
+        "request_id": "ef3d7858-38be-4594-9b3c-447b593c96f8",
+        "provider": "codex",
+        "revision": 4,
+        "phase": "finished",
+        "outcome": "passed",
+        "cli_version": "codex-cli 0.157.1",
+        "error_code": null,
+        "cleanup": "verified"
+      },
+      {
+        "request_id": "fc4bcfa7-8fda-455e-a1c3-611e33a73db1",
+        "provider": "claude",
+        "revision": 4,
+        "phase": "finished",
+        "outcome": "passed",
+        "cli_version": "2.1.293 (Claude Code)",
+        "error_code": null,
+        "cleanup": "verified"
+      },
+      {
+        "request_id": "ddd9fec6-855c-473c-b206-2d74389c24ca",
+        "provider": "codex",
+        "revision": 2,
+        "phase": "finished",
+        "outcome": "cancelled",
+        "cli_version": null,
+        "error_code": "cancelled",
+        "cleanup": "verified"
+      }
+    ],
+    "real_native_ipc": true,
+    "mocked_native_ipc": false,
+    "real_official_cli_versions": true,
+    "official_cli_providers": [
+      "codex",
+      "claude"
+    ],
+    "real_account_tested": false,
+    "real_model_inference": false,
+    "default_user_app_store_accessed": false,
+    "existing_managed_profiles_accessed": false,
+    "developer_http_requests": 0,
+    "process_cleanup": {
+      "method": "windows_taskkill",
+      "status": "termination_reported",
+      "helperExitCode": 0
+    },
+    "scope_limits": [
+      "Debug unbundled executable uses production frontend assets and native-owned resource worker",
+      "Fresh version-check profiles only; subscribed task execution and installer signing are separate steps",
+      "Host termination observation alone does not prove Docker cleanup; successful checks independently verified owned Docker resource absence"
+    ],
+    "run_id": "9b228b11-1e0c-46a6-8c5c-ade3c852fbb1"
+  },
+  "runtime_extraction": {
+    "product_core": "packages/agent-adapters",
+    "spike": "thin development adapters preserve existing commands",
+    "bridge_assets": "single product source; historical bridge bytes unchanged"
+  },
+  "prior_direct_worker_failures": [
+    {
+      "run_id": "6269bce0-157c-461a-a579-4ea0491ecb7a",
+      "success": false,
+      "observed_cause": "Pinned image digest reference was absent locally; no Docker mutation claimed. Reviewed pinned image pull installed the reference.",
+      "providers": [
+        {
+          "provider": "codex",
+          "result": {
+            "type": "result",
+            "outcome": "failed",
+            "cli_version": null,
+            "error_code": "docker_unavailable",
+            "cleanup": "verified"
+          }
+        },
+        {
+          "provider": "claude",
+          "result": {
+            "type": "result",
+            "outcome": "failed",
+            "cli_version": null,
+            "error_code": "docker_unavailable",
+            "cleanup": "verified"
+          }
+        }
+      ],
+      "result_not_reclassified": true
+    },
+    {
+      "run_id": "39edcefc-21f7-4ac8-a458-41f62d07996f",
+      "success": false,
+      "observed_cause": "Earlier 90-second execution budget expired during cold public CLI copy. Worker execution budget increased to 300 seconds; native/UI deadlines include cleanup and startup.",
+      "providers": [
+        {
+          "provider": "codex",
+          "result": {
+            "type": "result",
+            "outcome": "failed",
+            "cli_version": null,
+            "error_code": "deadline_exceeded",
+            "cleanup": "verified"
+          }
+        },
+        {
+          "provider": "claude",
+          "result": {
+            "type": "result",
+            "outcome": "failed",
+            "cli_version": null,
+            "error_code": "deadline_exceeded",
+            "cleanup": "verified"
+          }
+        }
+      ],
+      "result_not_reclassified": true
+    }
+  ],
+  "prior_native_windows_failures": [
+    {
+      "run_id": "e356c1ca-6692-424c-ad1b-d5f180462980",
+      "success": false,
+      "real_native_ipc": true,
+      "completed_checks": 2,
+      "real_official_cli_versions": false,
+      "observed_error_code": "docker_unavailable",
+      "cause": "Clean Docker environment selected missing default docker_engine pipe; inherited host context reached Docker Desktop Linux pipe.",
+      "resolution": "Fixed local Windows npipe allowlist with bounded version-only probes and endpoint pinned before mutations.",
+      "result_not_reclassified": true
+    },
+    {
+      "run_id": "9c8c902d-fa72-4038-aec6-2d4f41c35930",
+      "success": false,
+      "real_native_ipc": true,
+      "completed_checks": 2,
+      "real_official_cli_versions": false,
+      "observed_error_code": "docker_unavailable",
+      "cleanup": "verified",
+      "cause_proven": false,
+      "result_not_reclassified": true,
+      "followup": "A separate instrumented whole-worker reproduction reached image inspect and returned NoSuchImage for the unchanged reviewed pin. The original broad error code did not distinguish this setup failure. A later instrumented run passed; the cause of local image reference availability changing was not proven. Concurrency was not established as a cause."
+    },
+    {
+      "run_id": "71e5dc44-c030-488e-88ca-ffe70f4edea0",
+      "success": false,
+      "real_native_ipc": true,
+      "completed_checks": 2,
+      "real_official_cli_versions": false,
+      "observed_error_code": "docker_unavailable",
+      "cleanup": "verified",
+      "cause_proven": false,
+      "result_not_reclassified": true,
+      "followup": "A separate instrumented whole-worker reproduction reached image inspect and returned NoSuchImage for the unchanged reviewed pin. The original broad error code did not distinguish this setup failure. A later instrumented run passed; the cause of local image reference availability changing was not proven. Concurrency was not established as a cause."
+    },
+    {
+      "run_id": "e8c2ec80-efa7-4fd5-9524-7bab81bfc5e3",
+      "success": false,
+      "real_native_ipc": true,
+      "completed_checks": 2,
+      "real_official_cli_versions": false,
+      "observed_error_code": "image_missing",
+      "cleanup": "verified",
+      "preparation_started": false,
+      "result_not_reclassified": true,
+      "resolution": "A separate clean-Docker-config public pinned pull changed exact-reference inspect from missing to available before final acceptance."
+    }
+  ],
+  "public_prerequisite_setup": {
+    "pin": "node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392",
+    "before_code": 1,
+    "missing_before": true,
+    "pull_code": 0,
+    "after_code": 0,
+    "clean_docker_config": true,
+    "real_account_tested": false,
+    "real_model_inference": false
+  },
+  "readonly_tauri_diagnostic": {
+    "fixture": true,
+    "actual_bundle_helpers": true,
+    "stages": [
+      {
+        "stage": "verify_assets",
+        "ok": true
+      },
+      {
+        "stage": "select_windows_endpoint",
+        "ok": true
+      },
+      {
+        "stage": "version",
+        "ok": true,
+        "code": 0,
+        "stdout": "linux/amd64"
+      },
+      {
+        "stage": "image",
+        "ok": true,
+        "code": 0,
+        "stdout": "sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392"
+      }
+    ],
+    "daemon_mutations": false,
+    "temporary_resources_restored_byte_for_byte": true,
+    "does_not_reclassify_failed_runs": true
+  },
+  "prerequisite_diagnostic": {
+    "fixed_public_error_codes": [
+      "docker_unavailable",
+      "image_missing"
+    ],
+    "missing_image_does_not_prepare_or_mutate": true,
+    "fixture_regressions": "worker fixed-code/privacy/no-prepare cases and two localized UI failure/retry cases",
+    "instrumented_success_is_not_acceptance": true,
+    "local_image_availability_change_cause_proven": false
+  },
+  "prior_browser_ui_failure": {
+    "passed": 38,
+    "failed": 2,
+    "checks": [
+      "superseded/unmounted read fixture",
+      "420-poll limit fixture"
+    ],
+    "observed": "Background timer progression consumed a deferred read and advanced more polls than the test explicitly requested.",
+    "resolution": "Timer-sensitive fixtures pause the browser clock before mounting and advance only the intended virtual time. Exact poll bound and stale/unmount assertions remain.",
+    "result_not_reclassified": true
+  },
+  "prior_native_fixture_observations": [
+    {
+      "observed": "Fixture copied an ambient Volta shim under a clean environment and failed to locate LocalAppData.",
+      "resolution": "Fixture uses prepared process.execPath Node resource; production builder already used it."
+    },
+    {
+      "observed": "One intermediate parallel test process ended with Windows exit 0xc0000409 after fifteen printed passes.",
+      "cause_proven": false,
+      "result_not_reclassified": true
+    },
+    {
+      "observed": "Later parallel run reproduced a 10-second fixture wait timeout during concurrent cold startup.",
+      "resolution": "Fixture wait is 45 seconds; test owner cancels and joins before cleanup, avoiding cleanup double panic during unwind. Final default parallel 16/16 is separate evidence.",
+      "relation_to_0xc0000409_proven": false
+    }
+  ],
+  "independent_review": {
+    "model": "gpt-6.1-sol",
+    "reasoning": "high",
+    "result": "No actionable findings in final read-only runtime/native/build boundary review"
+  },
+  "real_account_tested": false,
+  "real_model_inference": false,
+  "subscription_quota_intentionally_consumed": false,
+  "scope_limits": [
+    "Real Windows native version checking only; no AI task, account login or auth refresh was invoked.",
+    "Debug unbundled executable and production frontend; signed installer and other host native UI acceptance are separate.",
+    "Shutdown fixture proves owned host process behavior; host process exit alone is not Docker cleanup proof.",
+    "Managed login/profile selection, trusted task admission and ambiguous Docker mutation recovery remain next work."
+  ]
+}
