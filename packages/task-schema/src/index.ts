@@ -1,6 +1,6 @@
-import Ajv from "ajv";
 import { canonicalize } from "json-canonicalize";
 import schema from "../schema/contracts.schema.json";
+import * as validators from "./validators.generated.js";
 import type {
   TaskContract,
   ExecutionContext,
@@ -14,12 +14,12 @@ export type {
   PlannerProposal,
 } from "./generated";
 
-const ajv = new Ajv({ allErrors: true, strict: true });
-ajv.addSchema(schema);
-function validateShape<T>(name: string, value: unknown): asserts value is T {
-  const validate = ajv.getSchema(`${schema.$id}#/$defs/${name}`)!;
+function validateShape<T>(name: keyof typeof validators, value: unknown): asserts value is T {
+  const validate = validators[name];
   if (!validate(value))
-    throw new Error(`${name}: ${ajv.errorsText(validate.errors)}`);
+    throw new Error(`${name}: ${validate.errors?.length
+      ? validate.errors.map(error => `data${error.instancePath} ${error.message}`).join(", ")
+      : "No errors"}`);
 }
 export const immutableFields = Object.keys(
   schema.$defs.TaskContract.properties,

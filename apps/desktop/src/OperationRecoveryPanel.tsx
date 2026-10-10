@@ -1,18 +1,19 @@
 /// <reference types="vite/client" />
 import { useEffect, useRef, useState } from "react";
-import { createOperationReviewRequest, validateRecoveryStatus, type RecoveryStatus } from "@commongrid/agent-adapters/recovery";
+import { createOperationReviewRequest, type RecoveryStatus } from "@commongrid/agent-adapters/recovery";
+import { operationStatusTransport, readOperationStatus } from "./operation-status-client";
 
 const words = {
   tr: {
-    title: "Yerel işlem günlüğü", description: "Geliştirici çalışma ortamındaki geçmiş kayıtları gösterir. Kayıtlar, Docker'ın güncel durumunu veya önceki çalışanın durduğunu kanıtlamaz.",
-    refresh: "İşlem kayıtlarını yenile", loading: "İşlem kayıtları okunuyor…", unavailable: "Yerel işlem günlüğü kullanılamıyor.", blocked: "İşlem kayıtları doğrulanamadı; inceleme gerekli.", native: "Paketlenmiş masaüstü sürümünde yerel işlem durumu bağlantısı henüz hazır değil.", empty: "Günlükte işlem kaydı yok. Bu, çalışır kaynak bulunmadığının kanıtı değildir.",
-    gate: "Görev başlatma ve otomatik kurtarma kapalı. Çalışanın durumu ve Docker durumu bilinmiyor.", review: "İnceleme isteğini göster", request: "Salt okunur inceleme isteği", requestNote: "Bu istek yalnız kimlik ve günlük sürümünü bağlar. Temizleme, devralma veya yeniden başlatma yetkisi vermez. İşlem değişmişse yeni kayıtla tekrar incele.",
+    title: "Yerel işlem günlüğü", description: "Yerel işlem geçmişini gösterir. Kayıtlar, Docker'ın güncel durumunu veya önceki çalışanın durduğunu kanıtlamaz.",
+    refresh: "İşlem kayıtlarını yenile", loading: "İşlem kayıtları okunuyor…", unavailable: "Yerel işlem günlüğü kullanılamıyor.", blocked: "İşlem kayıtları doğrulanamadı; inceleme gerekli.", empty: "Günlükte işlem kaydı yok. Bu, çalışır kaynak bulunmadığının kanıtı değildir.",
+    review: "İnceleme isteğini göster", request: "Salt okunur inceleme isteği", requestNote: "Bu istek yalnız kimlik ve günlük sürümünü bağlar. Temizleme, devralma veya yeniden başlatma yetkisi vermez. İşlem değişmişse yeni kayıtla tekrar incele.",
     complete: "Günlükte tamamlanmış", needsReview: "İnceleme gerekli", pending: "Sonucu doğrulanmamış işlem", namespaces: "Kaydedilmiş namespace", durability: "Kalıcılık", process: "Süreç kesintisine karşı kayıt", synced: "Dosya ve dizin senkronizasyonu", revision: "Günlük sürümü", showing: "Gösterilen / toplam kayıt", more: "Daha fazla kayıt göster",
   },
   en: {
-    title: "Local operation journal", description: "Shows historical records from the developer environment. Records do not prove Docker's current state or that the previous worker has stopped.",
-    refresh: "Refresh operation records", loading: "Reading operation records…", unavailable: "The local operation journal is unavailable.", blocked: "Operation records could not be validated; review is required.", native: "The packaged desktop version does not yet have a local operation status connection.", empty: "The journal has no operation records. This does not prove that running resources are absent.",
-    gate: "Task execution and automatic recovery are disabled. Worker and Docker states are unknown.", review: "Show review request", request: "Read-only review request", requestNote: "This request binds only the identity and journal revision. It grants no cleanup, takeover or restart authority. If the operation changes, review a fresh record.",
+    title: "Local operation journal", description: "Shows local operation history. Records do not prove Docker's current state or that the previous worker has stopped.",
+    refresh: "Refresh operation records", loading: "Reading operation records…", unavailable: "The local operation journal is unavailable.", blocked: "Operation records could not be validated; review is required.", empty: "The journal has no operation records. This does not prove that running resources are absent.",
+    review: "Show review request", request: "Read-only review request", requestNote: "This request binds only the identity and journal revision. It grants no cleanup, takeover or restart authority. If the operation changes, review a fresh record.",
     complete: "Recorded complete", needsReview: "Review required", pending: "Unconfirmed operation", namespaces: "Recorded namespace", durability: "Durability", process: "Process interruption record", synced: "File and directory synchronized", revision: "Journal revision", showing: "Shown / total records", more: "Show more records",
   },
 };
@@ -26,16 +27,11 @@ export function OperationRecoveryPanel({language}: {language: "tr" | "en"}) {
   async function refresh() {
     activeRequest.current?.abort();
     setRequest(""); setStatus(null); setShown(50);
-    if (!import.meta.env.DEV) { setState("unavailable"); return; }
     const controller = new AbortController(); activeRequest.current = controller;
     const timeout = window.setTimeout(() => controller.abort(), 5000);
     setState("loading");
     try {
-      const response = await fetch("/local-operation-status", {credentials: "same-origin", signal: controller.signal});
-      if (!response.ok) throw new Error("operation_status_unavailable");
-      const body = await response.text();
-      if (body.length > 1048576) throw new Error("invalid_response");
-      const checked = validateRecoveryStatus(JSON.parse(body));
+      const checked = await readOperationStatus(controller.signal);
       if (activeRequest.current !== controller || controller.signal.aborted) return;
       setStatus(checked); setState(checked.status);
     } catch {
@@ -45,10 +41,10 @@ export function OperationRecoveryPanel({language}: {language: "tr" | "en"}) {
   }
   useEffect(() => { void refresh(); return () => {activeRequest.current?.abort(); activeRequest.current = null;}; }, []);
   return <section className="settings-box operation-recovery" aria-labelledby="operation-recovery-title">
-    <div className="section-heading"><h2 id="operation-recovery-title">{t.title}</h2>{import.meta.env.DEV && <button className="secondary-button" onClick={() => void refresh()} disabled={state === "loading"}>{t.refresh}</button>}</div>
-    <p>{t.description}</p><p className="muted-note">{t.gate}</p>
+    <div className="section-heading"><h2 id="operation-recovery-title">{t.title}</h2>{operationStatusTransport() !== "unavailable" && <button className="secondary-button" onClick={() => void refresh()}>{t.refresh}</button>}</div>
+    <p>{t.description}</p>
     {state === "loading" && <p role="status">{t.loading}</p>}
-    {state === "unavailable" && <p role="status">{import.meta.env.DEV ? t.unavailable : t.native}</p>}
+    {state === "unavailable" && <p role="status">{t.unavailable}</p>}
     {state === "blocked" && <p role="alert">{t.blocked}</p>}
     {state === "available" && status?.operations.length === 0 && <p role="status">{t.empty}</p>}
     {state === "available" && !!status?.operations.length && <p>{t.showing}: {Math.min(shown, status.operations.length)} / {status.operations.length}</p>}

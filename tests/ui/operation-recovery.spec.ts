@@ -7,7 +7,7 @@ test("historical operation observations produce only revision-bound inspect requ
   let revision = 4;
   await page.route("**/local-operation-status", route => route.fulfill({json: {...envelope, operations: [{...operation, last_sequence: revision}]}}));
   await page.goto("/"); await page.getByRole("button", {name: "Ajanlar ve ortam", exact: true}).click();
-  await expect(page.getByText("Görev başlatma ve otomatik kurtarma kapalı.", {exact: false})).toBeVisible();
+  await expect(page.getByText("Yerel işlem geçmişini gösterir.", {exact: false})).toBeVisible();
   await page.getByRole("button", {name: "İnceleme isteğini göster"}).click();
   await expect(page.getByTestId("operation-review-request")).toContainText('"expected_sequence": 4');
   await expect(page.getByTestId("operation-review-request")).toContainText('"action": "inspect_only"');
@@ -23,7 +23,7 @@ test("historical operation observations produce only revision-bound inspect requ
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.getByRole("button", {name: "Change language"}).click();
   await expect(page.getByRole("heading", {name: "Local operation journal"})).toBeVisible();
-  await expect(page.getByText("Worker and Docker states are unknown.", {exact: false})).toBeVisible();
+  await expect(page.getByText("Records do not prove Docker's current state or that the previous worker has stopped.", {exact: false})).toBeVisible();
 });
 test("HTTP failure rejects even a valid observation body", async ({page}) => {
   await page.route("**/local-operation-status", route => route.fulfill({status: 503, json: envelope}));

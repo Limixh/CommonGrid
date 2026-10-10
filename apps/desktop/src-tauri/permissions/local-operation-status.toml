@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "read-local-operation-status"
+description = "Read projected operation status; grants no journal writes, cleanup, lease adoption, or execution."
+commands.allow = ["local_operation_status"]

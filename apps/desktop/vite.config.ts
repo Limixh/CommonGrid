@@ -4,6 +4,8 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { operationStatusMiddleware } from "./operation-status-server.ts";
 export default defineConfig({
+  // Packaged fonts stay same-origin under the native Content Security Policy.
+  build: { assetsInlineLimit: 0 },
   plugins: [
     react(),
     {
