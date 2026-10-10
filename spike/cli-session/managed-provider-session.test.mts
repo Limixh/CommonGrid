@@ -86,7 +86,7 @@ test("a ten minute device-login allowance never extends an individual RPC past t
 });
 
 test("pre-cancellation and invalid deadline prevent all operation ownership checks and Docker spawning",async()=>{
-  let calls=0;const runtime={verifyOperation:async()=>{calls++;throw Error("fixture_must_not_spawn");}};
+  let calls=0;const runtime={verifyOperation:async()=>{calls++;throw Error("fixture_must_not_spawn");},beginNamespaceExec:async()=>{throw Error("fixture_must_not_journal");}};
   const controller=new AbortController();controller.abort();
   await assert.rejects(codexRpc(runtime,"status",{signal:controller.signal}),/managed_provider_canceled/);
   for(const deadlineMs of [0,-1,NaN,Infinity,1.5,30_001])await assert.rejects(codexRpc(runtime,"status",{deadlineMs}),/managed_session_deadline_invalid/);
@@ -95,8 +95,17 @@ test("pre-cancellation and invalid deadline prevent all operation ownership chec
 
 test("ownership verification and generic provider operations have bounded cancellation even if a fixture hangs",async()=>{
   let calls=0;
-  await assert.rejects(codexRpc({verifyOperation:async()=>{calls++;return new Promise(()=>{});}},"status",{deadlineMs:10}),/managed_provider_deadline/);assert.equal(calls,1);
+  await assert.rejects(codexRpc({verifyOperation:async()=>{calls++;return new Promise(()=>{});},beginNamespaceExec:async()=>{throw Error("fixture_must_not_journal");}},"status",{deadlineMs:10}),/managed_provider_deadline/);assert.equal(calls,1);
   await assert.rejects(boundedSessionOperation(async()=>new Promise(()=>{}),{deadlineMs:10}),/managed_provider_deadline/);
+});
+
+test("provider launch stops when its write-ahead exec intent cannot be persisted",async()=>{
+  const calls:string[]=[];
+  await assert.rejects(codexRpc({
+    verifyOperation:async()=>{calls.push("verify");return "a".repeat(64);},
+    beginNamespaceExec:async()=>{calls.push("journal");throw Error("managed_operation_journal_failed");},
+  },"status"),/managed_operation_journal_failed/);
+  assert.deepEqual(calls,["verify","journal"]);
 });
 
 test("Claude auth status uses only the official JSON status command and sanitizes identity",async()=>{

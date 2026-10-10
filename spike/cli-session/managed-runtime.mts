@@ -9,7 +9,9 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { dockerCommand, DockerCommandError, TaskToolsRuntime } from "../../packages/agent-adapters/src/task-runtime.ts";
-import { DockerOperationLease, type OperationLeaseIdentity } from "../../packages/agent-adapters/src/operation-lease.ts";
+import { DockerOperationLease, assertOperationLeaseEvidence, operationLeaseFormat, type OperationLeaseIdentity } from "../../packages/agent-adapters/src/operation-lease.ts";
+import { createOperationJournal, readOperationJournals } from "../../packages/agent-adapters/src/operation-journal.ts";
+import type { OperationJournal, OperationJournalSnapshot, JournalIntent, JournalReceipt } from "../../packages/agent-adapters/src/operation-journal-types.ts";
 import { executeTaskTool } from "../../packages/agent-adapters/src/task-tool.ts";
 import { type SubscriptionProvider } from "../../packages/agent-adapters/src/egress-policy.ts";
 import { attachManagedControl } from "./managed-control.mts";
@@ -76,6 +78,10 @@ async function digest(source: string) {
   return hash.digest("hex");
 }
 export interface SessionIdentity { owner: string; provider: SubscriptionProvider; trust?: ManagedProfileTrust }
+export interface ManagedJournalOptions {
+  journalRoot?: string;
+  journalFactory?: (identity: {owner:string;provider:string;operation:string}, options:{root:string}) => Promise<OperationJournal>;
+}
 export class ManagedCliRuntime {
   readonly owner: string;
   readonly provider: SubscriptionProvider;
@@ -97,7 +103,11 @@ export class ManagedCliRuntime {
   // A canceled create client can lose its ID while the daemon is still working.
   // Absence in a single listing cannot prove that mutation never completed.
   private uncertainCreate = false;
-  private constructor(identity: SessionIdentity) {
+  private journal?: OperationJournal;
+  private journalOpening?: Promise<OperationJournal>;
+  private journalFailed = false;
+  private readonly journalOptions: ManagedJournalOptions;
+  private constructor(identity: SessionIdentity, options: ManagedJournalOptions = {}) {
     if (!uuidV4.test(identity.owner) || !["claude","codex"].includes(identity.provider)) throw new Error("managed_identity_invalid");
     this.owner = identity.owner; this.provider = identity.provider;
     if (identity.trust !== undefined) { assertManagedProfileTrust(identity.trust, this.owner, this.provider); this.profileTrust = Object.freeze({...identity.trust}); }
@@ -105,12 +115,170 @@ export class ManagedCliRuntime {
     this.initContainer = `cg-managed-init-${this.owner}`;
     this.toolsVolume = `cg-managed-tools-${this.owner}`;
     this.authVolume = `cg-managed-auth-${this.owner}`;
-    this.lease = new DockerOperationLease({owner:this.owner,provider:this.provider,operation:this.operation},base.image,(args,options) => this.command(args,options));
+    this.journalOptions = options;
+    this.lease = new DockerOperationLease({owner:this.owner,provider:this.provider,operation:this.operation},base.image,(args,options) => this.journaledCommand(args,options));
   }
-  static restore(identity: SessionIdentity) { return new ManagedCliRuntime(identity); }
+  static restore(identity: SessionIdentity, options: ManagedJournalOptions = {}) { return new ManagedCliRuntime(identity,options); }
   identity(): SessionIdentity { return {owner:this.owner,provider:this.provider,...(this.profileTrust ? {trust:{...this.profileTrust}} : {})}; }
   operationIdentity() { return { ...this.identity(), operation: this.operation }; }
   leaseIdentity(): OperationLeaseIdentity | undefined { return this.lease.snapshot(); }
+  journalSnapshot(): OperationJournalSnapshot | undefined { return this.journal?.snapshot(); }
+  private async journalWrite<T>(work: () => Promise<T>) {
+    if(this.journalFailed) throw new Error("managed_operation_journal_failed");
+    try { return await work(); }
+    catch { this.journalFailed=true; throw new Error("managed_operation_journal_failed"); }
+  }
+  private async openJournal(options: ManagedOperationOptions = {}) {
+    assertActiveSignal(options.signal);
+    if(this.journalFailed) throw new Error("managed_operation_journal_failed");
+    if(!this.journalOpening) this.journalOpening=this.journalWrite(async () => {
+      const identity={owner:this.owner,provider:this.provider,operation:this.operation};
+      const journal=await (this.journalOptions.journalFactory ?? createOperationJournal)(identity,{root:this.journalOptions.journalRoot ?? path.join(root,".local/managed-operation-journal")});
+      assert.deepEqual(journal.identity,identity,"managed_operation_journal_identity_mismatch");
+      this.journal=journal; return journal;
+    });
+    return this.journalOpening;
+  }
+  private async recordIntent(intent: Omit<JournalIntent,"intent_id">, options: ManagedOperationOptions = {}) {
+    const journal=await this.openJournal(options), value={intent_id:randomUUID(),...intent};
+    await this.journalWrite(() => journal.appendIntent(value));
+    return value;
+  }
+  private async recordReceipt(receipt: JournalReceipt) { await this.journalWrite(() => this.journal!.appendReceipt(receipt)); }
+  private namespaceRole(idOrName: string): "runtime" | "init" {
+    if(idOrName === this.initContainer) return "init";
+    const snapshot=this.journal?.snapshot();
+    const create=snapshot?.pending.find(intent => intent.action === "namespace_create" && snapshot.captures.some(capture => capture.intent_id === intent.intent_id && capture.resource_id === idOrName));
+    if(create?.role === "init") return "init";
+    // Captured IDs remain associated with their role after their create receipt.
+    return this.namespaceRoles.get(idOrName) ?? "runtime";
+  }
+  private readonly namespaceRoles = new Map<string,"runtime"|"init">();
+  private readonly confirmedNamespaceRemovals = new Set<string>();
+  private async captureNamespace(id: string, role: "runtime"|"init") {
+    this.namespaceRoles.set(id,role);
+    for(const intent of this.journal?.snapshot().pending ?? []) if(intent.action === "namespace_create" && intent.role === role) {
+      if(!this.journal!.snapshot().captures.some(capture => capture.intent_id === intent.intent_id)) await this.journalWrite(() => this.journal!.appendCapture({intent_id:intent.intent_id,resource_id:id}));
+      await this.recordReceipt({intent_id:intent.intent_id,outcome:"verified",resource_id:id});
+    }
+  }
+  private async settleAbsentNamespace(id: string) {
+    const snapshot=this.journal?.snapshot();
+    if(!snapshot) return;
+    let recordedRemoval=false;
+    for(const intent of snapshot.pending) {
+      const captured=snapshot.captures.find(value => value.intent_id === intent.intent_id)?.resource_id;
+      if(intent.action.startsWith("namespace_") && (intent.resource_id === id || captured === id)) {
+        await this.recordReceipt({intent_id:intent.intent_id,outcome:"verified",resource_id:id});
+        if(intent.action === "namespace_remove") recordedRemoval=true;
+      }
+    }
+    if(!recordedRemoval && snapshot.namespace_ids.includes(id) && !this.confirmedNamespaceRemovals.has(id)) {
+      const intent=await this.recordIntent({action:"namespace_remove",role:this.namespaceRole(id),resource_id:id});
+      await this.recordReceipt({intent_id:intent.intent_id,outcome:"verified",resource_id:id});
+    }
+    this.confirmedNamespaceRemovals.add(id);
+  }
+  private async settleLeaseReceipt() {
+    const receipt=this.leaseIdentity();
+    if(!receipt) return;
+    for(const intent of this.journal?.snapshot().pending ?? []) if(intent.action === "lease_acquire") {
+      if(!this.journal!.snapshot().captures.some(capture => capture.intent_id === intent.intent_id)) await this.journalWrite(() => this.journal!.appendCapture({intent_id:intent.intent_id,resource_id:receipt.lease_id}));
+      await this.recordReceipt({intent_id:intent.intent_id,outcome:"verified",lease_id:receipt.lease_id});
+    }
+  }
+  private async settleAbsentLease(leaseId: string) {
+    for(const intent of this.journal?.snapshot().pending ?? []) if(intent.action === "lease_release") await this.recordReceipt({intent_id:intent.intent_id,outcome:"verified",lease_id:leaseId});
+  }
+  private async releaseJournaledLease(options: ManagedOperationOptions) {
+    const leaseId=this.leaseIdentity()!.lease_id;
+    if(!this.journal!.snapshot().pending.some(intent => intent.action === "lease_release")) await this.recordIntent({action:"lease_release"},options);
+    await this.lease.release(options);
+    // release also verifies a previously removed exact ID without dispatching rm.
+    await this.settleAbsentLease(leaseId);
+  }
+  private async assertDispatchAllowed(intent: JournalIntent, options: ManagedOperationOptions) {
+    if(options.signal?.aborted) {
+      await this.recordReceipt({intent_id:intent.intent_id,outcome:"rejected_before_dispatch"});
+      assertActiveSignal(options.signal);
+    }
+    if(this.journalFailed) throw new Error("managed_operation_journal_failed");
+  }
+  private async journaledCommand(args: string[], options: ManagedOperationOptions = {}) {
+    let intent: Omit<JournalIntent,"intent_id"> | undefined;
+    const leaseName=this.lease.name, target=args.at(-1)!;
+    if(args[0] === "create") intent=args.includes(leaseName) ? {action:"lease_acquire"} : {action:"namespace_create",role:args.includes(this.initContainer) ? "init" : "runtime"};
+    else if(args[0] === "start") intent={action:"namespace_start",role:this.namespaceRole(target),resource_id:target};
+    else if(args[0] === "exec") intent={action:"namespace_exec",role:this.namespaceRole(args[1]),resource_id:args[1]};
+    else if(args[0] === "rm") intent=target === this.leaseIdentity()?.lease_id ? {action:"lease_release"} : {action:"namespace_remove",role:this.namespaceRole(target),resource_id:target};
+    else if(args[0] === "volume" && ["create","rm"].includes(args[1])) intent={action:args[1] === "create" ? "volume_create" : "volume_remove",role:target === this.authVolume ? "auth" : "tools"};
+    if(!intent) return this.command(args,options);
+    const recorded=(intent.action === "lease_release" ? this.journal?.snapshot().pending.find(value => value.action === "lease_release") : undefined) ?? await this.recordIntent(intent,options);
+    await this.assertDispatchAllowed(recorded,options);
+    const result=await this.command(args,options);
+    assertActiveSignal(options.signal);
+    if(intent.action === "lease_acquire" || intent.action === "namespace_create") {
+      assert.match(result,/^[a-f0-9]{64}$/,"managed_container_id_invalid");
+      await this.journalWrite(() => this.journal!.appendCapture({intent_id:recorded.intent_id,resource_id:result}));
+      if(intent.action === "lease_acquire") {
+        const evidence:unknown=JSON.parse(await this.command(["inspect","--format",operationLeaseFormat,result],options));
+        assertOperationLeaseEvidence(evidence,{owner:this.owner,provider:this.provider,operation:this.operation},result);
+        await this.recordReceipt({intent_id:recorded.intent_id,outcome:"verified",lease_id:result});
+      } else {
+        const evidence:unknown=JSON.parse(await this.command(["inspect","--format",evidenceFormat,result],options));
+        assertManagedContainerFence(evidence,this.owner,this.operation);assert.equal(evidence.id,result,"managed_container_id_mismatch");
+        await this.captureNamespace(result,intent.role as "runtime"|"init");
+      }
+    } else if(intent.action === "namespace_remove" || intent.action === "lease_release") {
+      const remaining=await this.command(["container","ls","--all","--no-trunc","--filter",`id=${target}`,"--format","{{.ID}}"],options);
+      assert.ok(!remaining.split(/\r?\n/).includes(target),"managed_cleanup_unconfirmed");
+      if(intent.action === "namespace_remove") await this.settleAbsentNamespace(target);
+      else await this.settleAbsentLease(target);
+    } else if(intent.action === "volume_create") {
+      assert.equal(await this.command(["volume","inspect","--format",`{{index .Labels "${labelKey}"}}`,target],options),this.owner,"managed_owner_mismatch");
+      await this.recordReceipt({intent_id:recorded.intent_id,outcome:"verified"});
+    } else if(intent.action === "volume_remove") {
+      const remaining=await this.command(["volume","ls","--filter",`name=${target}`,"--format","{{.Name}}"],options);
+      assert.ok(!remaining.split(/\r?\n/).includes(target),"managed_cleanup_unconfirmed");
+      await this.recordReceipt({intent_id:recorded.intent_id,outcome:"verified"});
+    } else {
+      const evidence:unknown=JSON.parse(await this.command(["inspect","--format",evidenceFormat,intent.resource_id!],options));
+      assertManagedContainerFence(evidence,this.owner,this.operation);assert.equal(evidence.id,intent.resource_id,"managed_container_id_mismatch");
+      await this.recordReceipt({intent_id:recorded.intent_id,outcome:"verified",resource_id:intent.resource_id});
+    }
+    assertActiveSignal(options.signal);
+    return result;
+  }
+  // Work may carry stdin or credentials. Only its container identity is durable.
+  async beginNamespaceExec(containerId: string, options: ManagedOperationOptions = {}) {
+    await this.lease.verify(options);
+    const evidence=await this.containerEvidence(containerId,options);
+    assertManagedContainerFence(evidence,this.owner,this.operation);assert.equal(evidence.id,containerId,"managed_container_id_mismatch");
+    const intent=await this.recordIntent({action:"namespace_exec",role:this.namespaceRole(containerId),resource_id:containerId},options);
+    await this.assertDispatchAllowed(intent,options);
+    // Detached/provider work remains pending until exact namespace absence.
+    return intent.intent_id;
+  }
+  async journalNamespaceExec<T>(containerId: string, work: () => Promise<T>, options: ManagedOperationOptions = {}, action: "namespace_exec"|"namespace_start" = "namespace_exec") {
+    await this.lease.verify(options);
+    const intent=await this.recordIntent({action,role:this.namespaceRole(containerId),resource_id:containerId},options);
+    await this.assertDispatchAllowed(intent,options);
+    const result=await work();
+    assertActiveSignal(options.signal);
+    const evidence=await this.containerEvidence(containerId,options);
+    assertManagedContainerFence(evidence,this.owner,this.operation);assert.equal(evidence.id,containerId,"managed_container_id_mismatch");
+    await this.recordReceipt({intent_id:intent.intent_id,outcome:"verified",resource_id:containerId});
+    return result;
+  }
+  async publishPublicManifest(work: () => Promise<void>, options: ManagedOperationOptions = {}, action: "public_manifest_publish"|"public_checkpoint_publish" = "public_manifest_publish") {
+    await this.lease.verify(options);
+    const intent=await this.recordIntent({action},options);
+    await this.assertDispatchAllowed(intent,options);
+    await work();
+    assertActiveSignal(options.signal);
+    await this.recordReceipt({intent_id:intent.intent_id,outcome:"verified"});
+  }
+  async publishPublicCheckpoint(work: () => Promise<void>, options: ManagedOperationOptions = {}) { return this.publishPublicManifest(work,options,"public_checkpoint_publish"); }
   private async mutation<T>(work: () => Promise<T>, requireQuiescence = false) {
     assert.ok(!this.mutating && (!requireQuiescence || this.retainedOperations === 0), "managed_operation_pending");
     this.mutating=true;
@@ -118,8 +286,9 @@ export class ManagedCliRuntime {
   }
   private async beginInternal(options: ManagedOperationOptions = {}) {
     assert.ok(!this.finished,"managed_operation_finished");
-    try { await this.lease.acquire(options); }
-    catch(error) { if(error instanceof Error && error.message === "operation_lease_profile_busy") throw new Error("managed_profile_busy"); throw error; }
+    await this.openJournal(options);
+    try { await this.lease.acquire(options); await this.settleLeaseReceipt(); }
+    catch(error) { if(this.journalFailed) throw new Error("managed_operation_journal_failed"); await this.settleLeaseReceipt(); if(error instanceof Error && error.message === "operation_lease_profile_busy") throw new Error("managed_profile_busy"); throw error; }
   }
   async beginOperation(options: ManagedOperationOptions = {}) {
     if(this.leaseIdentity()) { assert.ok(!this.finished,"managed_operation_finished"); await this.lease.verify(options); return; }
@@ -128,11 +297,13 @@ export class ManagedCliRuntime {
   async finishOperation(options: ManagedOperationOptions = {}) {
     return this.mutation(async () => {
       assertActiveSignal(options.signal);
-      if(!this.leaseIdentity()) { assert.ok(!this.lease.isUncertain(),"managed_cleanup_unconfirmed"); return; }
+      if(this.journalFailed) throw new Error("managed_operation_journal_failed");
+      if(!this.leaseIdentity()) { assert.ok(!this.lease.isUncertain(),"managed_cleanup_unconfirmed"); assert.equal(this.journal?.snapshot().pending.length ?? 0,0,"managed_cleanup_unconfirmed"); return; }
       if(await this.lease.exists(options)) await this.stopInternal(options);
-      else await this.confirmCapturedNamespacesAbsent(options);
+      else { await this.confirmCapturedNamespacesAbsent(options); await this.settleAbsentLease(this.leaseIdentity()!.lease_id); }
       assert.ok(!this.uncertainCreate && this.uncertainNamespaces.size === 0 && this.uncertainVolumes.size === 0 && this.uncertainVolumeRemovals.size === 0,"managed_cleanup_unconfirmed");
-      await this.lease.release(options); this.finished=true;
+      assert.equal(this.journal?.snapshot().pending.filter(intent => intent.action !== "lease_release").length ?? 0,0,"managed_cleanup_unconfirmed");
+      await this.releaseJournaledLease(options); await this.journalWrite(() => this.journal!.complete()); this.finished=true;
     },true);
   }
   async retainOperation(options: ManagedOperationOptions = {}) {
@@ -141,12 +312,14 @@ export class ManagedCliRuntime {
     let released=false; return () => { if(!released) { released=true; this.retainedOperations--; } };
   }
   private async ownedCommand(args: string[], options: ManagedOperationOptions = {}) {
-    await this.lease.verify(options); return this.command(args,options);
+    if(this.journalFailed) throw new Error("managed_operation_journal_failed");
+    await this.lease.verify(options); return this.journaledCommand(args,options);
   }
   private command(args: string[], options: ManagedOperationOptions = {}) { return checked(args, 30_000, options); }
   private async containerEvidence(name: string, options: ManagedOperationOptions = {}) {
     const evidence: unknown = JSON.parse(await this.ownedCommand(["inspect", "--format", evidenceFormat, name], options));
     assertManagedContainerFence(evidence, this.owner);
+    if(evidence.operation === this.operation) await this.captureNamespace(evidence.id,this.namespaceRole(name));
     return evidence;
   }
   async verifyOperation(options: ManagedOperationOptions = {}) {
@@ -159,9 +332,10 @@ export class ManagedCliRuntime {
   async verify(kind: "container" | "volume", name: string, options: ManagedOperationOptions = {}) {
     const field = kind === "container" ? ".Config.Labels" : ".Labels";
     assert.equal(await this.ownedCommand([kind === "container" ? "inspect" : "volume", ...(kind === "container" ? [] : ["inspect"]),"--format",`{{index ${field} "${labelKey}"}}`,name], options),this.owner,"managed_owner_mismatch");
+    if(kind === "volume") for(const intent of this.journal?.snapshot().pending ?? []) if(intent.action === "volume_create" && intent.role === (name === this.authVolume ? "auth" : "tools")) await this.recordReceipt({intent_id:intent.intent_id,outcome:"verified"});
   }
-  static async prepare(provider: SubscriptionProvider, options: {hostTrust?: ManagedHostTrustOptions; signal?: AbortSignal} = {}) {
-    const runtime = new ManagedCliRuntime({owner:randomUUID(),provider});
+  static async prepare(provider: SubscriptionProvider, options: {hostTrust?: ManagedHostTrustOptions; signal?: AbortSignal} & ManagedJournalOptions = {}) {
+    const runtime = new ManagedCliRuntime({owner:randomUUID(),provider},options);
     if (options.hostTrust !== undefined) assert.equal(provider, "claude", "managed_profile_trust_provider_invalid");
     const extra = options.hostTrust !== undefined ? await readManagedHostTrust(options.hostTrust, runtime.owner) : undefined;
     if (extra) runtime.profileTrust = Object.freeze({...extra.trust});
@@ -189,7 +363,7 @@ export class ManagedCliRuntime {
       await runtime.ownedCommand(["start",initId],options);
       for (const [from,to] of [[source,`/opt/cg/${provider}`],...["runtime-bridge.mjs","tunnel-wire.mjs","mcp.mjs","task-broker.mjs"].map(file => [fileURLToPath(new URL(file,import.meta.url)),`/opt/cg/${file}`])]) {
         await runtime.lease.verify(options);
-        const result = await dockerCommand(["exec","-i",initId,"node","-e","const fs=require('node:fs');const o=fs.createWriteStream(process.argv[1],{flags:'wx',mode:0o555});o.on('error',()=>process.exit(1));process.stdin.pipe(o)",to],{signal:options.signal,timeoutMs:180_000,stdin:createReadStream(from)});
+        const result = await runtime.journalNamespaceExec(initId,()=>dockerCommand(["exec","-i",initId,"node","-e","const fs=require('node:fs');const o=fs.createWriteStream(process.argv[1],{flags:'wx',mode:0o555});o.on('error',()=>process.exit(1));process.stdin.pipe(o)",to],{signal:options.signal,timeoutMs:180_000,stdin:createReadStream(from)}),options);
         assert.equal(result.code,0,"managed_public_delivery_failed");
       }
       await runtime.ownedCommand(["exec",initId,"node","-e","require('node:fs').writeFileSync('/opt/cg/ca.pem',require('node:tls').rootCertificates.join('\\n')+'\\n',{flag:'wx',mode:0o444});"],options);
@@ -247,7 +421,7 @@ export class ManagedCliRuntime {
       const startArgs=["start","--attach",...(stdin ? ["--interactive"] : []),containerId];
       if(stdin) {
         await this.lease.verify(options);
-        const result=await dockerCommand(startArgs,{signal:options.signal,timeoutMs:30_000,stdin});
+        const result=await this.journalNamespaceExec(containerId,()=>dockerCommand(startArgs,{signal:options.signal,timeoutMs:30_000,stdin}),options,"namespace_start");
         assert.equal(result.code,0,"managed_public_delivery_failed");
       } else await this.ownedCommand(startArgs,options);
     } finally {
@@ -319,7 +493,7 @@ export class ManagedCliRuntime {
     assertActiveSignal(options.signal);
     if (!args.length || args.some(arg => typeof arg !== "string" || arg.includes("\0")) || !Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 600_000 || (options.maxBytes !== undefined && (!Number.isInteger(options.maxBytes) || options.maxBytes < 1 || options.maxBytes > 1_048_576))) throw new Error("managed_exec_arguments_invalid");
     const containerId = await this.verifyOperation(options);
-    try { return await dockerCommand(["exec",containerId,...args],{...options,timeoutMs}); }
+    try { return await this.journalNamespaceExec(containerId,() => dockerCommand(["exec",containerId,...args],{...options,timeoutMs}),options); }
     catch(error) {
       // Killing a Docker client does not guarantee its exec descendants exit.
       // Tear down only this operation; its private home remains on the volume.
@@ -330,6 +504,9 @@ export class ManagedCliRuntime {
   }
   private async stopOperationContainer(containerId: string, options: ManagedOperationOptions = {}) {
     await removeManagedOperationContainer(containerId, this.owner, this.operation, args => this.ownedCommand(args, options), options);
+    // The helper also returns after proving an already-removed exact ID absent.
+    // Settle dispatched execs in that path before dropping the in-memory ID.
+    await this.settleAbsentNamespace(containerId);
     this.ownedNamespaceIds.delete(containerId);
   }
   async stop(explicitDestroy = false, options: ManagedOperationOptions = {}) {
@@ -360,6 +537,7 @@ export class ManagedCliRuntime {
       const listed=await this.command(["container","ls","--all","--no-trunc","--filter",`id=${id}`,"--format","{{.ID}}"],options);
       assertActiveSignal(options.signal);
       assert.ok(!listed.split(/\r?\n/).includes(id),"managed_cleanup_unconfirmed");
+      await this.settleAbsentNamespace(id);
       this.ownedNamespaceIds.delete(id);
     }
   }
@@ -368,20 +546,51 @@ export class ManagedCliRuntime {
       assertActiveSignal(options.signal);
       assert.ok(receipt && typeof receipt === "object" && receipt.owner_quiesced === true,"managed_recovery_quiescence_required");
       assert.ok(uuidV4.test(receipt.operation),"managed_operation_invalid");
+      assert.ok(!this.journalFailed,"managed_operation_journal_failed");
       assert.ok(!this.leaseIdentity() && !this.lease.isUncertain() && !this.finished,"managed_recovery_claim_conflict");
+      // The explicit acknowledgement cannot settle an old owner's dispatched,
+      // uncaptured mutation. Only a fully validated durable history can fence
+      // the exact namespaces this separate legacy helper may remove.
+      const catalog=await readOperationJournals(this.journalOptions.journalRoot ?? path.join(root,".local/managed-operation-journal"));
+      assertActiveSignal(options.signal);
+      assert.equal(catalog.status,"available","managed_recovery_journal_unavailable");
+      const matches=catalog.operations.filter(value => value.identity.owner === this.owner && value.identity.provider === this.provider && value.identity.operation === receipt.operation);
+      assert.equal(matches.length,1,"managed_recovery_journal_identity_mismatch");
+      const oldJournal=matches[0];
+      assert.equal(oldJournal.lease_id,receipt.lease_id,"managed_recovery_journal_lease_mismatch");
+      assert.equal(oldJournal.pending.length,0,"managed_recovery_journal_pending");
+      assert.equal(oldJournal.terminal,false,"managed_recovery_journal_terminal");
       const lease=await DockerOperationLease.inspectReceipt({owner:this.owner,provider:this.provider,operation:receipt.operation,lease_id:receipt.lease_id},base.image,(args,callOptions) => this.command(args,callOptions),options);
       const invoke=async (args:string[]) => { await lease.verify(options); return this.command(args,options); };
-      const captured:ManagedContainerEvidence[]=[];
+      const recordedIds=new Set(oldJournal.namespace_ids), captured=new Map<string,ManagedContainerEvidence>();
+      const inventory=await invoke(["container","ls","--all","--no-trunc","--filter",`label=${labelKey}=${this.owner}`,"--filter",`label=${operationLabelKey}=${receipt.operation}`,"--format","{{.ID}}"]);
+      for(const presentId of inventory.split(/\r?\n/).filter(Boolean)) {
+        assert.match(presentId,/^[a-f0-9]{64}$/,"managed_container_id_invalid");
+        if(presentId !== receipt.lease_id) assert.ok(recordedIds.has(presentId),"managed_recovery_namespace_unrecorded");
+      }
       for(const name of [this.container,this.initContainer]) {
         const listed=await invoke(["container","ls","--all","--filter",`name=^/${name}$`,"--format","{{.Names}}"]);
         if(!listed.split(/\r?\n/).includes(name)) continue;
         const evidence:unknown=JSON.parse(await invoke(["inspect","--format",evidenceFormat,name]));
-        assertManagedContainerFence(evidence,this.owner,receipt.operation,true); captured.push(evidence);
+        assertManagedContainerFence(evidence,this.owner,receipt.operation,true);
+        assert.ok(recordedIds.has(evidence.id),"managed_recovery_namespace_unrecorded"); captured.set(evidence.id,evidence);
       }
-      assert.ok(captured.length > 0,"managed_recovery_namespace_absent");
-      for(const evidence of captured) await removeManagedContainer(evidence,this.owner,receipt.operation,true,invoke,options);
+      // A captured container may have been renamed or relabelled. Validate
+      // every still-present immutable ID before deleting even the first one.
+      for(const namespaceId of recordedIds) {
+        if(captured.has(namespaceId)) continue;
+        const listed=await invoke(["container","ls","--all","--no-trunc","--filter",`id=${namespaceId}`,"--format","{{.ID}}"]);
+        if(!listed.split(/\r?\n/).includes(namespaceId)) continue;
+        const evidence:unknown=JSON.parse(await invoke(["inspect","--format",evidenceFormat,namespaceId]));
+        assertManagedContainerFence(evidence,this.owner,receipt.operation,true);
+        assert.equal(evidence.id,namespaceId,"managed_container_id_mismatch"); captured.set(namespaceId,evidence);
+      }
+      assert.ok(captured.size > 0,"managed_recovery_namespace_absent");
+      for(const evidence of captured.values()) await removeManagedContainer(evidence,this.owner,receipt.operation,true,invoke,options);
       await lease.release(options);
-      return {recovered_containers:captured.length,private_volumes_retained:true};
+      // The old owner remains responsible for recording external absence and
+      // completing its journal; this helper has no authority to rewrite it.
+      return {recovered_containers:captured.size,private_volumes_retained:true};
     });
   }
   async destroy(options: ManagedOperationOptions = {}) {
@@ -399,7 +608,8 @@ export class ManagedCliRuntime {
         assert.ok(!(await this.ownedCommand(["volume","ls","--filter",`name=${name}`,"--format","{{.Name}}"],options)).split(/\r?\n/).includes(name),"managed_cleanup_unconfirmed");
         this.uncertainVolumeRemovals.delete(name);
       }
-      await this.lease.release(options); this.finished=true;
+      assert.equal(this.journal?.snapshot().pending.length ?? 0,0,"managed_cleanup_unconfirmed");
+      await this.releaseJournaledLease(options); await this.journalWrite(() => this.journal!.complete()); this.finished=true;
     },true);
   }
 }
@@ -408,6 +618,7 @@ export async function startBridge(runtime: ManagedCliRuntime, task?: TaskToolsRu
   const release=await runtime.retainOperation();
   let containerId:string;
   try { containerId=await runtime.verifyOperation(); } catch(error) { release(); throw error; }
+  try { await runtime.beginNamespaceExec(containerId); } catch(error) { release(); throw error; }
   const child = spawn("docker",["exec","-i",containerId,"node","/opt/cg/runtime-bridge.mjs"],{windowsHide:true,stdio:["pipe","pipe","pipe"]});
   const control = attachManagedControl(child, {provider:runtime.provider, ...(task ? {execute: (arguments_: unknown) => executeTaskTool(task, arguments_)} : {})});
   const close=() => { control.close(); release(); };

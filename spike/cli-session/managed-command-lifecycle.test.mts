@@ -18,7 +18,7 @@ async function fixture(run:(value:{owner:string;manifest:string;calls:string[];r
   await mkdir(directory,{recursive:true});
   await writeFile(manifest,JSON.stringify({schema_version:"1.0",owner,provider:"claude",credential_files_copied:false})+"\n",{flag:"wx"});
   const runtime=ManagedCliRuntime.restore({owner,provider:"claude"});
-  const original={prepare:ManagedCliRuntime.prepare,restore:ManagedCliRuntime.restore,begin:ManagedCliRuntime.prototype.beginOperation,start:ManagedCliRuntime.prototype.start,stop:ManagedCliRuntime.prototype.stop,finish:ManagedCliRuntime.prototype.finishOperation,install:ManagedCliRuntime.prototype.installTrustBundle,installHost:ManagedCliRuntime.prototype.installClaudeHostTrust};
+  const original={prepare:ManagedCliRuntime.prepare,restore:ManagedCliRuntime.restore,begin:ManagedCliRuntime.prototype.beginOperation,start:ManagedCliRuntime.prototype.start,stop:ManagedCliRuntime.prototype.stop,finish:ManagedCliRuntime.prototype.finishOperation,install:ManagedCliRuntime.prototype.installTrustBundle,installHost:ManagedCliRuntime.prototype.installClaudeHostTrust,publish:ManagedCliRuntime.prototype.publishPublicManifest};
   const priorExit=process.exitCode;
   ManagedCliRuntime.restore=()=>runtime;
   ManagedCliRuntime.prototype.beginOperation=async()=>{calls.push("claim");};
@@ -26,12 +26,13 @@ async function fixture(run:(value:{owner:string;manifest:string;calls:string[];r
   ManagedCliRuntime.prototype.stop=async()=>{calls.push("stop");};
   ManagedCliRuntime.prototype.finishOperation=async()=>{calls.push("finish");};
   ManagedCliRuntime.prototype.installTrustBundle=async()=>{calls.push("install");};
+  ManagedCliRuntime.prototype.publishPublicManifest=async work=>{await work();};
   try{await run({owner,manifest,calls,runtime});}
   finally{
     ManagedCliRuntime.prepare=original.prepare;ManagedCliRuntime.restore=original.restore;
     ManagedCliRuntime.prototype.beginOperation=original.begin;ManagedCliRuntime.prototype.start=original.start;
     ManagedCliRuntime.prototype.stop=original.stop;ManagedCliRuntime.prototype.finishOperation=original.finish;
-    ManagedCliRuntime.prototype.installTrustBundle=original.install;ManagedCliRuntime.prototype.installClaudeHostTrust=original.installHost;process.exitCode=priorExit;
+    ManagedCliRuntime.prototype.installTrustBundle=original.install;ManagedCliRuntime.prototype.installClaudeHostTrust=original.installHost;ManagedCliRuntime.prototype.publishPublicManifest=original.publish;process.exitCode=priorExit;
     await unlink(manifest).catch(error=>{if(error.code!=="ENOENT")throw error;});
   }
 }

@@ -36,7 +36,12 @@ let operationFinalized=false;
 try {
 if(command === "prepare") {
   runtime=await ManagedCliRuntime.prepare(provider,{hostTrust});
-  await writeFile(path.join(directory,`${runtime.owner}.json`),JSON.stringify({schema_version:"1.0",...runtime.identity(),created_at:new Date().toISOString(),credential_files_copied:false},null,2)+"\n");
+  const target=path.join(directory,`${runtime.owner}.json`);
+  const manifest={schema_version:"1.0",...runtime.identity(),created_at:new Date().toISOString(),credential_files_copied:false};
+  await runtime.publishPublicManifest(async()=>{
+    await writeFile(target,JSON.stringify(manifest,null,2)+"\n",{flag:"wx"});
+    assert.deepEqual(JSON.parse(await readFile(target,"utf8")),manifest,"managed_public_manifest_publish_unconfirmed");
+  });
   console.log(`Prepared ${provider}: ${runtime.owner}. Private auth volume is empty; official login required.`);
   console.log(`npm run spike:managed-session -- login ${provider} ${runtime.owner}`);
   return runtime.owner;
@@ -54,8 +59,13 @@ if(command === "install-trust") {await runtime.installTrustBundle();console.log(
 if(command === "install-host-trust") {
   await runtime.installClaudeHostTrust(hostTrust!);
   const target=path.join(directory,`${runtime.owner}.json`),temporary=target+`.${randomUUID()}.tmp`;
-  try{await writeFile(temporary,JSON.stringify({...saved,...runtime.identity()},null,2)+"\n",{flag:"wx"});await rename(temporary,target);}
-  finally{await unlink(temporary).catch(error=>{if(error.code!=="ENOENT")throw error;});}
+  const manifest={...saved,...runtime.identity()};
+  await runtime.publishPublicManifest(async()=>{
+    try{
+      await writeFile(temporary,JSON.stringify(manifest,null,2)+"\n",{flag:"wx"});await rename(temporary,target);
+      assert.deepEqual(JSON.parse(await readFile(target,"utf8")),manifest,"managed_public_manifest_publish_unconfirmed");
+    }finally{await unlink(temporary).catch(error=>{if(error.code!=="ENOENT")throw error;});}
+  });
   console.log("Explicit public CA pinned to this Claude profile; no private key exported.");return;
 }
 if(command === "install-coding-profile") {await runtime.installCodexCodingProfile();console.log("Fixture-verified public Codex direct-tool profile installed; provider and auth unchanged.");return;}

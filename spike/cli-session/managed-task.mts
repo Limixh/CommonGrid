@@ -88,6 +88,8 @@ try {
   }
   rpc.assertActive();
   const containerId=await runtime.verifyOperation();
+  await runtime.beginNamespaceExec(containerId);
+  rpc.assertActive();
   child=spawn("docker",["exec","-i",containerId,...args],{windowsHide:true,stdio:["pipe","pipe","pipe"]});
   child.stderr.on("data",()=>{});child.stdin.on("error",()=>rpc.fail(new ProviderFailure("process")));child.stdout.on("error",()=>rpc.fail(new ProviderFailure("process")));child.on("error",()=>rpc.fail(new ProviderFailure("process")));child.on("close",()=>{void queue.finally(()=>rpc.processExit());});
   const decoder=new BoundedJsonLines(4_194_304,1_048_576),callbacks=new TaskCallbackGuard();

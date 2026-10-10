@@ -8,11 +8,24 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { ManagedCliRuntime, checked, assertManagedContainerFence, removeManagedOperationContainer, type ManagedContainerEvidence } from "./managed-runtime.mts";
 import { failureCode } from "../../packages/agent-adapters/src/session-protocol.ts";
+import { readOperationJournals } from "../../packages/agent-adapters/src/operation-journal.ts";
 
 type Provider = "claude" | "codex";
 interface Ready { kind: "ready"; provider: Provider; owner: string; operation: string; lease_id: string; containerId: string }
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const pause = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+const journalRoot = fileURLToPath(new URL("../../.local/managed-operation-journal/", import.meta.url));
+async function operationJournal(receipt: Ready) {
+  const inspection = await readOperationJournals(journalRoot, { maxOperations: 4096 });
+  assert.equal(inspection.status, "available", "managed_owner_crash_journal_unavailable");
+  const matches = inspection.operations.filter(value => value.identity.owner === receipt.owner && value.identity.provider === receipt.provider && value.identity.operation === receipt.operation);
+  assert.equal(matches.length, 1, "managed_owner_crash_journal_identity_mismatch");
+  const snapshot = matches[0];
+  assert.equal(snapshot.lease_id, receipt.lease_id, "managed_owner_crash_journal_lease_mismatch");
+  assert.ok(snapshot.namespace_ids.includes(receipt.containerId), "managed_owner_crash_journal_namespace_missing");
+  assert.equal(snapshot.terminal, false, "managed_owner_crash_journal_false_completion");
+  return snapshot;
+}
 const evidenceFormat = '{"id":{{json .Id}},"owner":{{json (index .Config.Labels "io.commongrid.spike.owner")}},"operation":{{json (index .Config.Labels "io.commongrid.spike.operation")}},"running":{{json .State.Running}},"status":{{json .State.Status}}}';
 function readyMessage(value: unknown, provider: Provider, owner: string): Ready {
   assert.ok(value && typeof value === "object" && !Array.isArray(value), "managed_owner_crash_worker_protocol");
@@ -87,7 +100,7 @@ export async function managedOwnerCrashMain(args = process.argv.slice(2)) {
   const providers = args.length ? [...new Set(args)] as Provider[] : ["claude", "codex"] as Provider[];
   const directory = fileURLToPath(new URL(`../../.local/managed-owner-crash/${randomUUID()}/`, import.meta.url));
   await mkdir(directory, { recursive: true });
-  const report: Record<string, any> = { checked_at: new Date().toISOString(), purpose: "synthetic_host_owner_crash_durable_claim_explicit_recovery", synthetic_profiles_only: true, existing_private_profiles_accessed: false, real_account_tested: false, real_model_inference: false, credential_files_copied: false, execution_enabled: false, isolation_gate: "not_evaluated", durable_f0_profile_claim_accepted: false, automatic_crash_recovery_accepted: false, production_profile_lock_accepted: false, providers: {}, cleanup_confirmed: false, scope_limits: ["forced death of a dedicated synthetic Node owner after successful start only", "explicit immutable-ID stop and stopped-operation reconciliation with manual owner-quiescence acknowledgment; no automatic live takeover", "daemon-local F0 ownership claim is not a production lifecycle-phase journal; host/daemon crash and real lost-create-ID acceptance remain pending", "pinned Docker Linux runtime on the current host only"] };
+  const report: Record<string, any> = { checked_at: new Date().toISOString(), purpose: "synthetic_host_owner_crash_durable_claim_and_phase_journal_explicit_recovery", synthetic_profiles_only: true, existing_private_profiles_accessed: false, real_account_tested: false, real_model_inference: false, credential_files_copied: false, execution_enabled: false, isolation_gate: "not_evaluated", durable_f0_profile_claim_accepted: false, process_crash_journal_observed: false, automatic_crash_recovery_accepted: false, production_profile_lock_accepted: false, providers: {}, cleanup_confirmed: false, scope_limits: ["forced death of a dedicated synthetic Node owner after successful start only", "explicit immutable-ID stop and stopped-operation reconciliation with manual owner-quiescence acknowledgment; no automatic live takeover", "journal persists intent and captured IDs across host-process death; it does not prove owner quiescence, current daemon state, Windows power-loss persistence or automatic recovery", "daemon loss and real interrupted-create lost-ID acceptance remain pending", "pinned Docker Linux runtime on the current host only"] };
   let cleanup = true;
   for (const provider of providers) {
     const checks: string[] = [], evidence: Record<string, any> = { status: "running", checks };
@@ -110,6 +123,7 @@ export async function managedOwnerCrashMain(args = process.argv.slice(2)) {
       const heartbeatScript = "console.log(require('node:fs').readFileSync('/home/node/cg-owner-crash-heartbeat','utf8'))";
       const before = Number(await ownedProbe(receipt, heartbeatScript));
       assert.ok(Number.isSafeInteger(before) && before > 0, "managed_owner_crash_heartbeat_invalid");
+      const journalBeforeDeath = await operationJournal(receipt);
       stage = "force_host_owner_death";
       await forceWorkerExit(child);
       assert.ok(child.exitCode !== null || child.signalCode !== null, "managed_owner_crash_worker_still_running");
@@ -117,6 +131,13 @@ export async function managedOwnerCrashMain(args = process.argv.slice(2)) {
       const after = Number(await ownedProbe(receipt, heartbeatScript));
       assert.ok(Number.isSafeInteger(after) && after > before, "managed_owner_crash_descendant_not_observed");
       checks.push("forced_host_owner_exit_leaves_live_owned_namespace_and_descendant");
+      const journalAfterDeath = await operationJournal(receipt);
+      assert.equal(journalAfterDeath.last_sequence, journalBeforeDeath.last_sequence, "managed_owner_crash_journal_changed_after_death");
+      assert.equal(journalAfterDeath.last_hash, journalBeforeDeath.last_hash, "managed_owner_crash_journal_changed_after_death");
+      evidence.journal_revision_after_owner_death = journalAfterDeath.last_sequence;
+      evidence.journal_durability = journalAfterDeath.durability;
+      evidence.journal_does_not_authorize_takeover = true;
+      checks.push("phase_journal_preserves_exact_ownership_receipts_after_host_owner_death");
       stage = "live_orphan_refuses_takeover";
       const recovery = ManagedCliRuntime.restore(prepared.identity());
       await assert.rejects(() => recovery.start(), /managed_profile_busy/);
@@ -208,6 +229,7 @@ export async function managedOwnerCrashMain(args = process.argv.slice(2)) {
   report.cleanup_confirmed = cleanup;
   report.success = cleanup && providers.every(provider => report.providers[provider].status === "passed");
   report.durable_f0_profile_claim_accepted = report.success;
+  report.process_crash_journal_observed = report.success;
   await writeFile(path.join(directory, "report.json"), JSON.stringify(report, null, 2) + "\n");
   console.log(`Report: ${path.join(directory, "report.json")}`);
   return report;

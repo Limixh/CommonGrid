@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { validateTask, type TaskContract } from "@commongrid/task-schema";
 import { AccountPanel } from "./AccountPanel";
+import { OperationRecoveryPanel } from "./OperationRecoveryPanel";
 import { boundedText, useAccount } from "./account-api";
 
 type Project = { id: string; title: string; type: string; description: string };
@@ -908,6 +909,7 @@ export function App() {
                 <code>npm run doctor</code>
               </div>
             </div>
+            <OperationRecoveryPanel language={settings.language} />
           </div>
         ) : page === "account" || page === "contributions" ? (
           <AccountPanel account={account} language={settings.language} contributions={page === "contributions"} />

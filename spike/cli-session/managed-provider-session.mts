@@ -29,10 +29,11 @@ export async function claudeStatus(runtime: Pick<ManagedCliRuntime,"exec">,optio
     assertSignal(signal);return validateClaudeStatus(status.stdout,status.code,options.requireLogin,options.requireLogout);
   },{...options,deadlineMs:options.deadlineMs??15_000});
 }
-export async function claudeInteractiveLogin(runtime:Pick<ManagedCliRuntime,"verifyOperation"|"exec">,options:ProviderSessionOptions={}) {
+export async function claudeInteractiveLogin(runtime:Pick<ManagedCliRuntime,"verifyOperation"|"exec"|"beginNamespaceExec">,options:ProviderSessionOptions={}) {
   if(!process.stdin.isTTY)throw new Error("claude_login_requires_user_terminal");
   await boundedSessionOperation(async signal=>{
     const containerId=await runtime.verifyOperation({signal});assertSignal(signal);
+    await runtime.beginNamespaceExec(containerId,{signal});assertSignal(signal);
     const child=spawn("docker",["exec","-it",containerId,"/opt/cg/claude","auth","login","--claudeai"],{windowsHide:true,stdio:"inherit"});
     let onAbort!:()=>void;
     try{await new Promise<void>((resolve,reject)=>{
@@ -45,10 +46,11 @@ export async function claudeInteractiveLogin(runtime:Pick<ManagedCliRuntime,"ver
   return claudeStatus(runtime,{signal:options.signal,requireLogin:true});
 }
 export type CodexSessionOperation="status"|"refresh"|"logout"|"login"|"quota";
-export async function codexRpc(runtime: Pick<ManagedCliRuntime,"verifyOperation">, operation: CodexSessionOperation,options:ProviderSessionOptions={}) {
+export async function codexRpc(runtime: Pick<ManagedCliRuntime,"verifyOperation"|"beginNamespaceExec">, operation: CodexSessionOperation,options:ProviderSessionOptions={}) {
   if(!["status","refresh","logout","login","quota"].includes(operation))throw new Error("managed_session_operation_invalid");
   return boundedSessionOperation(async signal=>{
     const containerId=await runtime.verifyOperation({signal});assertSignal(signal);
+    await runtime.beginNamespaceExec(containerId,{signal});assertSignal(signal);
     const child=spawn("docker",["exec","-i",containerId,"/opt/cg/codex","app-server","--listen","stdio://","-c",'cli_auth_credentials_store="file"',"-c",'model_provider="openai"'],{windowsHide:true,stdio:["pipe","pipe","pipe"]});
     return runCodexSessionProtocol(child,operation,{...options,signal});
   },options,operation==="login");
@@ -111,7 +113,7 @@ export async function runCodexSessionProtocol(child:ChildProcessWithoutNullStrea
     return {...identity,refresh_requested:operation === "refresh",logout_verified:operation === "logout"};
   }finally{options.signal?.removeEventListener("abort",abort);process.off("SIGINT",cancel);process.off("SIGTERM",cancel);rpc.dispose();lines.close();child.stdout.unpipe(input);input.destroy();child.stdin.end();child.kill();}
 }
-export async function readCodexQuota(runtime:Pick<ManagedCliRuntime,"verifyOperation">,options:ProviderSessionOptions={}) {
+export async function readCodexQuota(runtime:Pick<ManagedCliRuntime,"verifyOperation"|"beginNamespaceExec">,options:ProviderSessionOptions={}) {
   const result=await codexRpc(runtime,"quota",options);
   return sanitizeQuotaObservation("quota_snapshot" in result?result.quota_snapshot:undefined);
 }

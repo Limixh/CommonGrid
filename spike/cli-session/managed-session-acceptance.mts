@@ -162,8 +162,12 @@ export async function acceptanceMain(args=process.argv.slice(2)) {
     const reportPath=path.join(directory,`${options.owner}-${randomUUID()}-acceptance.report.json`);
     if(result.checkpoint){
       const temporary=`${checkpointPath}.${randomUUID()}.tmp`;
-      try{await writeFile(temporary,JSON.stringify(result.checkpoint,null,2)+"\n",{flag:"wx"});await rename(temporary,checkpointPath);}
-      finally{await unlink(temporary).catch(()=>{});}
+      await runtime.publishPublicCheckpoint(async()=>{
+        try{
+          await writeFile(temporary,JSON.stringify(result.checkpoint,null,2)+"\n",{flag:"wx"});await rename(temporary,checkpointPath);
+          assert.deepEqual(await readPublicJson(checkpointPath),result.checkpoint,"managed_checkpoint_publish_unconfirmed");
+        }finally{await unlink(temporary).catch(()=>{});}
+      });
     }
     // A checkpoint records the authenticated stages and namespace cleanup. The
     // final observational report also includes durable claim release failure.

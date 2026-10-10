@@ -1,12 +1,15 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+import { operationStatusMiddleware } from "./operation-status-server.ts";
 export default defineConfig({
   plugins: [
     react(),
     {
       name: "local-readiness-report",
       configureServer(server) {
+        server.middlewares.use("/local-operation-status", operationStatusMiddleware(fileURLToPath(new URL("../../.local/managed-operation-journal", import.meta.url))));
         server.middlewares.use("/local-readiness", async (_req, res) => {
           try {
             const report = await readFile(

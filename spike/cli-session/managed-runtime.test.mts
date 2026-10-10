@@ -1,16 +1,21 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { after } from "node:test";
 import { createHash, randomUUID, X509Certificate } from "node:crypto";
-import { readFile, mkdtemp, writeFile, rm, rmdir } from "node:fs/promises";
+import { readFile, mkdtemp, writeFile, rm, rmdir, realpath } from "node:fs/promises";
 import { rootCertificates } from "node:tls";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { runInNewContext } from "node:vm";
 import { DockerCommandError } from "../../packages/agent-adapters/src/task-runtime.ts";
+import { createOperationJournal } from "../../packages/agent-adapters/src/operation-journal.ts";
 import { ManagedCliRuntime, assertManagedContainerFence, removeManagedContainer, removeManagedOperationContainer, type ManagedContainerEvidence } from "./managed-runtime.mts";
 import { assertManagedProfileTrust, validateManagedHostTrust, installManagedHostTrustScript, verifyManagedHostTrustScript } from "./managed-trust.mts";
 
 const owner = randomUUID(), operation = randomUUID(), id = "a".repeat(64);
+const fixtureTempRoot=await realpath(tmpdir());
+const fixtureJournalRoot=await mkdtemp(path.join(fixtureTempRoot,"cg-runtime-test-journal-"));
+after(async()=>{assert.equal(path.dirname(fixtureJournalRoot),fixtureTempRoot);assert.ok(path.basename(fixtureJournalRoot).startsWith("cg-runtime-test-journal-"));await rm(fixtureJournalRoot,{recursive:true,force:true});});
+function restoreFixture(identity: Parameters<typeof ManagedCliRuntime.restore>[0]) { return ManagedCliRuntime.restore(identity,{journalRoot:fixtureJournalRoot}); }
 const evidence = (changes: Partial<ManagedContainerEvidence> = {}): ManagedContainerEvidence => ({id,owner,operation,running:false,status:"exited",...changes});
 const fixtureLeaseId = "c".repeat(64);
 function installLeaseFixture(runtime: ManagedCliRuntime, invoke: (args:string[], options:{signal?:AbortSignal}) => Promise<string>) {
@@ -30,7 +35,7 @@ function installLeaseFixture(runtime: ManagedCliRuntime, invoke: (args:string[],
   return {leaseCommands,allCommands,present:()=>present,removeExternally:()=>{present=false;}};
 }
 test("same profile restoration generates a distinct operation fence", () => {
-  const first=ManagedCliRuntime.restore({owner,provider:"codex"}), second=ManagedCliRuntime.restore(first.identity());
+  const first=restoreFixture({owner,provider:"codex"}), second=restoreFixture(first.identity());
   assert.deepEqual(first.identity(),second.identity()); assert.notEqual(first.operationIdentity().operation,second.operationIdentity().operation); assert.equal(first.container,second.container);
 });
 test("invalid ownership evidence and mismatched owner/operation never reach removal", async () => {
@@ -103,7 +108,7 @@ test("captured-ID cleanup validates identities before any command", async () => 
 });
 
 test("pre-aborted start, stop and exec do not dispatch a command", async () => {
-  const runtime = ManagedCliRuntime.restore({owner, provider:"codex"}), cancellation = new AbortController();
+  const runtime = restoreFixture({owner, provider:"codex"}), cancellation = new AbortController();
   let calls = 0;
   (runtime as any).command = async () => { calls++; throw new Error("unexpected_dispatch"); };
   cancellation.abort();
@@ -116,7 +121,7 @@ test("pre-aborted start, stop and exec do not dispatch a command", async () => {
 });
 
 test("cancelled create reconciles owned ID with a fresh signal and retains volumes", async () => {
-  const runtime = ManagedCliRuntime.restore({owner, provider:"codex"}), cancellation = new AbortController();
+  const runtime = restoreFixture({owner, provider:"codex"}), cancellation = new AbortController();
   let exists = false;
   const commands: string[][] = [], cleanupSignals: AbortSignal[] = [];
   installLeaseFixture(runtime, async (args: string[], options: {signal?:AbortSignal}) => {
@@ -137,7 +142,7 @@ test("cancelled create reconciles owned ID with a fresh signal and retains volum
 });
 
 test("lost create ID stays unconfirmed while absent, then resolves only on owned evidence", async () => {
-  const runtime = ManagedCliRuntime.restore({owner, provider:"codex"}), cancellation = new AbortController();
+  const runtime = restoreFixture({owner, provider:"codex"}), cancellation = new AbortController();
   let lateCreate = false;
   const removed: string[][] = [];
   installLeaseFixture(runtime, async (args: string[]) => {
@@ -167,7 +172,7 @@ test("stop cancellation after removal cannot report confirmed cleanup", async ()
 });
 
 test("start refuses an existing same-operation namespace without cleanup", async () => {
-  const runtime = ManagedCliRuntime.restore({owner,provider:"codex"}), commands: string[][] = [];
+  const runtime = restoreFixture({owner,provider:"codex"}), commands: string[][] = [];
   installLeaseFixture(runtime, async (args: string[]) => { commands.push(args); return args[0] === "volume" ? owner : runtime.container; });
   await assert.rejects(() => runtime.start(), /managed_profile_busy/);
   assert.ok(!commands.some(args => args[0] === "create" || args[0] === "rm"));
@@ -200,14 +205,14 @@ test("optional root requires scoped purpose, verified endpoint, source, current 
 });
 
 test("trust selection is bound to one Claude profile and snapshots cannot mutate runtime selection", () => {
-  const trust = selectedTrust(), runtime = ManagedCliRuntime.restore({owner,provider:"claude",trust});
+  const trust = selectedTrust(), runtime = restoreFixture({owner,provider:"claude",trust});
   trust.pem_sha256 = "0".repeat(64);
   const identity = runtime.identity(); identity.trust!.pem_sha256 = "1".repeat(64);
   assert.equal(runtime.identity().trust!.pem_sha256, trustProof.pem_sha256);
-  assert.throws(() => ManagedCliRuntime.restore({owner:randomUUID(),provider:"claude",trust:selectedTrust()}), /managed_profile_trust_owner_mismatch/);
-  assert.throws(() => ManagedCliRuntime.restore({owner,provider:"codex",trust:selectedTrust()}), /managed_profile_trust_provider_invalid/);
-  assert.throws(() => ManagedCliRuntime.restore({owner,provider:"claude",trust:{...selectedTrust(),kind:"bundled" as any}}), /managed_profile_trust_invalid/);
-  assert.equal(ManagedCliRuntime.restore({owner,provider:"claude"}).identity().trust, undefined);
+  assert.throws(() => restoreFixture({owner:randomUUID(),provider:"claude",trust:selectedTrust()}), /managed_profile_trust_owner_mismatch/);
+  assert.throws(() => restoreFixture({owner,provider:"codex",trust:selectedTrust()}), /managed_profile_trust_provider_invalid/);
+  assert.throws(() => restoreFixture({owner,provider:"claude",trust:{...selectedTrust(),kind:"bundled" as any}}), /managed_profile_trust_invalid/);
+  assert.equal(restoreFixture({owner,provider:"claude"}).identity().trust, undefined);
 });
 
 test("malformed saved trust exposes fixed codes without raw metadata or AssertionError payloads", () => {
@@ -230,7 +235,7 @@ test("malformed saved trust exposes fixed codes without raw metadata or Assertio
   for (const [change,code] of changes) {
     const trust = {...selectedTrust(),...change};
     assert.throws(() => assertManagedProfileTrust(trust,owner,"claude"),onlyCode(code));
-    assert.throws(() => ManagedCliRuntime.restore({owner,provider:"claude",trust:trust as any}),onlyCode(code));
+    assert.throws(() => restoreFixture({owner,provider:"claude",trust:trust as any}),onlyCode(code));
   }
   assert.throws(() => assertManagedProfileTrust({secret:supplied},owner,supplied),onlyCode("managed_profile_trust_provider_invalid"));
   assert.throws(() => assertManagedProfileTrust([supplied],owner,"claude"),onlyCode("managed_profile_trust_invalid"));
@@ -270,17 +275,17 @@ test("fixture-only immutable bundle installation and startup verify pinned root,
 });
 
 async function fakeStartedRuntime(trust = undefined as ReturnType<typeof selectedTrust> | undefined, validTrust = true) {
-  const runtime = ManagedCliRuntime.restore({owner,provider:"claude",...(trust ? {trust} : {})}), commands:string[][]=[];
+  const runtime = restoreFixture({owner,provider:"claude",...(trust ? {trust} : {})}), commands:string[][]=[];
   const pins = JSON.parse(await readFile(new URL("binaries.lock.json",import.meta.url),"utf8"));
   const bridges = new Map(await Promise.all(["runtime-bridge.mjs","tunnel-wire.mjs","mcp.mjs","task-broker.mjs"].map(async file => [file,sha256(await readFile(new URL(file,import.meta.url)))] as const)));
-  let exists = false;
+  let exists = false, activeId = id, creations = 0;
   const leaseFixture = installLeaseFixture(runtime, async (args:string[]) => {
     commands.push(args);
     if (args[0] === "volume") return owner;
-    if (args[0] === "create") { exists = true; return id; }
-    if (args[0] === "inspect") return JSON.stringify(evidence({operation:runtime.operationIdentity().operation,running:true,status:"running"}));
+    if (args[0] === "create") { exists = true; activeId = creations++ === 0 ? id : "b".repeat(64); return activeId; }
+    if (args[0] === "inspect") return JSON.stringify(evidence({id:activeId,operation:runtime.operationIdentity().operation,running:true,status:"running"}));
     if (args[0] === "rm") { exists = false; return ""; }
-    if (args.includes(`id=${id}`)) return exists ? id : "";
+    if (args.includes(`id=${activeId}`)) return exists ? activeId : "";
     if (args.includes(`name=^/${runtime.container}$`)) return exists ? runtime.container : "";
     if (args[0] === "exec") {
       const script = args[4];
@@ -312,7 +317,7 @@ test("lease is acquired before namespace mutation, held through restart, and rel
 });
 
 test("an uncertain lease create cannot mutate a profile or release on one absent snapshot", async () => {
-  const runtime = ManagedCliRuntime.restore({owner,provider:"codex"});
+  const runtime = restoreFixture({owner,provider:"codex"});
   const commands: string[][] = [];
   (runtime as any).command = async (args:string[]) => {
     commands.push(args);
@@ -338,7 +343,7 @@ test("losing a lease while its captured namespace exists cannot confirm cleanup 
 });
 
 test("an installer that loses its create ID keeps the claim despite absent init listings", async () => {
-  const runtime = ManagedCliRuntime.restore({owner,provider:"claude"});
+  const runtime = restoreFixture({owner,provider:"claude"});
   const leaseFixture = installLeaseFixture(runtime, async args => {
     if (args[0] === "volume") return owner;
     if (args[0] === "create") throw new DockerCommandError("cancelled");
@@ -352,7 +357,7 @@ test("an installer that loses its create ID keeps the claim despite absent init 
 
 test("an incumbent lease blocks installer and destroy without dispatching mutations", async () => {
   for (const action of ["install","destroy"] as const) {
-    const runtime = ManagedCliRuntime.restore({owner,provider:"claude"}), commands:string[][]=[];
+    const runtime = restoreFixture({owner,provider:"claude"}), commands:string[][]=[];
     (runtime as any).command = async (args:string[]) => {
       commands.push(args);
       if (args[0] === "create") throw new DockerCommandError("failed");
@@ -366,23 +371,36 @@ test("an incumbent lease blocks installer and destroy without dispatching mutati
 });
 
 test("manual recovery prevalidates every namespace and refuses absent or live ambiguity", async () => {
+  const oldOperation=randomUUID(), journal=await createOperationJournal({owner,provider:"claude",operation:oldOperation},{root:fixtureJournalRoot});
+  const leaseIntent=randomUUID();
+  await journal.appendIntent({intent_id:leaseIntent,action:"lease_acquire"});
+  await journal.appendCapture({intent_id:leaseIntent,resource_id:fixtureLeaseId});
+  await journal.appendReceipt({intent_id:leaseIntent,outcome:"verified",lease_id:fixtureLeaseId});
+  for(const [namespaceId,role] of [[id,"runtime"],["b".repeat(64),"init"]] as const) {
+    const intentId=randomUUID();
+    await journal.appendIntent({intent_id:intentId,action:"namespace_create",role});
+    await journal.appendCapture({intent_id:intentId,resource_id:namespaceId});
+    await journal.appendReceipt({intent_id:intentId,outcome:"verified",resource_id:namespaceId});
+  }
   for (const shape of ["absent","live","foreign_init"] as const) {
-    const runtime = ManagedCliRuntime.restore({owner,provider:"claude"}), commands:string[][]=[];
+    const runtime = restoreFixture({owner,provider:"claude"}), commands:string[][]=[];
     (runtime as any).command = async (args:string[]) => {
       commands.push(args);
-      if (args[0] === "inspect" && args.at(-1) === fixtureLeaseId) return JSON.stringify({id:fixtureLeaseId,name:`/cg-managed-lease-${owner}`,owner,provider:"claude",operation,kind:"managed-profile-claim",schema:"1",running:false,status:"created",network:"none",readonly:true,mounts:0,ports:0});
-      if (args[0] === "inspect") return JSON.stringify(evidence({id:args.at(-1) === runtime.container ? id : "b".repeat(64),operation:args.at(-1) === runtime.container || shape !== "foreign_init" ? operation : randomUUID(),running:shape === "live",status:shape === "live" ? "running" : "exited"}));
+      if (args[0] === "inspect" && args.at(-1) === fixtureLeaseId) return JSON.stringify({id:fixtureLeaseId,name:`/cg-managed-lease-${owner}`,owner,provider:"claude",operation:oldOperation,kind:"managed-profile-claim",schema:"1",running:false,status:"created",network:"none",readonly:true,mounts:0,ports:0});
+      if (args[0] === "inspect") return JSON.stringify(evidence({id:args.at(-1) === runtime.container ? id : "b".repeat(64),operation:args.at(-1) === runtime.container || shape !== "foreign_init" ? oldOperation : randomUUID(),running:shape === "live",status:shape === "live" ? "running" : "exited"}));
+      if (args.some(value => value.startsWith("label="))) return shape === "absent" ? "" : id;
       if (args.includes(`name=^/${runtime.container}$`)) return shape === "absent" ? "" : runtime.container;
       if (args.includes(`name=^/cg-managed-init-${owner}$`)) return shape === "foreign_init" ? `cg-managed-init-${owner}` : "";
+      if (args.some(value => value.startsWith("id="))) return "";
       throw Error("unexpected_dispatch");
     };
-    await assert.rejects(() => runtime.recoverStopped({operation,lease_id:fixtureLeaseId,owner_quiesced:true}));
+    await assert.rejects(() => runtime.recoverStopped({operation:oldOperation,lease_id:fixtureLeaseId,owner_quiesced:true}), shape === "absent" ? /managed_recovery_namespace_absent/ : shape === "live" ? /managed_recovery_requires_stopped/ : /managed_operation_mismatch/);
     assert.ok(!commands.some(args => args[0] === "rm" || args[0] === "volume"));
   }
 });
 
 test("manual recovery needs affirmative owner quiescence before Docker dispatch", async () => {
-  const runtime = ManagedCliRuntime.restore({owner,provider:"codex"}); let calls = 0;
+  const runtime = restoreFixture({owner,provider:"codex"}); let calls = 0;
   (runtime as any).command = async () => { calls++; throw Error("unexpected_dispatch"); };
   await assert.rejects(() => runtime.recoverStopped({operation,lease_id:fixtureLeaseId,owner_quiesced:false} as any));
   assert.equal(calls,0);
@@ -415,7 +433,7 @@ test("unprepared or changed optional root fails closed and removes only captured
 });
 
 test("host trust installation requires explicit files and never dispatches for invalid selection", async () => {
-  const runtime = ManagedCliRuntime.restore({owner,provider:"claude"});
+  const runtime = restoreFixture({owner,provider:"claude"});
   let calls = 0; (runtime as any).command = async () => { calls++; throw Error("unexpected_dispatch"); };
   await assert.rejects(() => runtime.installClaudeHostTrust(undefined as any), /managed_host_trust_selection_required/);
   await assert.rejects(() => ManagedCliRuntime.prepare("codex",{hostTrust:{pemPath:"unused",proofPath:"unused"}}), /managed_profile_trust_provider_invalid/);
@@ -434,7 +452,7 @@ test("explicit public root install publishes selection only after successful off
   try {
     await writeFile(pemPath,publicRoot); await writeFile(proofPath,JSON.stringify(trustProof));
     for (const fail of [true,false]) {
-      const runtime = ManagedCliRuntime.restore({owner,provider:"claude"}), commands:string[][]=[];
+      const runtime = restoreFixture({owner,provider:"claude"}), commands:string[][]=[];
       let initExists = false;
       installLeaseFixture(runtime, async (args:string[]) => {
         commands.push(args);
