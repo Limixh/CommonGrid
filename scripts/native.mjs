@@ -3,6 +3,7 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { root } from "./go.mjs";
 import { rustEnvironment } from "./rust.mjs";
+import { prepareNativeLauncher } from "./native-launcher-assets.mjs";
 const desktopRequire = createRequire(
   new URL("../apps/desktop/package.json", import.meta.url),
 );
@@ -10,6 +11,7 @@ const tauriBin = path.join(
   path.dirname(desktopRequire.resolve("@tauri-apps/cli/package.json")),
   "tauri.js",
 );
+await prepareNativeLauncher();
 const child = spawn(process.execPath, [tauriBin, ...process.argv.slice(2)], {
   cwd: path.join(root, "apps/desktop"),
   env: rustEnvironment(),

@@ -27,6 +27,8 @@
     "test:ui": "node scripts/ui-tests.mjs",
     "test:native": "node scripts/rust.mjs test --locked",
     "test:native-smoke": "node --import tsx scripts/native-journal-smoke.mts",
+    "test:native-cli-smoke": "node --import tsx scripts/native-cli-smoke.mts",
+    "prepare:native-launcher": "node scripts/native-launcher-assets.mjs",
     "test:spike": "node scripts/spike.mjs test",
     "test:db": "node scripts/postgres-tests.mjs",
     "db:migrate": "node scripts/go.mjs run ./cmd/db migrate",
@@ -52,6 +54,7 @@
   "devDependencies": {
     "@playwright/test": "1.64.0",
     "@types/node": "22.13.10",
+    "esbuild": "0.25.12",
     "json-schema-to-typescript": "15.0.4",
     "tsx": "4.20.5",
     "typescript": "5.9.3"

@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "local-cli-check"
+description = "Run, observe and cancel the fixed model-free managed CLI version check. No general shell, path, argv or environment access."
+commands.allow = ["local_cli_check_start", "local_cli_check_status", "local_cli_check_cancel"]

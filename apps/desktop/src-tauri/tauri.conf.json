@@ -6,5 +6,5 @@
     "windows": [{ "title": "CommonGrid", "width": 1380, "height": 900, "minWidth": 980, "minHeight": 680 }],
     "security": { "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:1420 ws://127.0.0.1:1420; object-src 'none'; frame-src 'none'" }
   },
-  "bundle": { "active": false }
+  "bundle": { "active": false, "resources": { "resources/launcher/": "launcher/" } }
 }

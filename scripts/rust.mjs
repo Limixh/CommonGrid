@@ -33,6 +33,10 @@ export function runRust(args, options = {}) {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  if (!["fmt", "clippy", "--version", "version"].includes(process.argv[2])) {
+    const { prepareNativeLauncher } = await import("./native-launcher-assets.mjs");
+    await prepareNativeLauncher();
+  }
   const child = runRust(process.argv.slice(2));
   child.on("error", () => { console.error("Rust toolchain unavailable; follow docs/DEVELOPMENT.md."); process.exitCode = 1; });
   child.on("exit", code => { process.exitCode = code ?? 1; });

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { validateTask, type TaskContract } from "@commongrid/task-schema";
 import { AccountPanel } from "./AccountPanel";
 import { OperationRecoveryPanel } from "./OperationRecoveryPanel";
+import { CliCheckPanel } from "./CliCheckPanel";
 import { boundedText, useAccount } from "./account-api";
 
 type Project = { id: string; title: string; type: string; description: string };
@@ -900,6 +901,7 @@ export function App() {
             ) : (
               <div className="empty-state">{t.noReport}</div>
             )}
+            <CliCheckPanel language={settings.language} />
             <div className="isolation-card">
               <Icon name="lock" size={26} />
               <div>

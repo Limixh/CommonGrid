@@ -15,5 +15,12 @@ sha2 = "0.10"
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading"] }
+
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }
+
+# Public runtime binaries are large; hashing them must not stall debug checks.
+[profile.dev.package.sha2]
+opt-level = 3

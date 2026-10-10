@@ -1,12 +1,12 @@
-# CLI çalıştırmayı açmadan önce
+# CLI ve görev çalıştırma kabulü
 
-**Karar: NOT_EVALUATED — uygulamadan görev başlatma kapalı.** Kullanıcıların kendi abonelikleriyle resmi CLI kullanması ve tamamlanmış v1 hedefi korunuyor. Bu liste teknik kabulü takip eder; başarılı test raporu tek başına GO vermez.
+**Genel görev kabulü: NOT_EVALUATED.** Kullanıcıların kendi abonelikleriyle resmi CLI kullanması ve tamamlanmış v1 hedefi korunuyor. Native CLI sürüm kontrolü ayrı ve sınırlı bir kabul adımıdır; başarılı test raporu tek başına tüm görev yollarına GO vermez.
 
 ## Güncel kanıt
 
 `bed8be2` kaynağıyla [paketlenmiş Windows uygulamasından günlük okuma ve inceleme](../spike/results/native-operation-status-windows-2026-10-10.json) kabul edildi. Değişmeyen Node/Go/frontend kaynağında 357 Node testi, genel Go/şema/tip/derleme kontrolü ve 24 browser UI testi; native context düzeltmesinden sonra 7 Rust testi ve gerçek WebView2 uygulamasında beş kontrol geçti. TypeScript ile Rust 107 ortak örnekte aynı sonucu verdi. Native kontroller; kayıt yokluğu, tam IPC eşleşmesi, sürüme bağlı inceleme isteği, istemcinin dosya yolu seçmesinin reddi ve bozuk kataloğun gizlenmesini kapsar. Browser native mock'ları ayrı kanıttır. Yeni sentetik uygulama dizini kullanıldı; gerçek hesap/model çağrısı yapılmadı.
 
-Bu denemede bulunan masaüstü açılış hatası, aynı şemadan build sırasında üretilen standalone doğrulayıcılarla düzeltildi; CSP değişmedi. İlk başarısız uygulama koşusu ve sonraki smoke testindeki yanlış native-marker simülasyonu raporda ayrı korunur. Native okuyucu artık bağlıdır; gerçek CLI görevlerini bu uygulama deposuna yazacak native başlatıcı sonraki adımdır. Geliştirici ve native günlük dizinleri otomatik taşınmaz. Sınırlar [ADR 0018](../spike/adr/0018-native-operation-journal-status.md) içindedir.
+Bu denemede bulunan masaüstü açılış hatası, aynı şemadan build sırasında üretilen standalone doğrulayıcılarla düzeltildi; CSP değişmedi. İlk başarısız uygulama koşusu ve sonraki smoke testindeki yanlış native-marker simülasyonu raporda ayrı korunur. Native okuyucu artık bağlıdır; native CLI sürüm kontrolü aynı uygulama deposuna yazar. Yönetilen giriş ve görev bağlantısı sonraki adımdır. Geliştirici ve native günlük dizinleri otomatik taşınmaz. Sınırlar [ADR 0018](../spike/adr/0018-native-operation-journal-status.md) içindedir.
 
 Haiku'nun gerçek görev adayı [34 örneklik yeniden değerlendirmeyi](../spike/results/coding-verifier-sparse-windows-2026-10-09.json), aynı giriş yapmış Codex profiliyle tek yeni Luna görevi [34 örnek, üç başarılı araç çağrısı, uygulanmış patch ve cleanup kontrolünü](../spike/results/managed-task-luna-accepted-windows-2026-10-09.json) geçti. İstenen ve gözlenen ucuz model doğrulandı. Önceki başarısız Luna adayları kendi tarihli raporlarında korunur; bu dar görev kabulü genel yazılım doğruluğu kabulü değildir.
 

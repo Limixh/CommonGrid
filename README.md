@@ -4,7 +4,7 @@ Kullanıcıların kendi Claude veya Codex abonelikleriyle ortak matematik ve yaz
 
 Hedefimiz MVP'nin ötesinde tamamlanmış v1: IDE benzeri çalışma alanı, görev paylaşımı, Lean ve yazılım doğrulaması, ara kayıt/devam, inceleme ve topluluk özellikleri. [Ürün kapsamı](PROJECT_SPEC1.2.md) ve [yol haritası](implementation_roadmap1.3.md) bu hedefi tanımlar.
 
-**Geliştirme sürümü.** Görevleri inceleyebilir, katkı tercihlerini ayarlayabilir ve yapılandırılmış sunucuda hesap/katkı kayıtlarını kullanabilirsiniz. Uygulamadan AI görevi başlatma, CLI oturum izolasyonu kabulü tamamlanana kadar kapalıdır.
+**Geliştirme sürümü.** Görevleri inceleyebilir, katkı tercihlerini ayarlayabilir ve yapılandırılmış sunucuda hesap/katkı kayıtlarını kullanabilirsiniz. Masaüstündeki **Ajanlar ve ortam** ekranı, Claude ve Codex için izole CLI sürüm kontrolünü başlatır, durumunu gösterir ve iptal eder.
 
 ## Başlatma
 
@@ -31,6 +31,6 @@ Bu komut ürün testlerini, ayrı deneme testlerini, tip kontrollerini ve derlem
 
 ## Nerede kaldık?
 
-[Güncel durum ve GO listesi](docs/GO_GATE.md) tamamlanan işleri ve çalıştırmayı açmadan önce gereken kanıtları gösterir. Test sayıları README'de tekrarlanmaz; sonuçlar [tarihli raporlarda](spike/results/README.md) tutulur. Önceki geliştirme kayıtları [arşivdedir](docs/DEVELOPMENT_HISTORY.md).
+[Güncel durum ve kabul listesi](docs/GO_GATE.md) tamamlanan işleri ve kalan kanıtları gösterir. Test sayıları README'de tekrarlanmaz; sonuçlar [tarihli raporlarda](spike/results/README.md) tutulur. Önceki geliştirme kayıtları [arşivdedir](docs/DEVELOPMENT_HISTORY.md).
 
-Ürün kodu `apps/`, `packages/` ve `services/` altında; kabul denemeleri `spike/` altındadır. Yeni genel altyapı katmanından önce CLI oturum yenilemesi, limitte durma ve taşınabilir izolasyon kabulüne odaklanıyoruz.
+Ürün kodu `apps/`, `packages/` ve `services/` altında; kabul denemeleri `spike/` altındadır. Sıradaki iş, yönetilen CLI girişini ve doğrulanmış görev seçimini native başlatıcıya bağlamak; oturum sürekliliği ve limit davranışı normal kullanımda izlenir.
