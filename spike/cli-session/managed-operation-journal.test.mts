@@ -15,7 +15,7 @@ async function makeFixture(directory: string, journalFactory?: ManagedJournalOpt
   const owner=randomUUID(), leaseId="c".repeat(64), commands:string[][]=[];
   const runtime=ManagedCliRuntime.restore({owner,provider:"claude"},{journalRoot:directory,...(journalFactory ? {journalFactory} : {})});
   const pins=JSON.parse(await readFile(new URL("binaries.lock.json",import.meta.url),"utf8"));
-  const hashes=new Map(await Promise.all(["runtime-bridge.mjs","tunnel-wire.mjs","mcp.mjs","task-broker.mjs"].map(async name => [name,createHash("sha256").update(await readFile(new URL(name,import.meta.url))).digest("hex")] as const)));
+  const hashes=new Map(await Promise.all(["runtime-bridge.mjs","tunnel-wire.mjs","mcp.mjs","task-broker.mjs"].map(async name => [name,createHash("sha256").update(await readFile(new URL(`../../packages/agent-adapters/runtime-assets/${name}`,import.meta.url))).digest("hex")] as const)));
   let leasePresent=false, namespaceId:string|undefined, nextId=10, failCreate=false, late=false;
   const leaseName=`cg-managed-lease-${owner}`;
   (runtime as any).command=async(args:string[]) => {

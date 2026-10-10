@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { Frames, decodeData } from "../../spike/cli-session/tunnel-wire.mjs";
+import { Frames, decodeData } from "../../packages/agent-adapters/runtime-assets/tunnel-wire.mjs";
 test("tunnel framing handles fragmented data and rejects oversized or truncated frames", async () => {
   const frames = new Frames(), values = []; frames.on("data",value=>values.push(value));
   frames.write(Buffer.from('{"kind":"data",'));frames.end(Buffer.from('"id":"1"}\n{"kind":"ready"}\n'));

@@ -23,8 +23,14 @@ function rootFallback(child: ChildProcess) {
   // a numeric PID after observing exit, because that PID may have been reused.
   if (rootRunning(child)) { try { child.kill("SIGKILL"); } catch {} }
 }
-function terminateOwnedCommand(child: ChildProcess): Promise<CommandCleanup> {
+function terminateOwnedCommand(child: ChildProcess, supervised = false): Promise<CommandCleanup> {
   if (!rootRunning(child)) return Promise.resolve({ method: "none", status: "unconfirmed" });
+  if (supervised) {
+    // The native supervisor owns the process group. This child did not create
+    // its own group, so -pid must never be used as a cancellation target.
+    rootFallback(child);
+    return Promise.resolve({ method: "owned_root_handle", status: "unconfirmed" });
+  }
   return new Promise(resolve => {
     let settled = false, rootExited = false, helperReported = false;
     let helper: ChildProcess | undefined;
@@ -64,16 +70,19 @@ function terminateOwnedCommand(child: ChildProcess): Promise<CommandCleanup> {
 // Reject promptly even when a descendant has inherited the output pipes.
 export function runOwnedCommand(command: string, args: string[], options: CommandOptions = {}): Promise<CommandResult> {
   const timeoutMs = options.timeoutMs ?? 10_000, maxBytes = options.maxBytes ?? 1_048_576;
+  // This exact value is supplied by the trusted native launcher, never by task
+  // input. POSIX descendants remain in the supervisor's owned worker group.
+  const supervised = process.platform !== "win32" && process.env.CG_NATIVE_SUPERVISED === "1";
   if (options.signal?.aborted) return Promise.reject(new CommandError("cancelled"));
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { windowsHide: true, detached: process.platform !== "win32", stdio: [options.stdin ? "pipe" : "ignore", "pipe", "pipe"] });
+    const child = spawn(command, args, { windowsHide: true, detached: process.platform !== "win32" && !supervised, stdio: [options.stdin ? "pipe" : "ignore", "pipe", "pipe"] });
     const stdout: Buffer[] = [], stderr: Buffer[] = [];
     let bytes = 0, reason: CommandError["reason"] | undefined;
     const finish = () => { clearTimeout(timer); options.stdin?.destroy(); options.signal?.removeEventListener("abort", abort); };
     const stop = (next: CommandError["reason"]) => {
       if (reason) return;
       reason = next;
-      const cleanup = terminateOwnedCommand(child);
+      const cleanup = terminateOwnedCommand(child, supervised);
       // Failure output is no longer consumed. Descendants can retain inherited
       // pipes after the root exits; close only our handles so rejection and host
       // shutdown do not depend on those descendants releasing them.

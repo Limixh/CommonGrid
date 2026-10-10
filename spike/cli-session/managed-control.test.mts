@@ -5,7 +5,7 @@ import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import type { Socket } from "node:net";
 import test from "node:test";
 import { attachManagedControl, validateControlEnvelope } from "./managed-control.mts";
-import { Frames } from "./tunnel-wire.mjs";
+import { Frames } from "../../packages/agent-adapters/runtime-assets/tunnel-wire.mjs";
 
 const tick = () => new Promise(resolve => setImmediate(resolve));
 function fixture(options: Parameters<typeof attachManagedControl>[1] = { provider: "codex" }, blockedOutput = false) {

@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
 import { once } from "node:events";
-import { createTaskBroker } from "../../spike/cli-session/task-broker.mjs";
+import { createTaskBroker } from "../../packages/agent-adapters/runtime-assets/task-broker.mjs";
 
 const token = "f".repeat(64);
 async function deadline(promise) {

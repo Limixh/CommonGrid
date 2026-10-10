@@ -277,7 +277,7 @@ test("fixture-only immutable bundle installation and startup verify pinned root,
 async function fakeStartedRuntime(trust = undefined as ReturnType<typeof selectedTrust> | undefined, validTrust = true) {
   const runtime = restoreFixture({owner,provider:"claude",...(trust ? {trust} : {})}), commands:string[][]=[];
   const pins = JSON.parse(await readFile(new URL("binaries.lock.json",import.meta.url),"utf8"));
-  const bridges = new Map(await Promise.all(["runtime-bridge.mjs","tunnel-wire.mjs","mcp.mjs","task-broker.mjs"].map(async file => [file,sha256(await readFile(new URL(file,import.meta.url)))] as const)));
+  const bridges = new Map(await Promise.all(["runtime-bridge.mjs","tunnel-wire.mjs","mcp.mjs","task-broker.mjs"].map(async file => [file,sha256(await readFile(new URL(`../../packages/agent-adapters/runtime-assets/${file}`,import.meta.url)))] as const)));
   let exists = false, activeId = id, creations = 0;
   const leaseFixture = installLeaseFixture(runtime, async (args:string[]) => {
     commands.push(args);

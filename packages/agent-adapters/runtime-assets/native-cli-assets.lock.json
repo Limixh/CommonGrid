@@ -1,0 +1,9 @@
+{
+  "schema_version": "1.0",
+  "platform": "linux-x64",
+  "base_image": "node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392",
+  "binaries": {
+    "claude": {"version": "2.1.293", "file": "claude", "sha256": "8968405e26db478af44eabc4635ab5ca557057b702a54460a59c13e1b253e978"},
+    "codex": {"version": "0.157.1", "file": "codex", "sha256": "3e2584f3f3829a43a0495011a1cecb2facbe64a2403e2b682351fd9c2983f970"}
+  }
+}

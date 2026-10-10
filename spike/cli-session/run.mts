@@ -107,7 +107,8 @@ async function providerTest(provider: "codex" | "claude") {
   // There are no host bind mounts or account files; no Buildx is needed.
   if(!cache)await deliver(container, path.join(root, ".tools/cli-fixtures", provider), `/opt/cg-cli/${provider}`);
   else assert.equal(await checked(["exec",container,"node","-e","const fs=require('node:fs'),c=require('node:crypto'),h=c.createHash('sha256'),s=fs.createReadStream('/opt/cg-cli/codex');s.on('data',x=>h.update(x));s.on('end',()=>console.log(h.digest('hex')));"]),lock.codex.binary_sha256);
-  for (const file of ["control.mjs", "mcp.mjs"]) await deliver(container, fileURLToPath(new URL(file, import.meta.url)), `/fixtures/${file}`);
+  await deliver(container, fileURLToPath(new URL("control.mjs", import.meta.url)), "/fixtures/control.mjs");
+  await deliver(container, fileURLToPath(new URL("../../packages/agent-adapters/runtime-assets/mcp.mjs", import.meta.url)), "/fixtures/mcp.mjs");
   const catalog=provider === "codex"&&directProfile?await codingCatalog():undefined;
   if(catalog)await deliver(container,profileFile,"/fixtures/catalog.json");
   await checked(["exec", "--user", "0:0", container, "/bin/chmod", "0555", ...(cache?[]:[`/opt/cg-cli/${provider}`, "/opt/cg-cli"]), "/fixtures"]);
