@@ -1,22 +1,21 @@
 // A pinned, explicit F0 tool profile. No provider/auth/entitlement override.
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import { readFile, mkdir, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { codexFunctionalTestModel } from "@commongrid/agent-adapters/testing/functional-test-models";
+import pins from "../../packages/agent-adapters/runtime-assets/native-cli-assets.lock.json";
+import { deriveCodexCodingCatalog } from "../../scripts/codex-coding-catalog.mjs";
 export const codexCodingModel=codexFunctionalTestModel;
-export const catalogSource={url:"https://raw.githubusercontent.com/openai/codex/rust-v0.157.1/codex-rs/models-manager/models.json",sha256:"0178d235c589a31abd6ed0ea1e870935dc5819240eb0e813e178d3ebedf534f4"};
+// The pin and the deterministic transform are shared with the product launcher asset.
+export const catalogSource={url:pins.codex_catalog.source_url,sha256:pins.codex_catalog.source_sha256};
 const root=fileURLToPath(new URL("../../",import.meta.url));
 export const profileFile=path.join(root,".local/codex-profile/catalog.json");
 export const profileProof=path.join(root,".local/codex-profile/fixture-proof.json");
 export async function codingCatalog() {
   const source=await readFile(path.join(root,".local/cli-routing/sources/codex-models.txt"));
-  assert.equal(createHash("sha256").update(source).digest("hex"),catalogSource.sha256,"codex_catalog_source_mismatch");
-  const model=JSON.parse(source.toString("utf8")).models.find((model:any)=>model.slug===codexCodingModel);assert.ok(model);
-  model.tool_mode="direct";model.multi_agent_version="disabled";model.experimental_supported_tools=[];
-  const value=JSON.stringify({models:[model]},null,2)+"\n";
-  const sha256=createHash("sha256").update(value).digest("hex");
+  const {value,sha256}=deriveCodexCodingCatalog(source,{model:codexCodingModel,source_sha256:catalogSource.sha256});
+  assert.equal(sha256,pins.codex_catalog.sha256,"codex_catalog_derivation_mismatch");
   await mkdir(path.dirname(profileFile),{recursive:true});await writeFile(profileFile,value);
   return {value,sha256};
 }

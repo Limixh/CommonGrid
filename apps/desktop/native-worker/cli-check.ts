@@ -45,15 +45,24 @@ export async function verifyAssets(boot: Boot, bridgeHashes: Record<string, stri
     const root = await lstat(boot.assets_root);
     if (!root.isDirectory() || root.isSymbolicLink()) throw new CheckFailure("asset_invalid");
     const config: unknown = JSON.parse(await readConfig(path.join(boot.assets_root, "config.json")));
-    if (!exact(config, ["schema_version", "base_image", "binaries", "bridges"]) || config.schema_version !== "1.0" || config.base_image !== pins.base_image ||
+    // The public coding catalog is optional: a build without its pinned source still works and the task runtime reports it missing.
+    const catalogPin = pins.codex_catalog, hasCatalog = Object.hasOwn(Object(config), "catalog");
+    if (!exact(config, ["schema_version", "base_image", "binaries", "bridges", ...(hasCatalog ? ["catalog"] : [])]) || config.schema_version !== "1.0" || config.base_image !== pins.base_image ||
+      (hasCatalog && config.catalog !== null && (!exact(config.catalog, ["file", "sha256"]) || config.catalog.file !== catalogPin.file || config.catalog.sha256 !== catalogPin.sha256)) ||
       JSON.stringify(config.binaries) !== JSON.stringify(Object.fromEntries(Object.entries(pins.binaries).map(([id, pin]) => [id, {file: pin.file, sha256: pin.sha256}]))) ||
       !exact(config.bridges, Object.keys(bridgeHashes)) || Object.entries(bridgeHashes).some(([name, hash]) => config.bridges[name] !== hash)) throw new CheckFailure("asset_invalid");
     for (const [name, hash] of Object.entries(bridgeHashes)) {
       if (await digest(path.join(boot.assets_root, name), 1_048_576) !== hash) throw new CheckFailure("asset_invalid");
     }
+    let catalog: Pick<ManagedRuntimeAssets, "codexCatalog"> = {};
+    if (hasCatalog && config.catalog !== null) {
+      const filePath = path.join(boot.assets_root, catalogPin.file);
+      if (await digest(filePath, 262_144) !== catalogPin.sha256) throw new CheckFailure("asset_invalid");
+      catalog = {codexCatalog: {filePath, sha256: catalogPin.sha256}};
+    }
     const pin = pins.binaries[boot.provider];
     if (await digest(path.join(boot.assets_root, pin.file), 536_870_912) !== pin.sha256) throw new CheckFailure("asset_invalid");
-    return {baseImage: pins.base_image, bridgeRoot: boot.assets_root, journalRoot: boot.journal_root,
+    return {baseImage: pins.base_image, bridgeRoot: boot.assets_root, journalRoot: boot.journal_root, ...catalog,
       binaries: {claude: {binaryPath: path.join(boot.assets_root, "claude"), sha256: pins.binaries.claude.sha256}, codex: {binaryPath: path.join(boot.assets_root, "codex"), sha256: pins.binaries.codex.sha256}}};
   } catch (error) {
     if (error instanceof CheckFailure) throw error;

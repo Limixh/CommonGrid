@@ -5,6 +5,7 @@ import { chmod, copyFile, lstat, mkdir, readFile, unlink, writeFile } from "node
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { root } from "./go.mjs";
+import { deriveCodexCodingCatalog } from "./codex-coding-catalog.mjs";
 
 const bridgeNames = ["runtime-bridge.mjs", "tunnel-wire.mjs", "mcp.mjs", "task-broker.mjs"];
 const hash = data => createHash("sha256").update(data).digest("hex");
@@ -55,7 +56,26 @@ export async function prepareNativeLauncher() {
     bridges[name] = hash(bytes); await writeChanged(path.join(assets, name), bytes);
   }
   const binaries = Object.fromEntries(Object.entries(pins.binaries).map(([id, pin]) => [id, {file: pin.file, sha256: pin.sha256}]));
-  await writeChanged(path.join(assets, "config.json"), JSON.stringify({schema_version: "1.0", base_image: pins.base_image, binaries, bridges}) + "\n");
+  // Controlled-task Codex catalog: derived deterministically from the pinned
+  // public models.json when the dev cache has it. Without the source the build
+  // still succeeds (catalog: null) and the task runtime reports asset_missing.
+  const catalogPin = pins.codex_catalog, catalogDestination = path.join(assets, catalogPin.file);
+  let catalogSource;
+  try {
+    const sourceFile = path.join(root, ".tools/cli-fixtures/codex-models.json"), stat = await lstat(sourceFile);
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 4_194_304) throw new Error("native_public_catalog_verification_failed");
+    catalogSource = await readFile(sourceFile);
+  } catch (error) { if (error.code !== "ENOENT") throw error; }
+  let catalog = null;
+  if (catalogSource === undefined) await unlink(catalogDestination).catch(error => { if (error.code !== "ENOENT") throw error; });
+  else {
+    let derived;
+    try { derived = deriveCodexCodingCatalog(catalogSource, catalogPin); } catch { throw new Error("native_public_catalog_verification_failed"); }
+    if (derived.sha256 !== catalogPin.sha256) throw new Error("native_public_catalog_pin_mismatch");
+    await writeChanged(catalogDestination, derived.value);
+    catalog = {file: catalogPin.file, sha256: derived.sha256};
+  }
+  await writeChanged(path.join(assets, "config.json"), JSON.stringify({schema_version: "1.0", base_image: pins.base_image, binaries, bridges, catalog}) + "\n");
   const bundled = await build({entryPoints: [path.join(root, "apps/desktop/native-worker/entry.ts")], platform: "node", target: "node22", format: "esm", bundle: true,
     write: false, logLevel: "silent", define: {__CG_BRIDGE_HASHES__: JSON.stringify(bridges)}, banner: {js: 'import { createRequire as cgCreateRequire } from "node:module"; const require = cgCreateRequire(import.meta.url);'}});
   const workerBytes = bundled.outputFiles[0].contents;

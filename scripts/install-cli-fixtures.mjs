@@ -52,6 +52,20 @@ for (const [provider, item] of Object.entries(lock).filter(([id]) => ["codex", "
 }
 console.log(`Fixture binaries: ${output}`);
 
+// Public Codex model catalog source for the controlled coding task. It is pinned
+// by SHA-256 in the product asset lock and only derived at launcher build time.
+const catalogPin = JSON.parse(await readFile(new URL("../packages/agent-adapters/runtime-assets/native-cli-assets.lock.json", import.meta.url), "utf8")).codex_catalog;
+const catalogSource = path.join(output, "codex-models.json");
+let catalogBytes;
+try { catalogBytes = await readFile(catalogSource); } catch (error) { if (error.code !== "ENOENT") throw error; }
+if (!catalogBytes || hash(catalogBytes) !== catalogPin.source_sha256) {
+  console.log("Downloading pinned public Codex model catalog source...");
+  await download(catalogPin.source_url, catalogSource);
+  catalogBytes = await readFile(catalogSource);
+}
+if (hash(catalogBytes) !== catalogPin.source_sha256) throw new Error("codex_catalog_checksum_mismatch");
+console.log("Verified Codex model catalog source SHA-256.");
+
 const manifest = path.join(output, "manifest.json");
 await download(lock.claude.manifest_url, manifest);
 const manifestData = JSON.parse(await readFile(manifest, "utf8"));
