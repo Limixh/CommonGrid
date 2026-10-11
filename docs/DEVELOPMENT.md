@@ -51,6 +51,7 @@ Windows başlatıcısı Docker Desktop Linux motorunun sabit yerel named pipe'ı
 | npm run test:native-cli-smoke | Windows/WebView2 native başlatıcı, iki resmi CLI sürümü, idempotency, iptal, app-owned journal ve gerçek Docker cleanup; hesap/model yok |
 | npm run test:native-profile-smoke | Windows/WebView2 üzerinde profil oluşturma/seçme ve aynı izole depoyla uygulama restart'ı; CLI, Docker veya hesap/model çağrısı yok |
 | npm run test:native-session-smoke | Windows/WebView2 ve gerçek Docker üzerinde yeni izole Codex profilinde resmi cihaz kodu, giriş iptali ve hesapsız status/logout; kullanıcı yetkilendirmesi ve model çağrısı yok |
+| npm run test:native-task-smoke | Windows/WebView2 üzerinde görev onayı, bağlı olmayan profil hatası ve hesapsız iptal/cleanup; varsayılan koşu model çağırmaz. `-- --real-account` yeni resmi girişten sonra yalnız bir Luna görevi, 34 örnek ve diff hash kontrolü çalıştırır |
 | npm run test:artifacts | Önce install:trivy; gerçek gizli bilgi tarayıcısı ve dosya/verifier kontrolleri |
 | npm run spike:session-continuity | Yeni hesapsız Docker profilleriyle kalıcı claim, restart, aynı profile yarış ve cleanup |
 | npm run spike:owner-crash | Yeni sentetik profillerde gerçek host Node worker SIGKILL, işlem sahipliği ve açık orphan uzlaştırması; gerçek hesap/model yok |

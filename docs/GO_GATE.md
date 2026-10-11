@@ -22,6 +22,8 @@ Profil sahipliği, faz günlüğü ve manuel uzlaştırma mevcuttur; native okuy
 
 Aynı Claude profili yaklaşık 11 saat sonra [yeniden giriş olmadan status/restart kontrolünü](../spike/results/managed-session-delayed-claude-windows-2026-10-09.json) geçti. Aradaki kullanım ve token yenilemesi gözlenmedi. Codex'in resmi salt okunur kota snapshot'ı tükenme/reset/eşzamanlı kullanım kabulü değildir; private değerler yayımlanmaz. Bildirilmeyen bilgiler unknown kalır.
 
+2026-10-11 `npm run test:native-task-smoke` gerçek Windows/WebView2 uygulamasında sekiz hesapsız kontrolü geçti: görev onayı, bağlı olmayan profil hatası, resmi cihaz girişinin iptali, görev iptali ve ardından resmi hesapsız durum kontrolü. Üç terminal işlem günlüğü, dört namespace ve üç claim kimliği için salt okunur Docker sorguları kaynak yokluğunu doğruladı; bu bağımsız envanter yalnız izole hesap profilini kapsar. Görev komutuna iptal iletimi iki sağlayıcı için 41 hedefli testle sınandı. İlk native koşu eksik Docker imaj referansında durdu; sabitlenmiş imaj hazırlanınca yeniden koşu geçti. Bu adım hesap yetkilendirmesi veya model çağrısı yapmadı; `-- --real-account` gerçek Luna görevini ayrıca sınar.
+
 ## Kalan kısa liste
 
 | İş | Kapanması için gereken kanıt | Durum |
