@@ -4,23 +4,24 @@ import {
   type ManagedProfileCreate, type ManagedProfileProvider, type ManagedProfilesStatus,
 } from "@commongrid/agent-adapters/managed-profiles";
 import { createManagedProfile, managedProfilesNative, readManagedProfiles, selectManagedProfile } from "./managed-profile-client";
+import { ProfileSessionPanel } from "./ProfileSessionPanel";
 
 const words = {
   tr: {
-    title: "Ajan profillerin", description: "Claude Code veya Codex için bir ad ve ajan seçimi kaydet. Hesap bağlantısı sonraki adım.",
+    title: "Ajan profillerin", description: "Claude Code veya Codex için profil oluştur. Seçili profilin hesap bağlantısını aşağıdaki panelden yönet.",
     name: "Profil adı", provider: "Ajan", create: "Profil oluştur", refresh: "Profilleri yenile", select: "Bu profili seç", selected: "Seçili profil",
     loading: "Profiller okunuyor…", saving: "Profil kaydediliyor…", empty: "Henüz bir ajan profili oluşturmadın.",
     unavailable: "Profil oluşturma ve seçme masaüstü uygulamasında kullanılabilir.",
     error: "Profil bilgileri doğrulanamadı. Son durumu yenileyip tekrar dene.", invalid: "Geçerli, kısa bir profil adı gir.",
-    limit: "Bu cihazdaki 16 profil sınırına ulaştın.", reserved: "CLI hesabı henüz kontrol edilmedi.", retry: "Aynı kaydı tekrar dene",
+    limit: "Bu cihazdaki 16 profil sınırına ulaştın.", saved: "Kaydedilmiş profil", retry: "Aynı kaydı tekrar dene",
   },
   en: {
-    title: "Your agent profiles", description: "Save a name and agent choice for Claude Code or Codex on this device. Account connection is the next step.",
+    title: "Your agent profiles", description: "Create a profile for Claude Code or Codex. Manage the selected profile's account connection in the panel below.",
     name: "Profile name", provider: "Agent", create: "Create profile", refresh: "Refresh profiles", select: "Select this profile", selected: "Selected profile",
     loading: "Reading profiles…", saving: "Saving profile…", empty: "You have not created an agent profile yet.",
     unavailable: "Profile creation and selection are available in the desktop application.",
     error: "Profile information could not be validated. Refresh the latest status and try again.", invalid: "Enter a valid, short profile name.",
-    limit: "This device has reached its limit of 16 profiles.", reserved: "The CLI account has not been checked yet.", retry: "Retry the same profile",
+    limit: "This device has reached its limit of 16 profiles.", saved: "Saved profile", retry: "Retry the same profile",
   },
 };
 export function ManagedProfilesPanel({language}: {language: "tr" | "en"}) {
@@ -81,6 +82,7 @@ export function ManagedProfilesPanel({language}: {language: "tr" | "en"}) {
   const available = status?.availability === "available";
   const full = (status?.profiles.length ?? 0) >= 16;
   const enabled = available && !pending && !error;
+  const selectedProfile = available ? status.profiles.find(profile => profile.profile_id === status.selected_profile_id) : undefined;
   return <section className="settings-box managed-profiles-panel" aria-labelledby="managed-profiles-title" aria-busy={pending !== null}>
     <div className="section-heading"><h2 id="managed-profiles-title">{t.title}</h2>{managedProfilesNative() && <button className="secondary-button" disabled={pending === "create" || pending === "select"} onClick={() => void observe("read")}>{t.refresh}</button>}</div>
     <p>{t.description}</p>
@@ -97,9 +99,10 @@ export function ManagedProfilesPanel({language}: {language: "tr" | "en"}) {
     {(pending === "create" || pending === "select") && <p role="status">{t.saving}</p>}
     {available && status.profiles.length === 0 && <p>{t.empty}</p>}
     {available && <ul className="managed-profile-list">{status.profiles.map(profile => <li key={profile.profile_id}>
-      <div><strong>{profile.name}</strong><span>{profile.provider === "codex" ? "Codex" : "Claude Code"} · {t.reserved}</span></div>
+      <div><strong>{profile.name}</strong><span>{profile.provider === "codex" ? "Codex" : "Claude Code"} · {t.saved}</span></div>
       {status.selected_profile_id === profile.profile_id ? <strong className="managed-profile-selected">{t.selected}</strong> :
         <button className="secondary-button" disabled={!enabled || retry} onClick={() => void observe("select", profile.profile_id)}>{t.select}</button>}
     </li>)}</ul>}
+    {selectedProfile && <ProfileSessionPanel key={selectedProfile.profile_id} language={language} profile={selectedProfile} />}
   </section>;
 }

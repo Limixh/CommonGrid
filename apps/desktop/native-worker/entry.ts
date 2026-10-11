@@ -1,11 +1,12 @@
 import { parseBoot, runCliCheck, type Frame } from "./cli-check.ts";
+import { parseSessionBoot, runProfileSession, type SessionFrame } from "./profile-session.ts";
 
 // Nothing runs before the native supervisor has assigned process ownership and
 // supplied one bounded boot frame. EOF is a cooperative cancellation request.
 const controller = new AbortController();
 let buffer = Buffer.alloc(0), started = false, finished = false;
 let deadline: NodeJS.Timeout | undefined;
-const emit = (frame: Frame) => { if (!finished) process.stdout.write(JSON.stringify(frame) + "\n"); };
+const emit = (frame: Frame | SessionFrame) => { if (!finished) process.stdout.write(JSON.stringify(frame) + "\n"); };
 const fail = () => {
   if (started) controller.abort("worker_failed");
   else { finished = true; process.exitCode = 1; process.stdin.destroy(); }
@@ -19,9 +20,11 @@ process.stdin.on("data", (chunk: Buffer) => {
     try {
       const message = JSON.parse(line);
       if (!started) {
-        const boot = parseBoot(message); started = true;
-        deadline = setTimeout(() => controller.abort("deadline_exceeded"), 300_000);
-        void runCliCheck(boot, controller.signal, emit).then(() => {
+        const boot = message?.type === "profile_session_boot" ? parseSessionBoot(message) : parseBoot(message); started = true;
+        const deadlineMs = boot.type === "profile_session_boot" ? (boot.action === "login" ? 660_000 : 120_000) : 300_000;
+        deadline = setTimeout(() => controller.abort("deadline_exceeded"), deadlineMs);
+        const work = boot.type === "profile_session_boot" ? runProfileSession(boot, controller.signal, emit) : runCliCheck(boot, controller.signal, emit);
+        void work.then(() => {
           finished = true; clearTimeout(deadline); process.stdin.destroy();
         }, () => { finished = true; clearTimeout(deadline); process.exitCode = 1; process.stdin.destroy(); });
       } else if (!finished && message && typeof message === "object" && Object.keys(message).length === 1 && message.type === "cancel") controller.abort("cancelled");

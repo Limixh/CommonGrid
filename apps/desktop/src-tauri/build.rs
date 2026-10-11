@@ -8,6 +8,10 @@ fn main() {
             "local_managed_profiles_status",
             "local_managed_profile_create",
             "local_managed_profile_select",
+            "local_profile_session_start",
+            "local_profile_session_status",
+            "local_profile_session_cancel",
+            "local_profile_session_open_device",
         ]),
     ))
     .expect("CommonGrid desktop build failed");

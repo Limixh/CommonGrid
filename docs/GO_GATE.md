@@ -4,7 +4,9 @@
 
 ## Güncel kanıt
 
-Profil adı/ajan seçimi ve seçili profil, native uygulama deposunda kalıcıdır; bunlar henüz CLI hesabına bağlanmamış tercihlerdir. Genel görev veya kimlik doğrulama yetkisi vermez. `App.tsx` katalog, ortam ve katkı ayarları modüllerine ayrıldı. Resmi sağlayıcı oturum kodu ürün paketine taşındı; Codex cihaz kodu için geçici callback hazır, native giriş bağlantısı sıradaki iştir.
+Profil adı/ajan seçimi ve seçili profil, native uygulama deposunda kalıcıdır. Seçili Codex profili resmi cihaz kodu akışıyla bağlanabilir; hesap kontrolü, çıkış ve iptal aynı paneldedir. Profil seçimi kendi başına hesabın bağlı olduğunu göstermez. Native worker ürün paketindeki resmi oturum modülünü kullanır; geçici cihaz kodu kalıcı metadata veya günlüğe yazılmaz. `App.tsx` katalog, ortam ve katkı ayarları modüllerine ayrıldı. Gerçek hesapla giriş tamamlama, Claude'un etkileşimli giriş bağlantısı ve bağlı profille görev başlatma sıradaki işlerdir.
+
+2026-10-11 Windows/WebView2 koşusunda `npm run test:native-session-smoke` yedi kontrolü geçti: yeni profilde resmi cihaz kodunun arayüze ulaşması, giriş iptali, aynı ortamda hesapsız hesap kontrolü/çıkış ve doğrulanmış cleanup. Model çağrısı veya hesap yetkilendirmesi yapılmadı. Önceki iki giriş denemesi kod üretmeden `session_failed` ile bitti; nedenleri kesinleşmedi ve sonraki başarı geçmiş sonuçları değiştirmez. Panel bu hatayı bağlı hesap olarak göstermiyor; yeniden deneme kullanıcı işlemiyle başlar.
 
 `9d9e7ed` kaynağıyla [Windows uygulamasındaki native CLI sürüm kontrolü](../spike/results/native-cli-launcher-node22-windows-2026-10-11.json) kabul edildi. Gerçek WebView2 koşusunda dokuz kontrol geçti: resmi Codex `0.157.1` ve Claude Code `2.1.293` sürümleri, yinelenen istekler, sürüme bağlı iptal, günlük eşleşmesi ve bağımsız Docker kaynak yokluğu. Koşu Node `22.23.3` ve production frontend kullanan debug uygulamayla yapıldı; hesap/model çağrısı yok. Node `22.23.3` ve `22.14.0` için ayrı ayrı 19 paralel Rust testi geçti. Uzun Windows yolları çalışır; belirsiz yol bileşenleri çalıştırmadan önce reddedilir. Kapsam [ADR 0019](../spike/adr/0019-native-owned-cli-version-check.md) içindedir.
 
@@ -20,7 +22,7 @@ Aynı Claude profili yaklaşık 11 saat sonra [yeniden giriş olmadan status/res
 
 | İş | Kapanması için gereken kanıt | Durum |
 |---|---|---|
-| Native CLI sürüm kontrolü | Gerçek uygulamada iki resmi CLI sürümü, istek/iptal sınırları, günlük ve bağımsız cleanup doğrulaması | Windows'ta dokuz native kontrol geçti; yönetilen giriş, profil seçimi ve güvenilir görev kabulü sonraki adım |
+| Native CLI sürüm kontrolü | Gerçek uygulamada iki resmi CLI sürümü, istek/iptal sınırları, günlük ve bağımsız cleanup doğrulaması | Windows kabulü tamamlandı; kalıcı profil seçimi ve Codex giriş paneli eklendi; bağlı profille görev kabulü bekliyor |
 | Güncel gerçek görev | Geçerli izole resmi profillerle gerçek dosya değişimi, 34 örneklik bağımsız kontrol, cleanup ve API'ye geçiş olmaması | Haiku ve Luna için dar görev kabulü tamamlandı |
 | Kalıcı işlem sahipliği | Restart ve host worker ölümü boyunca aynı profile yarışın engellenmesi, eski işlemin yeni kaynakları silememesi | Claim, faz günlüğü, geliştirici/manual uzlaştırma ve native bağlantı geçti; güvenilir görev kabulü, belirsiz mutasyonların güvenli uzlaştırılması ve otomatik recovery bekliyor |
 | Claude oturum sürekliliği | Doğal zaman geçişi sonrası resmi CLI görevi; yenileme veya yeniden giriş gereksiniminin auth dosyası okumadan gözlenmesi | Gecikmeli status/restart geçti; doğal yenileme bekliyor |

@@ -27,7 +27,7 @@ const CONFLICT: &str = "local_managed_profiles_conflict";
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-enum Provider {
+pub(crate) enum Provider {
     Claude,
     Codex,
 }
@@ -269,6 +269,24 @@ fn read(root: &Path) -> Result<Catalog, &'static str> {
         return Err(UNAVAILABLE);
     }
     Ok(catalog)
+}
+// Resolve only the saved, selected profile. Native callers never supply a
+// provider, runtime owner, path or authentication material.
+pub(crate) fn selected_provider(root: &Path, profile_id: &str) -> Result<Provider, &'static str> {
+    if !uuid(profile_id) {
+        return Err(DENIED);
+    }
+    let _gate = STORE.gate.lock().map_err(|_| UNAVAILABLE)?;
+    let catalog = read(root)?;
+    if catalog.selected_profile_id.as_deref() != Some(profile_id) {
+        return Err(CONFLICT);
+    }
+    catalog
+        .profiles
+        .iter()
+        .find(|profile| profile.profile_id == profile_id)
+        .map(|profile| profile.provider)
+        .ok_or(CONFLICT)
 }
 fn publish(root: &Path, catalog: &Catalog) -> Result<(), &'static str> {
     publish_with(root, catalog, || Ok(()))

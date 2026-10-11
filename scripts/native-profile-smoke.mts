@@ -221,7 +221,7 @@ try {
     assert.deepEqual(created.profiles.map(({provider, name}) => ({provider, name})), [
       {provider: "codex", name: "Codex smoke profile"}, {provider: "claude", name: "Claude smoke profile"},
     ]);
-    await expect(panel.getByText("CLI hesabı henüz kontrol edilmedi.", {exact: false})).toHaveCount(2);
+    await expect(panel.getByText("Kaydedilmiş profil", {exact: false})).toHaveCount(2);
     checks.push("real_packaged_ui_creates_codex_and_claude_reserved_public_configs");
     const claude = panel.locator(".managed-profile-list li").filter({hasText: "Claude smoke profile"});
     await claude.getByRole("button", {name: "Bu profili seç", exact: true}).click();
@@ -260,7 +260,7 @@ try {
     const panel = page.locator(".managed-profiles-panel");
     await expect(panel.locator(".managed-profile-list li")).toHaveCount(2);
     await expect(panel.locator(".managed-profile-list li").filter({hasText: "Claude smoke profile"}).getByText("Seçili profil", {exact: true})).toBeVisible();
-    await expect(panel.getByText("CLI hesabı henüz kontrol edilmedi.", {exact: false})).toHaveCount(2);
+    await expect(panel.getByText("Kaydedilmiş profil", {exact: false})).toHaveCount(2);
     await panel.screenshot({path: withinRun(path.join(directory, "native-profiles-restarted.png"))});
     checks.push("same_isolated_appdata_restart_preserves_both_reserved_configs_and_selected_profile");
   });

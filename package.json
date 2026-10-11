@@ -29,6 +29,7 @@
     "test:native-smoke": "node --import tsx scripts/native-journal-smoke.mts",
     "test:native-cli-smoke": "node --import tsx scripts/native-cli-smoke.mts",
     "test:native-profile-smoke": "node --import tsx scripts/native-profile-smoke.mts",
+    "test:native-session-smoke": "node --import tsx scripts/native-session-smoke.mts",
     "prepare:native-launcher": "node scripts/native-launcher-assets.mjs",
     "test:spike": "node scripts/spike.mjs test",
     "test:db": "node scripts/postgres-tests.mjs",

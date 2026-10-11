@@ -3,6 +3,7 @@ mod launcher;
 mod launcher_process;
 mod operation_journal;
 mod operation_status;
+mod profile_session;
 mod profile_store;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -18,10 +19,12 @@ fn application_context<R: tauri::Runtime>() -> tauri::Context<R> {
 
 fn main() {
     let launcher = Arc::new(launcher::Launcher::default());
+    let sessions = Arc::new(profile_session::ProfileSession::default());
     let exiting = Arc::new(AtomicBool::new(false));
     let exit_ready = Arc::new(AtomicBool::new(false));
     tauri::Builder::default()
         .manage(launcher)
+        .manage(sessions)
         .invoke_handler(tauri::generate_handler![
             operation_status::local_operation_status,
             launcher::local_cli_check_start,
@@ -29,7 +32,11 @@ fn main() {
             launcher::local_cli_check_cancel,
             profile_store::local_managed_profiles_status,
             profile_store::local_managed_profile_create,
-            profile_store::local_managed_profile_select
+            profile_store::local_managed_profile_select,
+            profile_session::local_profile_session_start,
+            profile_session::local_profile_session_status,
+            profile_session::local_profile_session_cancel,
+            profile_session::local_profile_session_open_device
         ])
         .build(application_context())
         .expect("CommonGrid desktop could not start")
@@ -39,13 +46,17 @@ fn main() {
                     return;
                 }
                 let owner = Arc::clone(app.state::<Arc<launcher::Launcher>>().inner());
+                let session_owner =
+                    Arc::clone(app.state::<Arc<profile_session::ProfileSession>>().inner());
                 if exiting.load(Ordering::Acquire) {
-                    if owner.active() {
+                    if owner.active() || session_owner.active() {
                         api.prevent_exit();
                     }
                     return;
                 }
-                if owner.shutdown() {
+                let stopping_launcher = owner.shutdown();
+                let stopping_session = session_owner.shutdown();
+                if stopping_launcher || stopping_session {
                     api.prevent_exit();
                     exiting.store(true, Ordering::Release);
                     let app = app.clone();
@@ -53,11 +64,16 @@ fn main() {
                     std::thread::spawn(move || {
                         let deadline =
                             std::time::Instant::now() + std::time::Duration::from_secs(45);
-                        while owner.active() && std::time::Instant::now() < deadline {
+                        while (owner.active() || session_owner.active())
+                            && std::time::Instant::now() < deadline
+                        {
                             std::thread::sleep(std::time::Duration::from_millis(25));
                         }
                         if owner.active() {
                             owner.force_review();
+                        }
+                        if session_owner.active() {
+                            session_owner.force_review();
                         }
                         exit_ready.store(true, Ordering::Release);
                         app.exit(0);

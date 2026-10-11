@@ -1288,3 +1288,9 @@ h1 span {
 .managed-profile-list strong, .managed-profile-list span { overflow-wrap: anywhere; }
 .managed-profile-list span { color: var(--muted); font-size: 13px; }
 .managed-profile-selected { color: var(--green); font-size: 13px; }
+.profile-session-panel { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--line); }
+.profile-session-panel h3 { margin: 0; }
+.profile-session-challenge { display: grid; gap: 12px; padding: 16px; margin-top: 16px; border: 1px solid var(--line); border-radius: 12px; }
+.profile-session-challenge p { margin: 0; }
+.profile-session-challenge code { font-size: 20px; letter-spacing: 2px; overflow-wrap: anywhere; }
+.profile-session-challenge button { justify-self: start; }

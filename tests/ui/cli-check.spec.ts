@@ -194,7 +194,9 @@ test("unknown cleanup prevents another check and oversized IPC never reaches the
 });
 
 test("automatic observation stops after 420 polls without inventing completion or cancelling", async ({page}) => {
-  test.setTimeout(60_000);
+  // The 420 sequential browser observations need wall-clock headroom during native builds.
+  // Virtual time and the exact product polling cap remain asserted below.
+  test.setTimeout(180_000);
   await freezeClock(page); await mockNative(page, envelope(running));
   const panel = await openPanel(page);
   await expect(panel).toContainText("CLI sürümü kontrol ediliyor");

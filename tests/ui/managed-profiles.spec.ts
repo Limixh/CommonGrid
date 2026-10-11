@@ -56,7 +56,7 @@ test("native profile creation sends metadata only, selection persists across pag
   await page.getByRole("navigation").getByRole("button", {name: /^Çalışma alanı/}).click();
   await page.getByRole("button", {name: "Ajanlar ve ortam", exact: true}).click();
   await expect(panel.getByText("Benim Claude", {exact: true})).toBeVisible(); await expect(panel).toContainText("Seçili profil");
-  await expect(panel).toContainText("CLI hesabı henüz kontrol edilmedi");
+  await expect(panel).toContainText("Kaydedilmiş profil");
   await page.setViewportSize({width: 390, height: 844});
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });

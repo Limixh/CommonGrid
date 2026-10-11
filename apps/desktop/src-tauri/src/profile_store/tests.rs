@@ -65,6 +65,23 @@ fn public(catalog: Catalog) -> Value {
 }
 
 #[test]
+fn session_provider_lookup_requires_the_saved_selected_profile() {
+    let fixture = Fixture::new();
+    assert!(selected_provider(&fixture.root(), ID).is_err());
+    assert!(!fixture.root().exists());
+    create(&fixture.root(), request(ID, 0)).unwrap();
+    create(&fixture.root(), request(OTHER_ID, 1)).unwrap();
+    assert!(selected_provider(&fixture.root(), ID).is_err());
+    select(&fixture.root(), selection(ID, 2)).unwrap();
+    assert_eq!(selected_provider(&fixture.root(), ID), Ok(Provider::Codex));
+    assert!(selected_provider(&fixture.root(), OTHER_ID).is_err());
+    assert!(selected_provider(&fixture.root(), "../host-auth").is_err());
+    fixture
+        .write(json!({"schema_version":"1.0","revision":3,"profiles":[],"selected_profile_id":ID}));
+    assert!(selected_provider(&fixture.root(), ID).is_err());
+}
+
+#[test]
 fn missing_read_is_empty_without_creating_a_store_and_selection_survives_restart() {
     let fixture = Fixture::new();
     assert_eq!(

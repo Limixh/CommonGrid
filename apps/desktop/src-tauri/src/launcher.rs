@@ -146,7 +146,7 @@ enum Frame {
 fn nullable<'de, D: serde::Deserializer<'de>>(input: D) -> Result<Option<String>, D::Error> {
     Option::<String>::deserialize(input)
 }
-fn uuid(value: &str) -> bool {
+pub(crate) fn uuid(value: &str) -> bool {
     let b = value.as_bytes();
     b.len() == 36
         && b[14] == b'4'
@@ -165,7 +165,7 @@ fn hash(value: &str) -> bool {
             .bytes()
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
-fn digest(path: &Path) -> Option<String> {
+pub(crate) fn digest(path: &Path) -> Option<String> {
     if !regular(path) {
         return None;
     }
@@ -194,7 +194,7 @@ fn digest(path: &Path) -> Option<String> {
     }
     Some(format!("{:x}", hash.finalize()))
 }
-fn resources(root: &Path) -> bool {
+pub(crate) fn resources(root: &Path) -> bool {
     if !safe_ancestors(root) {
         return false;
     }
@@ -221,7 +221,7 @@ fn resources(root: &Path) -> bool {
         && digest(&root.join(node_name())).as_deref() == Some(&value.node_sha256)
         && digest(&root.join("worker.mjs")).as_deref() == Some(&value.worker_sha256)
 }
-fn node_name() -> &'static str {
+pub(crate) fn node_name() -> &'static str {
     if cfg!(windows) {
         "node.exe"
     } else {

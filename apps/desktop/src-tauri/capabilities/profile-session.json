@@ -1,0 +1,8 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "local-profile-session",
+  "description": "Managed profile sessions from the local main webview only.",
+  "local": true,
+  "webviews": ["main"],
+  "permissions": ["local-profile-session"]
+}
