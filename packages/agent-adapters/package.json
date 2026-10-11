@@ -1,5 +1,5 @@
 {
   "name": "@commongrid/agent-adapters", "version": "0.1.0", "private": true,
-  "type": "module", "exports": { ".": "./src/index.ts", "./testing/functional-test-models": "./testing/functional-test-models.ts", "./operation-journal": "./src/operation-journal.ts", "./operation-journal-types": "./src/operation-journal-types.ts", "./recovery": "./src/operation-recovery.ts", "./cli-check": "./src/cli-check-protocol.ts", "./managed-profiles": "./src/managed-profile-protocol.ts", "./profile-session": "./src/profile-session-protocol.ts" },
+  "type": "module", "exports": { ".": "./src/index.ts", "./testing/functional-test-models": "./testing/functional-test-models.ts", "./operation-journal": "./src/operation-journal.ts", "./operation-journal-types": "./src/operation-journal-types.ts", "./recovery": "./src/operation-recovery.ts", "./cli-check": "./src/cli-check-protocol.ts", "./managed-profiles": "./src/managed-profile-protocol.ts", "./profile-session": "./src/profile-session-protocol.ts", "./task-run": "./src/task-run-protocol.ts" },
   "dependencies": { "@commongrid/task-schema": "0.1.0" }
 }
