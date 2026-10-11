@@ -6,14 +6,14 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import vm from "node:vm";
-import { applyControlledPatch, buildControlledPatch, controlledBaseline, controlledTaskPrompt, controlledTaskToolSchema, controlledVerifierCases, createControlledPatch,
+import { ControlledTaskCleanupError, applyControlledPatch, buildControlledPatch, controlledBaseline, controlledTaskPrompt, controlledTaskToolSchema, controlledVerifierCases, createControlledPatch,
   snapshotControlledCandidate, verifyControlledCandidate, type ControlledVerifierDeps } from "../src/controlled-task.ts";
 import { controlledCandidateSnapshotScript, validateControlledCandidateBytes, validateControlledCandidateSource } from "../src/controlled-task-artifact.ts";
 import { taskRunMaxPatchBytes, validTaskRunPatch } from "../src/task-run-protocol.ts";
 
 const correct = "export function sumIntegers(values) {\n  if (!Array.isArray(values)) throw new TypeError('Expected an array');\n  let total = 0;\n  for (const value of values) {\n    if (!Number.isSafeInteger(value)) throw new TypeError('Expected safe integers');\n    total += value;\n    if (!Number.isSafeInteger(total)) throw new RangeError('Unsafe sum');\n  }\n  return total;\n}\n";
-// Prevalidates every value, so it passes all JSON cases but skips empty slots.
-const skipsHoles = "export function sumIntegers(values) {\n  if (!Array.isArray(values) || !values.every(Number.isSafeInteger)) throw new TypeError('Expected safe integers');\n  let total = 0;\n  for (const value of values) {\n    total += value;\n    if (!Number.isSafeInteger(total)) throw new RangeError('Unsafe sum');\n  }\n  return total;\n}\n";
+// Preserves immediate validation/addition order but skips empty slots.
+const skipsHoles = "export function sumIntegers(values) {\n  if (!Array.isArray(values)) throw new TypeError('Expected an array');\n  let total = 0;\n  values.forEach(value => {\n    if (!Number.isSafeInteger(value)) throw new TypeError('Expected safe integers');\n    total += value;\n    if (!Number.isSafeInteger(total)) throw new RangeError('Unsafe sum');\n  });\n  return total;\n}\n";
 const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
 
 test("artifact policy accepts normal UTF-8 source and rejects unsafe or secret content without disclosing it", () => {
@@ -37,6 +37,12 @@ test("exporter script embeds the validator without literal bidi characters and r
       const fs = await import("node:fs"), map = (value: unknown) => value === "/task" ? directory : value === "/task/sum.mjs" ? path.join(directory, "sum.mjs") : value as string;
       const facade = new Proxy(fs, {get(target, property) {
         if (property === "constants") return target.constants;
+        // Windows path stats may report dev=0 while handle stats report the
+        // volume ID. This facade models the Linux exporter filesystem only.
+        if (process.platform === "win32" && ["lstatSync", "fstatSync"].includes(property as string)) return (value: unknown, ...args: unknown[]) => {
+          const stat = (target as any)[property](property === "lstatSync" ? map(value) : value, ...args);
+          stat.dev = 0; return stat;
+        };
         if (["readdirSync", "lstatSync", "openSync"].includes(property as string)) return (value: unknown, ...args: unknown[]) => (target as any)[property](map(value), ...args);
         return (target as any)[property];
       }});
@@ -172,4 +178,89 @@ test("snapshot freezes the task, decodes only canonical base64 and always unpaus
 test("prompt and tool schema stay the accepted fixed contract", () => {
   assert.ok(controlledTaskPrompt.includes("Fix /task/sum.mjs using only task_exec.") && controlledTaskPrompt.includes("Task tool contract: "));
   assert.deepEqual(Object.keys(controlledTaskToolSchema.properties), ["argv", "timeout_ms"]); assert.deepEqual(controlledTaskToolSchema.required, ["argv"]); assert.equal(controlledTaskToolSchema.additionalProperties, false);
+});
+
+test("snapshot cleanup always attempts unpause and reports independent resource uncertainty", async () => {
+  for (const fault of ["container", "inspect", "rm", "unpause"] as const) for (const rejected of [false, true]) {
+    const calls: string[] = [];
+    let name = "", id = "";
+    const docker = {
+      async checked(args: string[]) {
+        calls.push(args[0]);
+        if (args[0] === fault) throw new Error("PRIVATE_EXPORTER_CLEANUP");
+        if (args[0] === "container") return name;
+        if (args[0] === "inspect") return id;
+        return "";
+      },
+      async command(args: string[]) {
+        calls.push("run"); name = args[args.indexOf("--name") + 1]; id = args[args.indexOf("--label") + 1].split("=")[1];
+        return {code: rejected ? 1 : 0, stdout: Buffer.from(correct).toString("base64")};
+      },
+    };
+    const runtime = {container: "task-container", volume: "task-volume", async inspect() {}};
+    await assert.rejects(snapshotControlledCandidate(runtime as any, "image", docker), error => {
+      assert.ok(error instanceof ControlledTaskCleanupError);
+      assert.equal(error.scope, "snapshot"); assert.equal(error.message, "controlled_snapshot_cleanup_failed");
+      assert.equal(error.errors.length, 1); return true;
+    });
+    assert.equal(calls.at(-1), "unpause", `${fault}: ${rejected}`);
+  }
+});
+
+test("verifier cleanup errors retain their typed category across verification and abort", async () => {
+  for (const fault of ["container", "staging", "both"] as const) for (const abort of [false, true]) {
+    const f = verifierFixture(), controller = new AbortController(), staging = f.deps.staging;
+    f.deps.staging = async image => {
+      const resource = await staging(image);
+      return {...resource, async close() { await resource.close(); if (fault !== "container") throw new Error("PRIVATE_STAGING_CLEANUP"); }};
+    };
+    const checked = f.deps.checked;
+    f.deps.checked = async (...args) => {
+      if (args[0][0] === "container" && fault !== "staging") { f.calls.push("container"); throw new Error("PRIVATE_VERIFIER_CLEANUP"); }
+      return checked(...args);
+    };
+    f.deps.command = async () => { if (abort) controller.abort("cancelled"); return {code: 1, stdout: ""}; };
+    await assert.rejects(verifyControlledCandidate(correct, "image", f.deps, controller.signal), error => {
+      assert.ok(error instanceof ControlledTaskCleanupError);
+      assert.equal(error.scope, "verifier"); assert.equal(error.message, "controlled_verifier_cleanup_failed");
+      assert.equal(error.errors.length, fault === "both" ? 2 : 1); return true;
+    });
+    assert.equal(f.calls.at(-1), "close", "staging cleanup must run after container cleanup failure");
+  }
+});
+
+test("verifier staging setup cleanup uncertainty is wrapped only for the exact sandbox category", async () => {
+  const f = verifierFixture(), leak = new AggregateError([new Error("PRIVATE")], "sandbox_cleanup_failed");
+  f.deps.staging = async () => { throw leak; };
+  await assert.rejects(verifyControlledCandidate(correct, "image", f.deps), error => {
+    assert.ok(error instanceof ControlledTaskCleanupError); assert.equal(error.scope, "verifier"); assert.deepEqual(error.errors, [leak]); return true;
+  });
+  for (const failure of [new Error("sandbox_cleanup_failed"), new AggregateError([], "sandbox_cleanup_failed_extra")]) {
+    f.deps.staging = async () => { throw failure; };
+    await assert.rejects(verifyControlledCandidate(correct, "image", f.deps), error => error === failure);
+  }
+});
+
+test("verifier enforces first-error order when overflow and invalid values coexist", async () => {
+  const prevalidates = "export function sumIntegers(values) {\n  if (!Array.isArray(values)) throw new TypeError('Expected an array');\n  for (const value of values) if (!Number.isSafeInteger(value)) throw new TypeError('Expected safe integers');\n  let total = 0;\n  for (const value of values) {\n    total += value;\n    if (!Number.isSafeInteger(total)) throw new RangeError('Unsafe sum');\n  }\n  return total;\n}\n";
+  const orderedCases = [[Number.MAX_SAFE_INTEGER, 1, "bad"], [Number.MIN_SAFE_INTEGER, -1, "bad"], ["bad", Number.MAX_SAFE_INTEGER, 1]];
+  for (const source of [correct, prevalidates]) {
+    const f = verifierFixture(), command = f.deps.command;
+    let inputs: unknown[] = [], outputs: Array<{error?: string; value?: number}> = [];
+    f.deps.command = async (...args) => {
+      inputs = JSON.parse(args[0][6]);
+      const result = await command(...args);
+      assert.equal(result.code, 0); outputs = JSON.parse(result.stdout);
+      return result;
+    };
+    const result = await verifyControlledCandidate(source, "image", f.deps);
+    assert.equal(inputs.length, 32); assert.equal(outputs.length, controlledVerifierCases);
+    for (const [index, values] of orderedCases.entries()) {
+      const caseIndex = inputs.findIndex(input => JSON.stringify(input) === JSON.stringify(values));
+      assert.ok(caseIndex >= 0, `missing ordered-error case ${index}`);
+      assert.deepEqual(outputs[caseIndex], {error: source === correct && index < 2 ? "RangeError" : "TypeError"});
+    }
+    assert.equal(result.json_cases_passed, source === correct);
+    assert.equal(result.passed, source === correct);
+  }
 });

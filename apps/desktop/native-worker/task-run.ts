@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
-import { controlledTaskId, createControlledPatch, seedControlledTask, snapshotControlledCandidate, verifyControlledCandidate, type ControlledVerifierResult } from "../../../packages/agent-adapters/src/controlled-task.ts";
+import { ControlledTaskCleanupError, controlledTaskId, createControlledPatch, seedControlledTask, snapshotControlledCandidate, verifyControlledCandidate, type ControlledVerifierResult } from "../../../packages/agent-adapters/src/controlled-task.ts";
 import { TaskToolLimitError, runControlledProviderTurn, type ProviderTurnOptions } from "../../../packages/agent-adapters/src/controlled-task-session.ts";
 import { ManagedCliRuntime, startBridge, type ManagedRuntimeAssets } from "../../../packages/agent-adapters/src/managed-runtime.ts";
 import { assertBridgeHealthy, ProviderFailure } from "../../../packages/agent-adapters/src/session-protocol.ts";
@@ -75,9 +75,10 @@ function errorCode(error: unknown, signal: AbortSignal): TaskRunError {
   if ((error as Error)?.message === "managed_profile_busy") return "profile_needs_review";
   return "worker_failed";
 }
-// A failure inside one verification step: aborts win, candidate policy codes are
-// candidate failures, anything else (Docker, tooling) is the step's own code.
+// Preserve cleanup uncertainty before mapping aborts, candidate policy failures
+// or the step's own tooling code.
 const stepFailure = (signal: AbortSignal, code: TaskRunError) => (error: unknown): never => {
+  if (error instanceof ControlledTaskCleanupError) throw error;
   if (signal.aborted) throw error;
   throw new TaskRunFailure(error instanceof Error && /^candidate_/.test(error.message) ? "candidate_invalid" : code);
 };
@@ -119,7 +120,7 @@ export async function runTaskRun(boot: TaskRunBoot, signal: AbortSignal, emit: (
     }
     release = await runtime.retainOperation({signal});
     try { sandbox = await deps.sandbox(assets.baseImage); }
-    catch (failure) { if (failure instanceof AggregateError && /^sandbox_cleanup_/.test(failure.message)) cleanupFailed = true; throw failure; }
+    catch (failure) { if (failure instanceof AggregateError && failure.message === "sandbox_cleanup_failed") cleanupFailed = holdOwnership = true; throw failure; }
     signal.throwIfAborted();
     await seedControlledTask(sandbox); signal.throwIfAborted();
     bridge = await deps.bridge(runtime, sandbox); assertBridgeHealthy(bridge.stats); signal.throwIfAborted();
@@ -148,6 +149,9 @@ export async function runTaskRun(boot: TaskRunBoot, signal: AbortSignal, emit: (
       result = validateTaskRunResult({verifier, candidate_sha256: verdict.candidate_sha256, patch_sha256: evidence.patch_sha256, patch: evidence.patch}, "passed");
     }
   } catch (failure) {
+    // Snapshot/verifier containers have separate owners and cannot be proven gone
+    // by closing the task sandbox or the managed runtime. Preserve the claim.
+    if (failure instanceof ControlledTaskCleanupError) cleanupFailed = holdOwnership = true;
     result = null; error = errorCode(failure, signal);
   } finally {
     emit({type: "progress", phase: "cleaning"});

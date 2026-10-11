@@ -19,7 +19,7 @@
     "generate:check": "node scripts/generate.mjs --check",
     "typecheck": "tsc --noEmit && npm run typecheck -w @commongrid/desktop",
     "test": "npm run test:product && npm run test:spike-fixtures",
-    "test:product": "node --test scripts/test/tool-probes.test.mjs && tsx --test packages/task-schema/test/*.test.ts packages/agent-adapters/test/*.test.ts && node scripts/go.mjs test ./...",
+    "test:product": "node --test scripts/test/tool-probes.test.mjs && tsx --test --test-concurrency=4 packages/task-schema/test/*.test.ts packages/agent-adapters/test/*.test.ts && node scripts/go.mjs test ./...",
     "test:spike-fixtures": "node --test scripts/test/cli-wire-inventory.test.mjs scripts/test/task-broker.test.mjs scripts/test/tunnel-wire.test.mjs && tsx --test spike/cli-session/*.test.mjs spike/cli-session/*.test.mts",
     "build": "npm run build -w @commongrid/desktop && node scripts/go.mjs build ./...",
     "check": "npm run generate:check && npm run typecheck && npm test && npm run build",

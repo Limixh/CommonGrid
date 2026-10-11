@@ -47,6 +47,12 @@ export interface ControlledStaging { volume: string; exec: Exec["exec"]; close()
 export interface ControlledVerifierDeps extends ControlledTaskDocker {
   staging(image: string): Promise<ControlledStaging>;
 }
+/** Independent resources may still exist; callers must retain their operation claim. */
+export class ControlledTaskCleanupError extends AggregateError {
+  constructor(readonly scope: "snapshot" | "verifier", failures: unknown[]) {
+    super(failures, scope === "snapshot" ? "controlled_snapshot_cleanup_failed" : "controlled_verifier_cleanup_failed");
+  }
+}
 const dockerDeps: ControlledTaskDocker = {checked: (args, timeoutMs) => checked(args, timeoutMs), command: dockerCommand};
 const verifierDeps: ControlledVerifierDeps = {...dockerDeps, staging: image => TaskToolsRuntime.create({image, cpu: 1, memoryMb: 256}, 120_000)};
 
@@ -64,9 +70,13 @@ export async function snapshotControlledCandidate(runtime: Pick<TaskToolsRuntime
     assert.equal(bytes.toString("base64"), encoded, "candidate_snapshot_encoding");
     return validateControlledCandidateBytes(bytes);
   } finally {
-    const found = await docker.checked(["container", "ls", "--all", "--filter", `name=^/${name}$`, "--format", "{{.Names}}"]);
-    if (found) { assert.equal(await docker.checked(["inspect", "--format", `{{index .Config.Labels "${owner}"}}`, name]), id); await docker.checked(["rm", "--force", name]); }
-    await docker.checked(["unpause", runtime.container]);
+    const failures: unknown[] = [];
+    try {
+      const found = await docker.checked(["container", "ls", "--all", "--filter", `name=^/${name}$`, "--format", "{{.Names}}"]);
+      if (found) { assert.equal(await docker.checked(["inspect", "--format", `{{index .Config.Labels "${owner}"}}`, name]), id); await docker.checked(["rm", "--force", name]); }
+    } catch (error) { failures.push(error); }
+    try { await docker.checked(["unpause", runtime.container]); } catch (error) { failures.push(error); }
+    if (failures.length) throw new ControlledTaskCleanupError("snapshot", failures);
   }
 }
 
@@ -81,7 +91,11 @@ export interface ControlledVerifierResult { passed: boolean; cases: number; json
 export async function verifyControlledCandidate(source: string, image: string, deps: ControlledVerifierDeps = verifierDeps, signal?: AbortSignal): Promise<ControlledVerifierResult> {
   validateControlledCandidateSource(source);
   signal?.throwIfAborted();
-  const staging = await deps.staging(image), id = randomUUID(), name = `cg-verifier-${id}`;
+  // Staging setup can fail after creating its own resources but before returning them.
+  const staging = await deps.staging(image).catch(error => {
+    if (error instanceof AggregateError && error.message === "sandbox_cleanup_failed") throw new ControlledTaskCleanupError("verifier", [error]);
+    throw error;
+  }), id = randomUUID(), name = `cg-verifier-${id}`;
   try {
     signal?.throwIfAborted();
     await writeControlledCandidate(staging, source);
@@ -90,9 +104,12 @@ export async function verifyControlledCandidate(source: string, image: string, d
     signal?.throwIfAborted();
     // Host oracle is independent of all candidate code and files. Random cases
     // are generated after export; no expected answer is passed to the child.
-    const cases: unknown[] = [[], [1, 2, 3], [-7, 4, -2], [0], [Number.MAX_SAFE_INTEGER], [Number.MAX_SAFE_INTEGER, 1], [Number.MIN_SAFE_INTEGER, -1], [1.2], ["2"], null, {}, [true]];
+    const cases: unknown[] = [[], [1, 2, 3], [-7, 4, -2], [0], [Number.MAX_SAFE_INTEGER], [Number.MAX_SAFE_INTEGER, 1], [Number.MIN_SAFE_INTEGER, -1], [1.2], ["2"], null, {}, [true],
+      // An earlier running-sum overflow wins over a later invalid value;
+      // an invalid first value wins over a later potential overflow.
+      [Number.MAX_SAFE_INTEGER, 1, "bad"], [Number.MIN_SAFE_INTEGER, -1, "bad"], ["bad", Number.MAX_SAFE_INTEGER, 1]];
     const random = Buffer.from(randomUUID().replaceAll("-", ""), "hex");
-    for (let i = 0; i < 20; i++) cases.push(Array.from({length: i % 8}, (_, j) => (random[(i + j) % random.length] - 128) * 17));
+    for (let i = 0; i < 17; i++) cases.push(Array.from({length: i % 8}, (_, j) => (random[(i + j) % random.length] - 128) * 17));
     // Sparse arrays must be constructed in both processes: JSON would replace
     // their holes with null and hide implementations that skip empty slots.
     const sparseCases = [Array(1), [1,,]];
@@ -116,7 +133,7 @@ export async function verifyControlledCandidate(source: string, image: string, d
       if (found) { assert.equal(await deps.checked(["inspect", "--format", `{{index .Config.Labels "${owner}"}}`, name]), id); await deps.checked(["rm", "--force", name]); }
     } catch (error) { failures.push(error); }
     try { await staging.close(); } catch (error) { failures.push(error); }
-    if (failures.length) throw new AggregateError(failures, "controlled_verifier_cleanup_failed");
+    if (failures.length) throw new ControlledTaskCleanupError("verifier", failures);
   }
 }
 

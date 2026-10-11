@@ -8,7 +8,7 @@ import { test } from "node:test";
 import { BindingFailure, type ProfileBinding } from "../../../apps/desktop/native-worker/profile-bindings.ts";
 import { verifyAssets, type Boot } from "../../../apps/desktop/native-worker/cli-check.ts";
 import { parseTaskRunBoot, runTaskRun, taskRunBindingRoot, type TaskRunBoot, type TaskRunDependencies, type TaskRunFrame, type TaskRunRuntime, type TaskRunSandbox } from "../../../apps/desktop/native-worker/task-run.ts";
-import { applyControlledPatch, controlledBaseline, createControlledPatch, controlledVerifierCases } from "../src/controlled-task.ts";
+import { ControlledTaskCleanupError, applyControlledPatch, controlledBaseline, createControlledPatch, controlledVerifierCases } from "../src/controlled-task.ts";
 import { TaskToolLimitError, type ProviderTurnOptions } from "../src/controlled-task-session.ts";
 import type { ManagedRuntimeAssets } from "../src/managed-runtime.ts";
 import { ProviderFailure } from "../src/session-protocol.ts";
@@ -270,7 +270,42 @@ test("any cleanup that cannot be verified becomes needs_review with unknown clea
   assert.deepEqual(result(f.frames), {type: "result", outcome: "needs_review", error_code: "cleanup_failed", cleanup: "unknown", result: null});
   const created = fixture(); created.deps.sandbox = async () => { throw new AggregateError([new Error("PRIVATE")], "sandbox_cleanup_failed"); }; await created.run();
   assert.deepEqual(result(created.frames), {type: "result", outcome: "needs_review", error_code: "cleanup_failed", cleanup: "unknown", result: null});
+  assert.ok(created.calls.includes("stop")); assert.ok(created.calls.includes("release"));
+  assert.ok(!created.calls.includes("finish"), "an unreturned sandbox with uncertain cleanup retains the persistent claim");
 });
+test("independent cleanup uncertainty preserves the profile claim even when cancelled or timed out", async () => {
+  for (const scope of ["snapshot", "verifier"] as const) for (const abort of [null, "cancelled", "deadline_exceeded"] as const) {
+    const f = fixture(), controller = new AbortController();
+    const fail = async () => {
+      if (abort) controller.abort(abort);
+      throw new ControlledTaskCleanupError(scope, [new Error("PRIVATE_INDEPENDENT_RESOURCE")]);
+    };
+    if (scope === "snapshot") f.deps.snapshot = fail; else f.deps.verify = fail;
+    await f.run(controller.signal);
+    assert.deepEqual(result(f.frames), {type: "result", outcome: "needs_review", error_code: "cleanup_failed", cleanup: "unknown", result: null}, `${scope}: ${abort}`);
+    assert.ok(f.calls.includes("sandbox-close"));
+    assert.deepEqual(f.calls.slice(-2), ["stop", "release"]);
+    assert.ok(!f.calls.includes("finish"), "claim must remain while independent resources may exist");
+    assert.ok(!JSON.stringify(f.frames).includes("PRIVATE"));
+    supervise(f.boot, f.frames);
+  }
+});
+
+test("cleanup-looking error text alone cannot mark an independent resource leak", async () => {
+  for (const scope of ["snapshot", "verifier"] as const) for (const failure of [
+    new Error(`controlled_${scope}_cleanup_failed`),
+    new AggregateError([new Error("PRIVATE")], `controlled_${scope}_cleanup_failed`),
+    Object.assign(new Error("PRIVATE"), {scope}),
+  ]) {
+    const f = fixture(), fail = async () => { throw failure; };
+    if (scope === "snapshot") f.deps.snapshot = fail; else f.deps.verify = fail;
+    await f.run();
+    assert.deepEqual(result(f.frames), {type: "result", outcome: "failed", error_code: scope === "snapshot" ? "worker_failed" : "verifier_failed", cleanup: "verified", result: null});
+    assert.equal(f.calls.at(-1), "finish");
+    supervise(f.boot, f.frames);
+  }
+});
+
 test("unhealthy relay never passes", async () => {
   for (const when of ["before", "after"] as const) {
     const f = fixture();

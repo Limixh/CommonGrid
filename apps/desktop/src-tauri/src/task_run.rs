@@ -279,6 +279,9 @@ impl End {
 }
 struct Inner {
     status: Status,
+    // Worker protocol state advances even when cancellation freezes the
+    // public projection. Buffered observations still need normal validation.
+    worker_observation: Option<Operation>,
     cancel: Option<mpsc::SyncSender<()>>,
     cancel_requested: bool,
     shutting_down: bool,
@@ -300,6 +303,7 @@ impl Default for TaskRun {
                     availability: "available",
                     operation: None,
                 },
+                worker_observation: None,
                 cancel: None,
                 cancel_requested: false,
                 shutting_down: false,
@@ -483,6 +487,7 @@ impl TaskRun {
         inner.requests.insert(operation.request_id.clone());
         inner.cancel = Some(tx);
         inner.cancel_requested = false;
+        inner.worker_observation = Some(operation.clone());
         inner.status.operation = Some(operation.clone());
         let answer = inner.status.clone();
         drop(inner);
@@ -582,12 +587,18 @@ impl TaskRun {
             return false;
         };
         let cancelled = inner.cancel_requested;
-        let Some(operation) = &mut inner.status.operation else {
+        let Inner {
+            status,
+            worker_observation,
+            ..
+        } = &mut *inner;
+        let Some(operation) = &mut status.operation else {
             return false;
         };
         if operation.request_id != id || operation.phase == Phase::Finished || result.is_some() {
             return false;
         }
+        let observation = worker_observation.get_or_insert_with(|| operation.clone());
         match frame {
             Frame::Progress { phase }
                 if matches!(
@@ -595,20 +606,25 @@ impl TaskRun {
                     Phase::Preparing | Phase::Running | Phase::Verifying | Phase::Cleaning
                 ) =>
             {
+                if !progress(observation.phase, phase) {
+                    return false;
+                }
+                observation.phase = phase;
                 if cancelled && phase != Phase::Cleaning {
                     return true;
-                }
-                if !progress(operation.phase, phase) {
-                    return false;
                 }
                 operation.phase = phase;
                 operation.revision += 1;
                 true
             }
             Frame::Activity { tool_calls }
-                if matches!(operation.phase, Phase::Running | Phase::Verifying)
-                    && (operation.tool_calls..=MAX_TOOL_CALLS).contains(&tool_calls) =>
+                if matches!(observation.phase, Phase::Running | Phase::Verifying)
+                    && (observation.tool_calls..=MAX_TOOL_CALLS).contains(&tool_calls) =>
             {
+                observation.tool_calls = tool_calls;
+                if cancelled {
+                    return true;
+                }
                 if tool_calls != operation.tool_calls {
                     operation.tool_calls = tool_calls;
                     operation.revision += 1;
@@ -616,14 +632,18 @@ impl TaskRun {
                 true
             }
             Frame::Model { observed }
-                if matches!(operation.phase, Phase::Running | Phase::Verifying)
+                if matches!(observation.phase, Phase::Running | Phase::Verifying)
                     && observed_model(operation.provider, &observed)
-                    && operation
+                    && observation
                         .model
                         .observed
                         .as_ref()
                         .is_none_or(|first| *first == observed) =>
             {
+                observation.model.observed = Some(observed.clone());
+                if cancelled {
+                    return true;
+                }
                 if operation.model.observed.is_none() {
                     operation.model.observed = Some(observed);
                     operation.revision += 1;
@@ -635,15 +655,16 @@ impl TaskRun {
                 error_code,
                 cleanup,
                 result: payload,
-            } if operation.phase == Phase::Cleaning => {
+            } if observation.phase == Phase::Cleaning => {
                 let end = End {
                     outcome,
                     error: error_code,
                     cleanup,
                     result: payload,
                 };
-                // Judge the state this frame would publish, at its widest.
-                let mut candidate = operation.clone();
+                // Validate the complete worker terminal report, including
+                // observations cancellation has hidden, at its widest.
+                let mut candidate = observation.clone();
                 candidate.revision = MAX_REVISION - 1;
                 Self::terminal(&mut candidate, end.clone());
                 if !valid_status(&Status {

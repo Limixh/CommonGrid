@@ -118,7 +118,7 @@ test("the task card names the task, the exact model per provider, the limits and
   await mockNative(page); const panel = await open(page);
   await expect(panel).toContainText("Kontrollü doğrulama görevi: sum.mjs");
   await expect(panel.locator(".task-run-card code")).toHaveText("gpt-6-luna");
-  for (const text of ["Ağ erişimi yok", "En fazla 16 araç çağrısı", "20 dakika süre sınırı", "34 örnekli bağımsız doğrulayıcı", "Yalnız doğrulanmış diff gösterilir", "kendi Claude veya Codex aboneliğinin kotasını"])
+  for (const text of ["Görev çalışma alanında ağ erişimi yok", "En fazla 16 araç çağrısı", "20 dakika süre sınırı", "34 örnekli bağımsız doğrulayıcı", "Yalnız doğrulanmış diff gösterilir", "kendi Claude veya Codex aboneliğinin kotasını"])
     await expect(panel).toContainText(text);
   await page.locator(".managed-profile-list li").filter({hasText: "Claude profilim"}).getByRole("button", {name: "Bu profili seç", exact: true}).click();
   await expect(panel.locator(".task-run-card code")).toHaveText("haiku");

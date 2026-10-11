@@ -60,6 +60,8 @@ Windows başlatıcısı Docker Desktop Linux motorunun sabit yerel named pipe'ı
 
 Gerçek hesabı kullanan komutlar olağan test paketinde çalışmaz. Testte Codex Luna ve Claude Haiku kullanılır; erişilemezse durulur. Kota kasıtlı tüketilmez, pahalı modele veya ücretli API'ye otomatik geçilmez. Ayrıntılar [AGENTS.md](../AGENTS.md) ve [izole oturum rehberinde](../spike/cli-session/MANAGED_SESSIONS.md).
 
+Ürün birim testleri aynı anda en fazla dört test dosyası çalıştırır; çok sayıda Node sürecinin süre sınırı testleri üzerindeki yükünü azaltır. Native süreç testlerini tek tek çalıştırmak için `node scripts/rust.mjs test --locked -- --test-threads=1` kullanılabilir. Bu seçenekler uygulamanın görev veya temizleme süre sınırlarını değiştirmez.
+
 ## Kod ve değişiklik disiplini
 
 Yeniden kullanılabilir CLI runtime/control, protokol/kota, kalıcı operation claim, faz günlüğü ve salt okunur kurtarma projection yardımcıları packages/agent-adapters içinde; gerçek hesap/Docker deneylerinin yöneticileri spike içinde kalır. Ürün kodu spike dosyalarını doğrudan içe aktarmamalıdır. Deneme testi ayrı isimle çalışır; npm run check güvenlik regresyonlarını da kapsar.

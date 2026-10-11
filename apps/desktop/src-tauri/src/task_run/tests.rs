@@ -1359,6 +1359,94 @@ fn cancellation_keeps_its_revision_and_outranks_late_progress() {
 }
 
 #[test]
+fn cancellation_keeps_buffered_frame_validation_without_projecting_observations() {
+    for (provider, model, other_model) in [
+        (Provider::Codex, "gpt-6-luna", "gpt-6.1-sol"),
+        (Provider::Claude, "claude-haiku-4-5", "claude-haiku-5-5"),
+    ] {
+        for phase in [Phase::Starting, Phase::Preparing] {
+            let (owner, _rx) = primed(provider, phase, 0, None);
+            let cancelled = owner.cancel(cancel(ID, 10)).unwrap();
+            let before = value(&cancelled);
+            let mut result = None;
+            // Cancellation is not permission to accept out-of-order or
+            // malformed observations, even while the public phase is frozen.
+            assert!(!feed(
+                &owner,
+                &json!({"type":"model","observed":model}),
+                &mut result
+            ));
+            assert!(!feed(
+                &owner,
+                &json!({"type":"activity","tool_calls":1}),
+                &mut result
+            ));
+            if phase == Phase::Starting {
+                assert!(feed(&owner, &progress_frame("preparing"), &mut result));
+            }
+            assert!(!feed(&owner, &progress_frame("verifying"), &mut result));
+            assert!(feed(&owner, &progress_frame("running"), &mut result));
+            assert!(feed(
+                &owner,
+                &json!({"type":"model","observed":model}),
+                &mut result
+            ));
+            assert!(feed(
+                &owner,
+                &json!({"type":"activity","tool_calls":3}),
+                &mut result
+            ));
+            for invalid in [
+                json!({"type":"model","observed":other_model}),
+                json!({"type":"model","observed":""}),
+                json!({"type":"model","observed":null}),
+                json!({"type":"activity","tool_calls":2}),
+                json!({"type":"activity","tool_calls":17}),
+                json!({"type":"activity","tool_calls":-1}),
+                json!({"type":"activity","tool_calls":1.5}),
+                json!({"type":"activity","tool_calls":"3"}),
+                progress_frame("preparing"),
+            ] {
+                assert!(!feed(&owner, &invalid, &mut result), "{phase:?}: {invalid}");
+            }
+            assert!(feed(&owner, &progress_frame("verifying"), &mut result));
+            assert_eq!(value(&owner.status()), before);
+            assert!(feed(&owner, &progress_frame("cleaning"), &mut result));
+            assert!(!feed(
+                &owner,
+                &json!({"type":"model","observed":model}),
+                &mut result
+            ));
+            assert!(!feed(
+                &owner,
+                &json!({"type":"activity","tool_calls":3}),
+                &mut result
+            ));
+            assert!(!feed(&owner, &progress_frame("running"), &mut result));
+            assert!(!feed(
+                &owner,
+                &result_frame("passed", json!(null), "verified", patch_of("\0")),
+                &mut result
+            ));
+            assert!(feed(
+                &owner,
+                &result_frame("passed", json!(null), "verified", ok_result()),
+                &mut result
+            ));
+            owner.finish(ID, result.unwrap());
+            let end = current(&owner);
+            assert_eq!(
+                (end.outcome, end.cleanup),
+                (Some(Outcome::Cancelled), Cleanup::Verified)
+            );
+            assert!(valid_operation(&end));
+            assert_eq!(end.tool_calls, 0);
+            assert!(end.model.observed.is_none() && end.result.is_none());
+        }
+    }
+}
+
+#[test]
 fn shutdown_requests_cancel_and_force_review_never_claims_cleanup() {
     let (owner, rx) = primed(
         Provider::Claude,
@@ -1684,6 +1772,66 @@ fn cancellation_during_a_run_is_revision_bound_and_drops_late_results() {
 }
 
 #[test]
+fn cancellation_consumes_buffered_observations_before_running_and_keeps_cleanup_verified() {
+    let fixture = Fixture::new();
+    fixture.registry("codex");
+    let root = fixture.resources(&worker("codex", PASS));
+    for (phase, prefix, suffix) in [
+        (Phase::Starting, "", "P('preparing');P('running');"),
+        (Phase::Preparing, "P('preparing');", "P('running');"),
+    ] {
+        for terminal in [
+            "R('cancelled','cancelled','verified',null);",
+            "R('passed',null,'verified',OK);",
+        ] {
+            // A ready marker makes cancellation deterministic even before the
+            // worker's first progress frame. Release its pending observations
+            // only after it has received the native cancellation message.
+            let body = format!("{prefix}const cancelled=CANCELLED();(await import('node:fs')).writeFileSync('ready','');await cancelled;{suffix}M(MODEL);A(1);A(3);P('verifying');P('cleaning');{terminal}");
+            fixture.swap(&root, &worker("codex", &body));
+            let owner = Owner::new();
+            go(&owner, &fixture, &root, ID).unwrap();
+            let ready = fixture.home().join("ready");
+            let deadline = Instant::now() + Duration::from_secs(20);
+            while !ready.exists() {
+                assert!(Instant::now() < deadline, "worker did not become ready");
+                thread::sleep(Duration::from_millis(5));
+            }
+            let before = wait(&owner, phase);
+            let cancelled = owner.cancel(cancel(ID, before.revision)).unwrap();
+            let seen = sample(&owner);
+            let end = wait(&owner, Phase::Finished);
+            assert_eq!(
+                (end.outcome, end.cleanup, end.error_code.as_deref()),
+                (
+                    Some(Outcome::Cancelled),
+                    Cleanup::Verified,
+                    Some("cancelled")
+                ),
+                "{phase:?}: {terminal}"
+            );
+            assert_eq!(end.tool_calls, 0);
+            assert!(end.model.observed.is_none() && end.result.is_none());
+            assert_eq!(end.revision, before.revision + 3);
+            let mut seen = seen.join().unwrap();
+            seen.insert(0, cancelled);
+            assert_monotone(&seen);
+            for status in seen {
+                let operation = status.operation.unwrap();
+                assert!(
+                    matches!(operation.phase, Phase::Cleaning | Phase::Finished)
+                        || operation.phase == phase
+                );
+                assert_eq!(operation.tool_calls, 0);
+                assert!(operation.model.observed.is_none());
+            }
+            drop(owner);
+            fs::remove_file(ready).unwrap();
+        }
+    }
+}
+
+#[test]
 fn cancellation_reports_unverified_cleanup_and_stuck_workers_as_review() {
     let fixture = Fixture::new();
     fixture.registry("codex");
@@ -1766,14 +1914,17 @@ fn deadline_is_enforced_with_an_independent_cleanup_grace() {
     // Cleanup that takes longer than the whole deadline still counts as verified.
     let root = fixture.resources(&worker(
         "codex",
-        "P('preparing');P('running');M(MODEL);A(1);await CANCELLED();await sleep(700);P('cleaning');R('cancelled','cancelled','verified',null);",
+        "P('preparing');P('running');M(MODEL);A(1);await CANCELLED();await sleep(5500);P('cleaning');R('cancelled','cancelled','verified',null);",
     ));
     let owner = Owner::new();
     let limits = Limits {
-        deadline: Duration::from_millis(300),
+        // Include native runtime hashing and Windows process startup in the
+        // budget, then confirm the worker is running before testing expiry.
+        deadline: Duration::from_secs(5),
         grace: Duration::from_secs(20),
     };
     go_with(&owner, &fixture, &root, limits).unwrap();
+    wait(&owner, Phase::Running);
     let late = wait(&owner, Phase::Finished);
     assert_eq!(
         (late.outcome, late.cleanup),
@@ -1786,6 +1937,7 @@ fn deadline_is_enforced_with_an_independent_cleanup_grace() {
     fixture.swap(&root, &worker("codex", "P('preparing');P('running');M(MODEL);A(1);P('verifying');P('cleaning');await CANCELLED();R('passed',null,'verified',OK);"));
     let owner = Owner::new();
     go_with(&owner, &fixture, &root, limits).unwrap();
+    wait(&owner, Phase::Cleaning);
     let late = wait(&owner, Phase::Finished);
     assert_eq!(
         (late.outcome, late.error_code.as_deref()),
@@ -1803,10 +1955,11 @@ fn deadline_is_enforced_with_an_independent_cleanup_grace() {
     );
     let owner = Owner::new();
     let limits = Limits {
-        deadline: Duration::from_millis(300),
+        deadline: Duration::from_secs(5),
         grace: Duration::from_millis(400),
     };
     go_with(&owner, &fixture, &root, limits).unwrap();
+    wait(&owner, Phase::Running);
     let stuck = wait(&owner, Phase::Finished);
     assert_eq!(
         (stuck.outcome, stuck.cleanup),
