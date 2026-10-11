@@ -66,7 +66,8 @@ export function statusLabel(t: UIWords, status: StatusKey): string {
 }
 
 // visible: in the current list. filtered: loaded but hidden by the filters.
-// unloaded: not loaded yet and more pages exist. absent: the whole catalog is
+// unloaded: not loaded yet and the catalog is incomplete (including a paging
+// cap or loop). absent: the whole catalog is
 // loaded and the id is not in it.
 export type RelationState = "visible" | "filtered" | "unloaded" | "absent";
 export type Relation = { id: string; state: RelationState; task?: TaskContract; status: StatusKey };
@@ -82,13 +83,13 @@ export function relationsOf(
   tasks: readonly TaskContract[],
   visibleIds: ReadonlySet<string>,
   statuses: StatusMap,
-  hasMore: boolean,
+  incomplete: boolean,
 ): Relations {
   const byId = new Map<string, TaskContract>();
   for (const item of tasks) if (!byId.has(item.id)) byId.set(item.id, item);
   const describe = (id: string): Relation => {
     const found = byId.get(id);
-    if (!found) return { id, state: hasMore ? "unloaded" : "absent", status: "unknown" };
+    if (!found) return { id, state: incomplete ? "unloaded" : "absent", status: "unknown" };
     return { id, task: found, state: visibleIds.has(id) ? "visible" : "filtered", status: statusOf(statuses, id) };
   };
   const prerequisites = [...new Set(task.depends_on)].filter((id) => id !== task.id).map(describe);
@@ -99,6 +100,6 @@ export function relationsOf(
     prerequisites,
     dependents: dependents.slice(0, MAX_RELATIONS_SHOWN),
     hiddenDependents: Math.max(0, dependents.length - MAX_RELATIONS_SHOWN),
-    dependentsComplete: !hasMore,
+    dependentsComplete: !incomplete,
   };
 }

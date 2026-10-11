@@ -159,6 +159,16 @@ test("HTML-like summaries stay plain text", async ({ page }) => {
   expect(await page.evaluate(() => (window as unknown as { __pwned?: number }).__pwned)).toBeUndefined();
 });
 
+test("checkpoint text uses the server's Unicode character limits", async ({ page }) => {
+  const summary = "😀".repeat(4000);
+  const instructions = "🧭".repeat(12001);
+  await mock(page, { lists: { checkpoints: [checkpoint("cp-unicode", {}, { summary, continuation_instructions: instructions })] } });
+  await openContributions(page, "Kaydedilen ilerleme");
+  await page.locator(".receipt-open").first().click();
+  await expect(page.getByTestId("checkpoint-summary")).toHaveText(summary);
+  await expect(page.getByTestId("checkpoint-instructions")).toHaveText(instructions);
+});
+
 test("resume check sends the selected validated task and strategy and shows the server answer without assuming", async ({ page }) => {
   const seen: URL[] = [];
   await mock(page, { lists: { checkpoints: [checkpoint("cp-opened")] }, resume: (url) => { seen.push(url); return { json: { source: "database", execution_enabled: false, item: checkpoint("cp-other", {}, { summary: "Server latest", base_commit: firstTask.workspace.commit }) } }; } });

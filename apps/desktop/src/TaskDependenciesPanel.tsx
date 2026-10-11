@@ -13,14 +13,15 @@ type PanelProps = {
   visibleIds: ReadonlySet<string>;
   statuses: StatusMap;
   hasMore: boolean;
+  incomplete: boolean;
   loadingMore: boolean;
   t: UIWords;
   onOpen: (id: string) => void;
   onLoadMore: () => void;
 };
 
-export function TaskDependenciesPanel({ task, tasks, visibleIds, statuses, hasMore, loadingMore, t, onOpen, onLoadMore }: PanelProps) {
-  const relations = relationsOf(task, tasks, visibleIds, statuses, hasMore);
+export function TaskDependenciesPanel({ task, tasks, visibleIds, statuses, hasMore, incomplete, loadingMore, t, onOpen, onLoadMore }: PanelProps) {
+  const relations = relationsOf(task, tasks, visibleIds, statuses, incomplete);
   const stateLabel = { visible: t.relVisible, filtered: t.relFiltered, unloaded: t.relUnloaded, absent: t.relAbsent } as const;
   const hint = { visible: "", filtered: t.relFilteredHint, unloaded: t.relUnloadedHint, absent: t.relAbsentHint } as const;
   function item(relation: Relation) {

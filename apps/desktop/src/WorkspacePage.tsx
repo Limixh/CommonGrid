@@ -335,7 +335,7 @@ export function WorkspacePage({ catalog, settings, t, setPage }: WorkspacePagePr
                       <p className="muted-note">{t.noMilestones}</p>
                     )}
                   </div>
-                  <TaskDependenciesPanel task={task} tasks={tasks} visibleIds={visibleIds} statuses={statuses} hasMore={taskMore.hasMore} loadingMore={taskMore.state === "loading"} t={t} onOpen={openRelation} onLoadMore={() => void loadMoreTasks()} />
+                  <TaskDependenciesPanel task={task} tasks={tasks} visibleIds={visibleIds} statuses={statuses} hasMore={taskMore.hasMore} incomplete={taskMore.hasMore || taskMore.capped || taskMore.loop} loadingMore={taskMore.state === "loading"} t={t} onOpen={openRelation} onLoadMore={() => void loadMoreTasks()} />
                   <h4>{t.files}</h4>
                   <div className="file-manifest">
                     {task.workspace.entry_files.map((file) => (

@@ -48,7 +48,11 @@ function count(value: unknown, min = 0): number {
   return value;
 }
 // Free text is displayed verbatim as a text node, never as markup.
-function freeText(value: unknown, max: number): string { if (typeof value !== "string" || value.length > max) bad(); return value; }
+function freeText(value: unknown, max: number): string {
+  // JSON Schema maxLength counts Unicode code points, as does the server.
+  if (typeof value !== "string" || Array.from(value).length > max) bad();
+  return value;
+}
 function label(value: unknown): string { if (typeof value !== "string" || value.length < 1 || value.length > 64) bad(); return value; }
 function unwrap(value: unknown): Record<string, unknown> { return object(object(value).item); }
 

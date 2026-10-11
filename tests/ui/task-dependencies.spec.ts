@@ -190,7 +190,7 @@ test("a repeated task id on a later page is ignored and counted", async ({ page 
 });
 
 test("a server that repeats a cursor or returns nothing new stops paging instead of looping", async ({ page }) => {
-  const a = await make(softwareBase, "t-a");
+  const a = await make(softwareBase, "t-a", { depends_on: ["t-unloaded"] });
   const b = await make(softwareBase, "t-b");
   const c = await make(softwareBase, "t-c");
   const d = await make(softwareBase, "t-d");
@@ -206,6 +206,9 @@ test("a server that repeats a cursor or returns nothing new stops paging instead
   await expect(page.locator(".task-card")).toHaveCount(4);
   await expect(page.getByRole("alert").filter({ hasText: "sayfalama durduruldu" })).toBeVisible();
   await expect(loadMore(page)).toHaveCount(0);
+  await expect(panel(page).locator("[data-relation-state=unloaded]")).toContainText("t-unloaded");
+  await expect(panel(page).locator("[data-relation-state=absent]")).toHaveCount(0);
+  await expect(panel(page)).toContainText("yüklenmemiş sayfalardaki bağımlı");
   expect(counts).toEqual({ "": 1, "t-b": 1, "t-c": 1 });
 });
 
@@ -226,7 +229,7 @@ test("a page with no new records but a cursor also stops paging", async ({ page 
 test("paging is bounded at 20 pages", async ({ page }) => {
   const pages: Record<string, Reply> = {};
   const all: Json[] = [];
-  for (let i = 0; i < 22; i++) all.push(await make(softwareBase, `t-${String(i).padStart(2, "0")}`));
+  for (let i = 0; i < 22; i++) all.push(await make(softwareBase, `t-${String(i).padStart(2, "0")}`, i === 0 ? { depends_on: ["t-21"] } : {}));
   for (let i = 0; i < 22; i++) pages[i === 0 ? "" : all[i - 1].id] = { items: [all[i]], next_cursor: all[i].id };
   const { counts } = await mock(page, { tasks: pages });
   await openCatalog(page, 1);
@@ -236,6 +239,9 @@ test("paging is bounded at 20 pages", async ({ page }) => {
   }
   await expect(loadMore(page)).toHaveCount(0);
   await expect(page.getByText("en fazla 1000 kayıt ve 20 sayfayla sınırlıdır")).toBeVisible();
+  await expect(panel(page).locator("[data-relation-state=unloaded]")).toContainText("t-21");
+  await expect(panel(page).locator("[data-relation-state=absent]")).toHaveCount(0);
+  await expect(panel(page)).toContainText("yüklenmemiş sayfalardaki bağımlı");
   expect(Object.keys(counts)).toHaveLength(20);
 });
 
