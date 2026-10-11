@@ -64,6 +64,14 @@ Gerçek hesabı kullanan komutlar olağan test paketinde çalışmaz. Testte Cod
 
 Ürün birim testleri aynı anda en fazla dört test dosyası çalıştırır; çok sayıda Node sürecinin süre sınırı testleri üzerindeki yükünü azaltır. Native süreç testlerini tek tek çalıştırmak için `node scripts/rust.mjs test --locked -- --test-threads=1` kullanılabilir. Bu seçenekler uygulamanın görev veya temizleme süre sınırlarını değiştirmez.
 
+## GitHub üzerinde CI
+
+CI (sürekli entegrasyon), değişikliklerin GitHub makinelerinde derlenip test edilmesidir. Foundations; sözleşme/API/arayüz, PostgreSQL, artifact, Docker/CLI fixture ve Temporal kontrollerini, ayrıca Linux/Windows/macOS masaüstü test ve derlemelerini çalıştırır. Yerel kontrollerin kaçırabileceği platform farklarını yakalar; gerçek AI hesabı veya model çağrısı yapmaz.
+
+2026-10-12 itibarıyla Actions dakika kotası dolduğu için Foundations GitHub üzerinde geçici olarak devre dışıdır. Repodaki tetikleyici yalnız `workflow_dispatch` olarak korunur; push veya pull request otomatik koşu başlatmaz. Test işleri silinmedi. Yerelde `npm run check`, `npm run test:db`, `npm run test:ui` ve gerektiğinde native/Docker kontrolleri çalıştırılmaya devam edilir.
+
+Kota kullanılabilir olduğunda yeniden açmak için, aktif geliştirme dallarına da bu CI ayarını aktarın; ardından GitHub → Actions → Foundations → Enable workflow ve Run workflow ile `main` üzerinde elle başlatın. Workflow devre dışıyken elle de başlatılamaz. Uzak CI çalıştırılmadığında yerel başarı, Linux/macOS CI kabulü olarak raporlanmaz.
+
 ## Kod ve değişiklik disiplini
 
 Yeniden kullanılabilir CLI runtime/control, protokol/kota, kalıcı operation claim, faz günlüğü ve salt okunur kurtarma projection yardımcıları packages/agent-adapters içinde; gerçek hesap/Docker deneylerinin yöneticileri spike içinde kalır. Ürün kodu spike dosyalarını doğrudan içe aktarmamalıdır. Deneme testi ayrı isimle çalışır; npm run check güvenlik regresyonlarını da kapsar.

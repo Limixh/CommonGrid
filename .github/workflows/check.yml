@@ -1,5 +1,8 @@
 name: Foundations
-on: [push, pull_request]
+# Hosted CI is paused while the account's Actions minute allowance is exhausted.
+# After re-enabling Foundations in GitHub, run it manually when quota is available.
+on:
+  workflow_dispatch: {}
 permissions:
   contents: read
 jobs:
