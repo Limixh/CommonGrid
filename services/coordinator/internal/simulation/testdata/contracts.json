@@ -1,0 +1,988 @@
+{
+  "execution_enabled": false,
+  "source": "simulation-fixture",
+  "tasks": [
+    {
+      "agents": {
+        "excluded": [],
+        "preferred": [
+          "codex"
+        ]
+      },
+      "contract_hash": "6b285cd9642f1ad8ec3e9975fcd674e9935db8ffd67a28814e308dfe7effa496",
+      "depends_on": [],
+      "description": "Her a b : Nat için a + b = b + a teoremini, sabitlenmiş hedef tanımını değiştirmeden ispatla.",
+      "difficulty": "easy",
+      "environment": {
+        "cpu": 2,
+        "image": "commongrid/lean-fixture@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "memory_mb": 4096,
+        "time_limit_sec": 600
+      },
+      "handoff": {
+        "allow_workspace_snapshot": true,
+        "checkpoint_interval_sec": 120,
+        "enabled": true,
+        "max_checkpoints": 10,
+        "resume_from_latest": true
+      },
+      "id": "sim-root",
+      "kind": "solve",
+      "node_id": "root",
+      "parallelism": {
+        "cap": 3,
+        "initial": 1,
+        "mode": "independent"
+      },
+      "progress": {
+        "milestones": [
+          {
+            "check": "zero_add",
+            "critical": true,
+            "id": "base",
+            "name": "Taban durumu",
+            "weight": 0.3
+          },
+          {
+            "check": "succ_add",
+            "critical": true,
+            "id": "step",
+            "name": "Tümevarım adımı",
+            "weight": 0.7
+          }
+        ]
+      },
+      "project_id": "proof-lab",
+      "prompt": "Challenge.lean içindeki add_comm hedefini Nat tümevarımıyla ispatla. Yeni aksiyom, sorry veya hedef değişikliği kabul edilmez.",
+      "review": {
+        "policy": "auto",
+        "required_approvals": 0
+      },
+      "reward_points": 100,
+      "schema_version": "1.0",
+      "strategies": [
+        {
+          "id": "induction",
+          "instructions": "İlk değişkende tümevarım yap; sıfır ve ardıl yardımcı lemmalarını kullan."
+        }
+      ],
+      "task_version": 1,
+      "title": "Simulation root goal",
+      "type": "lean",
+      "verification": {
+        "forbidden_patterns": [
+          "sorry",
+          "axiom"
+        ],
+        "local_precheck": "lake build",
+        "output_schema": "lean-artifact/1.0",
+        "profile": "lean-proof",
+        "server_command": "commongrid-lean-check Main.lean"
+      },
+      "workspace": {
+        "commit": "0000000000000000000000000000000000000000",
+        "entry_files": [
+          "Challenge.lean",
+          "Main.lean"
+        ],
+        "repo": "https://example.com/commongrid-fixtures.git",
+        "writable_paths": [
+          "Main.lean"
+        ]
+      }
+    },
+    {
+      "agents": {
+        "excluded": [],
+        "preferred": [
+          "codex"
+        ]
+      },
+      "contract_hash": "8c0ca4b799bb7bfc8ab6d431d1f899001ca6fa03444dc71bb7dd93d73fa6a0dd",
+      "depends_on": [],
+      "description": "Her a b : Nat için a + b = b + a teoremini, sabitlenmiş hedef tanımını değiştirmeden ispatla.",
+      "difficulty": "easy",
+      "environment": {
+        "cpu": 2,
+        "image": "commongrid/lean-fixture@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "memory_mb": 4096,
+        "time_limit_sec": 600
+      },
+      "handoff": {
+        "allow_workspace_snapshot": true,
+        "checkpoint_interval_sec": 120,
+        "enabled": true,
+        "max_checkpoints": 10,
+        "resume_from_latest": true
+      },
+      "id": "sim-a",
+      "kind": "solve",
+      "node_id": "a",
+      "parallelism": {
+        "cap": 3,
+        "initial": 1,
+        "mode": "independent"
+      },
+      "progress": {
+        "milestones": [
+          {
+            "check": "zero_add",
+            "critical": true,
+            "id": "base",
+            "name": "Taban durumu",
+            "weight": 0.3
+          },
+          {
+            "check": "succ_add",
+            "critical": true,
+            "id": "step",
+            "name": "Tümevarım adımı",
+            "weight": 0.7
+          }
+        ]
+      },
+      "project_id": "proof-lab",
+      "prompt": "Challenge.lean içindeki add_comm hedefini Nat tümevarımıyla ispatla. Yeni aksiyom, sorry veya hedef değişikliği kabul edilmez.",
+      "review": {
+        "policy": "auto",
+        "required_approvals": 0
+      },
+      "reward_points": 100,
+      "schema_version": "1.0",
+      "strategies": [
+        {
+          "id": "induction",
+          "instructions": "İlk değişkende tümevarım yap; sıfır ve ardıl yardımcı lemmalarını kullan."
+        }
+      ],
+      "task_version": 1,
+      "title": "Simulation branch A",
+      "type": "lean",
+      "verification": {
+        "forbidden_patterns": [
+          "sorry",
+          "axiom"
+        ],
+        "local_precheck": "lake build",
+        "output_schema": "lean-artifact/1.0",
+        "profile": "lean-proof",
+        "server_command": "commongrid-lean-check Main.lean"
+      },
+      "workspace": {
+        "commit": "0000000000000000000000000000000000000000",
+        "entry_files": [
+          "Challenge.lean",
+          "Main.lean"
+        ],
+        "repo": "https://example.com/commongrid-fixtures.git",
+        "writable_paths": [
+          "Main.lean"
+        ]
+      }
+    },
+    {
+      "agents": {
+        "excluded": [],
+        "preferred": [
+          "codex"
+        ]
+      },
+      "contract_hash": "842d6c83c774d701099147b07013618dc259beb3757ee2a3c46e88e2abf77ad7",
+      "depends_on": [],
+      "description": "Her a b : Nat için a + b = b + a teoremini, sabitlenmiş hedef tanımını değiştirmeden ispatla.",
+      "difficulty": "easy",
+      "environment": {
+        "cpu": 2,
+        "image": "commongrid/lean-fixture@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "memory_mb": 4096,
+        "time_limit_sec": 600
+      },
+      "handoff": {
+        "allow_workspace_snapshot": true,
+        "checkpoint_interval_sec": 120,
+        "enabled": true,
+        "max_checkpoints": 10,
+        "resume_from_latest": true
+      },
+      "id": "sim-b",
+      "kind": "solve",
+      "node_id": "b",
+      "parallelism": {
+        "cap": 3,
+        "initial": 1,
+        "mode": "independent"
+      },
+      "progress": {
+        "milestones": [
+          {
+            "check": "zero_add",
+            "critical": true,
+            "id": "base",
+            "name": "Taban durumu",
+            "weight": 0.3
+          },
+          {
+            "check": "succ_add",
+            "critical": true,
+            "id": "step",
+            "name": "Tümevarım adımı",
+            "weight": 0.7
+          }
+        ]
+      },
+      "project_id": "proof-lab",
+      "prompt": "Challenge.lean içindeki add_comm hedefini Nat tümevarımıyla ispatla. Yeni aksiyom, sorry veya hedef değişikliği kabul edilmez.",
+      "review": {
+        "policy": "auto",
+        "required_approvals": 0
+      },
+      "reward_points": 100,
+      "schema_version": "1.0",
+      "strategies": [
+        {
+          "id": "induction",
+          "instructions": "İlk değişkende tümevarım yap; sıfır ve ardıl yardımcı lemmalarını kullan."
+        }
+      ],
+      "task_version": 1,
+      "title": "Simulation branch B",
+      "type": "lean",
+      "verification": {
+        "forbidden_patterns": [
+          "sorry",
+          "axiom"
+        ],
+        "local_precheck": "lake build",
+        "output_schema": "lean-artifact/1.0",
+        "profile": "lean-proof",
+        "server_command": "commongrid-lean-check Main.lean"
+      },
+      "workspace": {
+        "commit": "0000000000000000000000000000000000000000",
+        "entry_files": [
+          "Challenge.lean",
+          "Main.lean"
+        ],
+        "repo": "https://example.com/commongrid-fixtures.git",
+        "writable_paths": [
+          "Main.lean"
+        ]
+      }
+    },
+    {
+      "agents": {
+        "excluded": [],
+        "preferred": [
+          "codex"
+        ]
+      },
+      "contract_hash": "6befbf462a2be3113a5654ff712d50a116c3c21745beed6e8e671d11f77bbd84",
+      "depends_on": [],
+      "description": "Her a b : Nat için a + b = b + a teoremini, sabitlenmiş hedef tanımını değiştirmeden ispatla.",
+      "difficulty": "easy",
+      "environment": {
+        "cpu": 2,
+        "image": "commongrid/lean-fixture@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "memory_mb": 4096,
+        "time_limit_sec": 600
+      },
+      "handoff": {
+        "allow_workspace_snapshot": true,
+        "checkpoint_interval_sec": 120,
+        "enabled": true,
+        "max_checkpoints": 10,
+        "resume_from_latest": true
+      },
+      "id": "sim-c",
+      "kind": "solve",
+      "node_id": "c",
+      "parallelism": {
+        "cap": 3,
+        "initial": 1,
+        "mode": "independent"
+      },
+      "progress": {
+        "milestones": [
+          {
+            "check": "zero_add",
+            "critical": true,
+            "id": "base",
+            "name": "Taban durumu",
+            "weight": 0.3
+          },
+          {
+            "check": "succ_add",
+            "critical": true,
+            "id": "step",
+            "name": "Tümevarım adımı",
+            "weight": 0.7
+          }
+        ]
+      },
+      "project_id": "proof-lab",
+      "prompt": "Challenge.lean içindeki add_comm hedefini Nat tümevarımıyla ispatla. Yeni aksiyom, sorry veya hedef değişikliği kabul edilmez.",
+      "review": {
+        "policy": "auto",
+        "required_approvals": 0
+      },
+      "reward_points": 100,
+      "schema_version": "1.0",
+      "strategies": [
+        {
+          "id": "induction",
+          "instructions": "İlk değişkende tümevarım yap; sıfır ve ardıl yardımcı lemmalarını kullan."
+        }
+      ],
+      "task_version": 1,
+      "title": "Simulation branch C",
+      "type": "lean",
+      "verification": {
+        "forbidden_patterns": [
+          "sorry",
+          "axiom"
+        ],
+        "local_precheck": "lake build",
+        "output_schema": "lean-artifact/1.0",
+        "profile": "lean-proof",
+        "server_command": "commongrid-lean-check Main.lean"
+      },
+      "workspace": {
+        "commit": "0000000000000000000000000000000000000000",
+        "entry_files": [
+          "Challenge.lean",
+          "Main.lean"
+        ],
+        "repo": "https://example.com/commongrid-fixtures.git",
+        "writable_paths": [
+          "Main.lean"
+        ]
+      }
+    },
+    {
+      "agents": {
+        "excluded": [],
+        "preferred": [
+          "codex"
+        ]
+      },
+      "contract_hash": "8c1f77cf59ef9122a4155b0a98b45df849405c93dc2e248223d807c99137ad5b",
+      "depends_on": [],
+      "description": "Her a b : Nat için a + b = b + a teoremini, sabitlenmiş hedef tanımını değiştirmeden ispatla.",
+      "difficulty": "easy",
+      "environment": {
+        "cpu": 2,
+        "image": "commongrid/lean-fixture@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "memory_mb": 4096,
+        "time_limit_sec": 600
+      },
+      "handoff": {
+        "allow_workspace_snapshot": true,
+        "checkpoint_interval_sec": 120,
+        "enabled": true,
+        "max_checkpoints": 10,
+        "resume_from_latest": true
+      },
+      "id": "sim-trap",
+      "kind": "solve",
+      "node_id": "trap",
+      "parallelism": {
+        "cap": 3,
+        "initial": 1,
+        "mode": "independent"
+      },
+      "progress": {
+        "milestones": [
+          {
+            "check": "zero_add",
+            "critical": true,
+            "id": "base",
+            "name": "Taban durumu",
+            "weight": 0.3
+          },
+          {
+            "check": "succ_add",
+            "critical": true,
+            "id": "step",
+            "name": "Tümevarım adımı",
+            "weight": 0.7
+          }
+        ]
+      },
+      "project_id": "proof-lab",
+      "prompt": "Challenge.lean içindeki add_comm hedefini Nat tümevarımıyla ispatla. Yeni aksiyom, sorry veya hedef değişikliği kabul edilmez.",
+      "review": {
+        "policy": "auto",
+        "required_approvals": 0
+      },
+      "reward_points": 100,
+      "schema_version": "1.0",
+      "strategies": [
+        {
+          "id": "induction",
+          "instructions": "İlk değişkende tümevarım yap; sıfır ve ardıl yardımcı lemmalarını kullan."
+        }
+      ],
+      "task_version": 1,
+      "title": "Simulation trap branch",
+      "type": "lean",
+      "verification": {
+        "forbidden_patterns": [
+          "sorry",
+          "axiom"
+        ],
+        "local_precheck": "lake build",
+        "output_schema": "lean-artifact/1.0",
+        "profile": "lean-proof",
+        "server_command": "commongrid-lean-check Main.lean"
+      },
+      "workspace": {
+        "commit": "0000000000000000000000000000000000000000",
+        "entry_files": [
+          "Challenge.lean",
+          "Main.lean"
+        ],
+        "repo": "https://example.com/commongrid-fixtures.git",
+        "writable_paths": [
+          "Main.lean"
+        ]
+      }
+    },
+    {
+      "agents": {
+        "excluded": [],
+        "preferred": [
+          "codex"
+        ]
+      },
+      "contract_hash": "03188bb95b6e4a6bd71e8f6767f83fce272f5f2f68cc525ea762d7d97ccec220",
+      "depends_on": [],
+      "description": "Her a b : Nat için a + b = b + a teoremini, sabitlenmiş hedef tanımını değiştirmeden ispatla.",
+      "difficulty": "easy",
+      "environment": {
+        "cpu": 2,
+        "image": "commongrid/lean-fixture@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "memory_mb": 4096,
+        "time_limit_sec": 600
+      },
+      "handoff": {
+        "allow_workspace_snapshot": false,
+        "checkpoint_interval_sec": 120,
+        "enabled": false,
+        "max_checkpoints": 10,
+        "resume_from_latest": false
+      },
+      "id": "sim-nohandoff",
+      "kind": "solve",
+      "node_id": "nohandoff",
+      "parallelism": {
+        "cap": 3,
+        "initial": 1,
+        "mode": "independent"
+      },
+      "progress": {
+        "milestones": [
+          {
+            "check": "zero_add",
+            "critical": true,
+            "id": "base",
+            "name": "Taban durumu",
+            "weight": 0.3
+          },
+          {
+            "check": "succ_add",
+            "critical": true,
+            "id": "step",
+            "name": "Tümevarım adımı",
+            "weight": 0.7
+          }
+        ]
+      },
+      "project_id": "proof-lab",
+      "prompt": "Challenge.lean içindeki add_comm hedefini Nat tümevarımıyla ispatla. Yeni aksiyom, sorry veya hedef değişikliği kabul edilmez.",
+      "review": {
+        "policy": "auto",
+        "required_approvals": 0
+      },
+      "reward_points": 100,
+      "schema_version": "1.0",
+      "strategies": [
+        {
+          "id": "induction",
+          "instructions": "İlk değişkende tümevarım yap; sıfır ve ardıl yardımcı lemmalarını kullan."
+        }
+      ],
+      "task_version": 1,
+      "title": "Simulation branch without handoff",
+      "type": "lean",
+      "verification": {
+        "forbidden_patterns": [
+          "sorry",
+          "axiom"
+        ],
+        "local_precheck": "lake build",
+        "output_schema": "lean-artifact/1.0",
+        "profile": "lean-proof",
+        "server_command": "commongrid-lean-check Main.lean"
+      },
+      "workspace": {
+        "commit": "0000000000000000000000000000000000000000",
+        "entry_files": [
+          "Challenge.lean",
+          "Main.lean"
+        ],
+        "repo": "https://example.com/commongrid-fixtures.git",
+        "writable_paths": [
+          "Main.lean"
+        ]
+      }
+    },
+    {
+      "agents": {
+        "excluded": [],
+        "preferred": [
+          "codex"
+        ]
+      },
+      "contract_hash": "d38592d90e62cd31fbaa990b02fe0fb1538f3c2cc20ae372912b436781755cc4",
+      "depends_on": [],
+      "description": "Her a b : Nat için a + b = b + a teoremini, sabitlenmiş hedef tanımını değiştirmeden ispatla.",
+      "difficulty": "easy",
+      "environment": {
+        "cpu": 2,
+        "image": "commongrid/lean-fixture@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "memory_mb": 4096,
+        "time_limit_sec": 600
+      },
+      "handoff": {
+        "allow_workspace_snapshot": true,
+        "checkpoint_interval_sec": 120,
+        "enabled": true,
+        "max_checkpoints": 10,
+        "resume_from_latest": true
+      },
+      "id": "sim-ma",
+      "kind": "solve",
+      "node_id": "ma",
+      "parallelism": {
+        "cap": 3,
+        "initial": 1,
+        "mode": "independent"
+      },
+      "progress": {
+        "milestones": [
+          {
+            "check": "zero_add",
+            "critical": true,
+            "id": "base",
+            "name": "Taban durumu",
+            "weight": 0.3
+          },
+          {
+            "check": "succ_add",
+            "critical": true,
+            "id": "step",
+            "name": "Tümevarım adımı",
+            "weight": 0.7
+          }
+        ]
+      },
+      "project_id": "proof-lab",
+      "prompt": "Challenge.lean içindeki add_comm hedefini Nat tümevarımıyla ispatla. Yeni aksiyom, sorry veya hedef değişikliği kabul edilmez.",
+      "review": {
+        "policy": "maintainer",
+        "required_approvals": 1
+      },
+      "reward_points": 100,
+      "schema_version": "1.0",
+      "strategies": [
+        {
+          "id": "induction",
+          "instructions": "İlk değişkende tümevarım yap; sıfır ve ardıl yardımcı lemmalarını kullan."
+        }
+      ],
+      "task_version": 1,
+      "title": "Simulation reviewed branch A",
+      "type": "lean",
+      "verification": {
+        "forbidden_patterns": [
+          "sorry",
+          "axiom"
+        ],
+        "local_precheck": "lake build",
+        "output_schema": "lean-artifact/1.0",
+        "profile": "lean-proof",
+        "server_command": "commongrid-lean-check Main.lean"
+      },
+      "workspace": {
+        "commit": "0000000000000000000000000000000000000000",
+        "entry_files": [
+          "Challenge.lean",
+          "Main.lean"
+        ],
+        "repo": "https://example.com/commongrid-fixtures.git",
+        "writable_paths": [
+          "Main.lean"
+        ]
+      }
+    },
+    {
+      "agents": {
+        "excluded": [],
+        "preferred": [
+          "codex"
+        ]
+      },
+      "contract_hash": "4eeb807c68cf0574369a4a74950661131f44dc3ad45dd8d73ab87ec68db37b9c",
+      "depends_on": [],
+      "description": "Her a b : Nat için a + b = b + a teoremini, sabitlenmiş hedef tanımını değiştirmeden ispatla.",
+      "difficulty": "easy",
+      "environment": {
+        "cpu": 2,
+        "image": "commongrid/lean-fixture@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "memory_mb": 4096,
+        "time_limit_sec": 600
+      },
+      "handoff": {
+        "allow_workspace_snapshot": true,
+        "checkpoint_interval_sec": 120,
+        "enabled": true,
+        "max_checkpoints": 10,
+        "resume_from_latest": true
+      },
+      "id": "sim-mb",
+      "kind": "solve",
+      "node_id": "mb",
+      "parallelism": {
+        "cap": 3,
+        "initial": 1,
+        "mode": "independent"
+      },
+      "progress": {
+        "milestones": [
+          {
+            "check": "zero_add",
+            "critical": true,
+            "id": "base",
+            "name": "Taban durumu",
+            "weight": 0.3
+          },
+          {
+            "check": "succ_add",
+            "critical": true,
+            "id": "step",
+            "name": "Tümevarım adımı",
+            "weight": 0.7
+          }
+        ]
+      },
+      "project_id": "proof-lab",
+      "prompt": "Challenge.lean içindeki add_comm hedefini Nat tümevarımıyla ispatla. Yeni aksiyom, sorry veya hedef değişikliği kabul edilmez.",
+      "review": {
+        "policy": "maintainer",
+        "required_approvals": 1
+      },
+      "reward_points": 100,
+      "schema_version": "1.0",
+      "strategies": [
+        {
+          "id": "induction",
+          "instructions": "İlk değişkende tümevarım yap; sıfır ve ardıl yardımcı lemmalarını kullan."
+        }
+      ],
+      "task_version": 1,
+      "title": "Simulation reviewed branch B",
+      "type": "lean",
+      "verification": {
+        "forbidden_patterns": [
+          "sorry",
+          "axiom"
+        ],
+        "local_precheck": "lake build",
+        "output_schema": "lean-artifact/1.0",
+        "profile": "lean-proof",
+        "server_command": "commongrid-lean-check Main.lean"
+      },
+      "workspace": {
+        "commit": "0000000000000000000000000000000000000000",
+        "entry_files": [
+          "Challenge.lean",
+          "Main.lean"
+        ],
+        "repo": "https://example.com/commongrid-fixtures.git",
+        "writable_paths": [
+          "Main.lean"
+        ]
+      }
+    },
+    {
+      "agents": {
+        "excluded": [],
+        "preferred": [
+          "codex"
+        ]
+      },
+      "contract_hash": "8ee0ac51c6354a3d3c1ce627c9be1be02294da59d4802e46ede73460f4868360",
+      "depends_on": [],
+      "description": "Her a b : Nat için a + b = b + a teoremini, sabitlenmiş hedef tanımını değiştirmeden ispatla.",
+      "difficulty": "easy",
+      "environment": {
+        "cpu": 2,
+        "image": "commongrid/lean-fixture@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "memory_mb": 4096,
+        "time_limit_sec": 600
+      },
+      "handoff": {
+        "allow_workspace_snapshot": true,
+        "checkpoint_interval_sec": 120,
+        "enabled": true,
+        "max_checkpoints": 10,
+        "resume_from_latest": true
+      },
+      "id": "sim-mc",
+      "kind": "solve",
+      "node_id": "mc",
+      "parallelism": {
+        "cap": 3,
+        "initial": 1,
+        "mode": "independent"
+      },
+      "progress": {
+        "milestones": [
+          {
+            "check": "zero_add",
+            "critical": true,
+            "id": "base",
+            "name": "Taban durumu",
+            "weight": 0.3
+          },
+          {
+            "check": "succ_add",
+            "critical": true,
+            "id": "step",
+            "name": "Tümevarım adımı",
+            "weight": 0.7
+          }
+        ]
+      },
+      "project_id": "proof-lab",
+      "prompt": "Challenge.lean içindeki add_comm hedefini Nat tümevarımıyla ispatla. Yeni aksiyom, sorry veya hedef değişikliği kabul edilmez.",
+      "review": {
+        "policy": "maintainer",
+        "required_approvals": 1
+      },
+      "reward_points": 100,
+      "schema_version": "1.0",
+      "strategies": [
+        {
+          "id": "induction",
+          "instructions": "İlk değişkende tümevarım yap; sıfır ve ardıl yardımcı lemmalarını kullan."
+        }
+      ],
+      "task_version": 1,
+      "title": "Simulation reviewed branch C",
+      "type": "lean",
+      "verification": {
+        "forbidden_patterns": [
+          "sorry",
+          "axiom"
+        ],
+        "local_precheck": "lake build",
+        "output_schema": "lean-artifact/1.0",
+        "profile": "lean-proof",
+        "server_command": "commongrid-lean-check Main.lean"
+      },
+      "workspace": {
+        "commit": "0000000000000000000000000000000000000000",
+        "entry_files": [
+          "Challenge.lean",
+          "Main.lean"
+        ],
+        "repo": "https://example.com/commongrid-fixtures.git",
+        "writable_paths": [
+          "Main.lean"
+        ]
+      }
+    },
+    {
+      "agents": {
+        "excluded": [],
+        "preferred": [
+          "codex"
+        ]
+      },
+      "contract_hash": "a3eea16423e498c7494cae2badde860d701e23f1e0a5bb8e8242db2af82dc966",
+      "depends_on": [],
+      "description": "Sıralı bir dizide ilk eşleşen öğeyi bulan lower_bound fonksiyonunun sınır koşullarını düzelt.",
+      "difficulty": "medium",
+      "environment": {
+        "cpu": 2,
+        "image": "commongrid/software-fixture@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "memory_mb": 2048,
+        "time_limit_sec": 600
+      },
+      "handoff": {
+        "allow_workspace_snapshot": true,
+        "checkpoint_interval_sec": 120,
+        "enabled": true,
+        "max_checkpoints": 10,
+        "resume_from_latest": true
+      },
+      "id": "sim-seq",
+      "kind": "solve",
+      "node_id": "seq",
+      "parallelism": {
+        "cap": 1,
+        "initial": 1,
+        "mode": "exclusive"
+      },
+      "progress": {
+        "milestones": [
+          {
+            "check": "npm test -- edges",
+            "critical": true,
+            "id": "edges",
+            "name": "Sınır koşulları",
+            "weight": 0.4
+          },
+          {
+            "check": "npm test -- duplicates",
+            "critical": true,
+            "id": "duplicates",
+            "name": "Tekrarlayan değerler",
+            "weight": 0.6
+          }
+        ]
+      },
+      "project_id": "runtime-lab",
+      "prompt": "src/search.ts içindeki lower_bound fonksiyonunu düzelt. Boş dizi, tekrar eden değerler ve bulunamayan hedefler için mevcut testleri geçir. Test dosyalarını değiştirme.",
+      "review": {
+        "policy": "maintainer",
+        "required_approvals": 1
+      },
+      "reward_points": 120,
+      "schema_version": "1.0",
+      "strategies": [
+        {
+          "id": "invariant",
+          "instructions": "Yarı açık [lo, hi) aralığının invariantını koru; önce en küçük karşı örneği bul."
+        },
+        {
+          "id": "boundary-first",
+          "instructions": "Önce boş dizi ve uç değerleri incele, ardından tekrar eden değerleri ele al."
+        }
+      ],
+      "task_version": 1,
+      "title": "Simulation sequential software task",
+      "type": "software",
+      "verification": {
+        "forbidden_patterns": [],
+        "local_precheck": "npm test",
+        "output_schema": "software-diff/1.0",
+        "profile": "software-tests",
+        "server_command": "npm test"
+      },
+      "workspace": {
+        "commit": "0000000000000000000000000000000000000000",
+        "entry_files": [
+          "src/search.ts",
+          "tests/search.test.ts"
+        ],
+        "repo": "https://example.com/commongrid-fixtures.git",
+        "writable_paths": [
+          "src/search.ts"
+        ]
+      }
+    },
+    {
+      "agents": {
+        "excluded": [],
+        "preferred": [
+          "codex"
+        ]
+      },
+      "contract_hash": "a8c3b74d28a104db6d9fdd11539c72ba12a7b6a05ae63cd40c848b256b621bdc",
+      "depends_on": [
+        "sim-a"
+      ],
+      "description": "Her a b : Nat için a + b = b + a teoremini, sabitlenmiş hedef tanımını değiştirmeden ispatla.",
+      "difficulty": "easy",
+      "environment": {
+        "cpu": 2,
+        "image": "commongrid/lean-fixture@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "memory_mb": 4096,
+        "time_limit_sec": 600
+      },
+      "handoff": {
+        "allow_workspace_snapshot": true,
+        "checkpoint_interval_sec": 120,
+        "enabled": true,
+        "max_checkpoints": 10,
+        "resume_from_latest": true
+      },
+      "id": "sim-dep",
+      "kind": "solve",
+      "node_id": "dep",
+      "parallelism": {
+        "cap": 3,
+        "initial": 1,
+        "mode": "independent"
+      },
+      "progress": {
+        "milestones": [
+          {
+            "check": "zero_add",
+            "critical": true,
+            "id": "base",
+            "name": "Taban durumu",
+            "weight": 0.3
+          },
+          {
+            "check": "succ_add",
+            "critical": true,
+            "id": "step",
+            "name": "Tümevarım adımı",
+            "weight": 0.7
+          }
+        ]
+      },
+      "project_id": "proof-lab",
+      "prompt": "Challenge.lean içindeki add_comm hedefini Nat tümevarımıyla ispatla. Yeni aksiyom, sorry veya hedef değişikliği kabul edilmez.",
+      "review": {
+        "policy": "auto",
+        "required_approvals": 0
+      },
+      "reward_points": 100,
+      "schema_version": "1.0",
+      "strategies": [
+        {
+          "id": "induction",
+          "instructions": "İlk değişkende tümevarım yap; sıfır ve ardıl yardımcı lemmalarını kullan."
+        }
+      ],
+      "task_version": 1,
+      "title": "Simulation task needing sim-a first",
+      "type": "lean",
+      "verification": {
+        "forbidden_patterns": [
+          "sorry",
+          "axiom"
+        ],
+        "local_precheck": "lake build",
+        "output_schema": "lean-artifact/1.0",
+        "profile": "lean-proof",
+        "server_command": "commongrid-lean-check Main.lean"
+      },
+      "workspace": {
+        "commit": "0000000000000000000000000000000000000000",
+        "entry_files": [
+          "Challenge.lean",
+          "Main.lean"
+        ],
+        "repo": "https://example.com/commongrid-fixtures.git",
+        "writable_paths": [
+          "Main.lean"
+        ]
+      }
+    }
+  ]
+}

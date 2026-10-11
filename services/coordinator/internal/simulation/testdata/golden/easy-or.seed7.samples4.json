@@ -1,0 +1,496 @@
+{
+  "format": "commongrid.simulation.report",
+  "report_version": "1.0",
+  "disclaimer": "Synthetic simulation of scheduling policies. It does not measure real model success or efficiency, real volunteer behaviour or real cost, and it is not product acceptance.",
+  "seed": 7,
+  "scenario": {
+    "id": "easy-or",
+    "title": "Kolay OR",
+    "format_version": "1.0",
+    "sha256": "e279d255a0c45fcfb9f084619ccbfb5586c09bf16c7e438cad077f66cf3c841e",
+    "nodes": 4,
+    "leaves": 3,
+    "volunteers": 3
+  },
+  "budget": {
+    "total_agent_sec": 6000,
+    "total_agent_hours": 1.666667
+  },
+  "samples": 4,
+  "worlds": [
+    {
+      "sample": 0,
+      "digest": "3cc2021c17c67e8e314a1bd1f9541f12f8d22ba64256ae032654c3dc54285416"
+    },
+    {
+      "sample": 1,
+      "digest": "dda23fd37cb4f0ad62199f8468457f6a45e95cc5ab2f202b02ff032cb840b030"
+    },
+    {
+      "sample": 2,
+      "digest": "af05eb188ca3d15e3e00866f13f29085e8bffcc3e5c55dc7f1cd7d6b516d4f8b"
+    },
+    {
+      "sample": 3,
+      "digest": "2d28960ea0268718a5acf493c5d8254c64d21769149400893b4916aa20f9e690"
+    }
+  ],
+  "policies": [
+    {
+      "policy": "single",
+      "samples": 4,
+      "solved_runs": 4,
+      "unsolved_runs": 0,
+      "solve_rate": 1,
+      "end_reasons": {
+        "solved": 4
+      },
+      "agent_hours_total": 0.480278,
+      "agent_hours_per_solved": 0.120069,
+      "wall_time_sec_solved_runs": {
+        "count": 4,
+        "mean": 432.25,
+        "median": 399.5,
+        "max": 690
+      },
+      "attempts": {
+        "started": 12,
+        "failed": 4,
+        "failed_by_reason": {
+          "agent_failed": 4,
+          "interrupted": 0,
+          "provider_outage": 0,
+          "review_rejected": 0,
+          "shared_profile_flaw": 0,
+          "timeout": 0,
+          "verification_rejected": 0
+        },
+        "failed_rate": 0.5,
+        "useful": 4,
+        "duplicate": 0,
+        "superseded": 0,
+        "cancelled": 4,
+        "candidates_submitted": 4
+      },
+      "queues": {
+        "verification_wait_sec": {
+          "count": 4,
+          "mean": 0,
+          "max": 0
+        },
+        "review_wait_sec": {
+          "count": 0,
+          "mean": "not_measured",
+          "max": "not_measured"
+        },
+        "resume_wait_sec": {
+          "count": 0,
+          "mean": "not_measured",
+          "max": "not_measured"
+        }
+      },
+      "correlation": {
+        "shared_profile_failures": 0,
+        "shared_failure_groups": 0,
+        "duplicate_artifacts": 0
+      },
+      "handoff": {
+        "resumes": 0,
+        "lost_work_sec": 0,
+        "overhead_sec": 0
+      },
+      "runs": [
+        {
+          "sample": 0,
+          "solved": true,
+          "end_reason": "solved",
+          "wall_time_sec": 249,
+          "agent_sec": 249,
+          "max_committed_agent_sec": 848,
+          "attempts_started": 2,
+          "failed_attempts": 0,
+          "useful_results": 1,
+          "duplicate_artifacts": 0
+        },
+        {
+          "sample": 1,
+          "solved": true,
+          "end_reason": "solved",
+          "wall_time_sec": 240,
+          "agent_sec": 240,
+          "max_committed_agent_sec": 839,
+          "attempts_started": 2,
+          "failed_attempts": 0,
+          "useful_results": 1,
+          "duplicate_artifacts": 0
+        },
+        {
+          "sample": 2,
+          "solved": true,
+          "end_reason": "solved",
+          "wall_time_sec": 690,
+          "agent_sec": 690,
+          "max_committed_agent_sec": 1289,
+          "attempts_started": 4,
+          "failed_attempts": 2,
+          "useful_results": 1,
+          "duplicate_artifacts": 0
+        },
+        {
+          "sample": 3,
+          "solved": true,
+          "end_reason": "solved",
+          "wall_time_sec": 550,
+          "agent_sec": 550,
+          "max_committed_agent_sec": 1149,
+          "attempts_started": 4,
+          "failed_attempts": 2,
+          "useful_results": 1,
+          "duplicate_artifacts": 0
+        }
+      ]
+    },
+    {
+      "policy": "fixed:3",
+      "samples": 4,
+      "solved_runs": 4,
+      "unsolved_runs": 0,
+      "solve_rate": 1,
+      "end_reasons": {
+        "solved": 4
+      },
+      "agent_hours_total": 0.683333,
+      "agent_hours_per_solved": 0.170833,
+      "wall_time_sec_solved_runs": {
+        "count": 4,
+        "mean": 205,
+        "median": 213.5,
+        "max": 233
+      },
+      "attempts": {
+        "started": 20,
+        "failed": 4,
+        "failed_by_reason": {
+          "agent_failed": 4,
+          "interrupted": 0,
+          "provider_outage": 0,
+          "review_rejected": 0,
+          "shared_profile_flaw": 0,
+          "timeout": 0,
+          "verification_rejected": 0
+        },
+        "failed_rate": 0.5,
+        "useful": 4,
+        "duplicate": 0,
+        "superseded": 0,
+        "cancelled": 12,
+        "candidates_submitted": 4
+      },
+      "queues": {
+        "verification_wait_sec": {
+          "count": 4,
+          "mean": 0,
+          "max": 0
+        },
+        "review_wait_sec": {
+          "count": 0,
+          "mean": "not_measured",
+          "max": "not_measured"
+        },
+        "resume_wait_sec": {
+          "count": 0,
+          "mean": "not_measured",
+          "max": "not_measured"
+        }
+      },
+      "correlation": {
+        "shared_profile_failures": 0,
+        "shared_failure_groups": 0,
+        "duplicate_artifacts": 0
+      },
+      "handoff": {
+        "resumes": 0,
+        "lost_work_sec": 0,
+        "overhead_sec": 0
+      },
+      "runs": [
+        {
+          "sample": 0,
+          "solved": true,
+          "end_reason": "solved",
+          "wall_time_sec": 233,
+          "agent_sec": 699,
+          "max_committed_agent_sec": 2245,
+          "attempts_started": 5,
+          "failed_attempts": 1,
+          "useful_results": 1,
+          "duplicate_artifacts": 0
+        },
+        {
+          "sample": 1,
+          "solved": true,
+          "end_reason": "solved",
+          "wall_time_sec": 160,
+          "agent_sec": 480,
+          "max_committed_agent_sec": 1959,
+          "attempts_started": 4,
+          "failed_attempts": 0,
+          "useful_results": 1,
+          "duplicate_artifacts": 0
+        },
+        {
+          "sample": 2,
+          "solved": true,
+          "end_reason": "solved",
+          "wall_time_sec": 215,
+          "agent_sec": 645,
+          "max_committed_agent_sec": 2197,
+          "attempts_started": 5,
+          "failed_attempts": 1,
+          "useful_results": 1,
+          "duplicate_artifacts": 0
+        },
+        {
+          "sample": 3,
+          "solved": true,
+          "end_reason": "solved",
+          "wall_time_sec": 212,
+          "agent_sec": 636,
+          "max_committed_agent_sec": 2349,
+          "attempts_started": 6,
+          "failed_attempts": 2,
+          "useful_results": 1,
+          "duplicate_artifacts": 0
+        }
+      ]
+    },
+    {
+      "policy": "round-robin",
+      "samples": 4,
+      "solved_runs": 4,
+      "unsolved_runs": 0,
+      "solve_rate": 1,
+      "end_reasons": {
+        "solved": 4
+      },
+      "agent_hours_total": 0.685833,
+      "agent_hours_per_solved": 0.171458,
+      "wall_time_sec_solved_runs": {
+        "count": 4,
+        "mean": 205.75,
+        "median": 214,
+        "max": 262
+      },
+      "attempts": {
+        "started": 21,
+        "failed": 5,
+        "failed_by_reason": {
+          "agent_failed": 5,
+          "interrupted": 0,
+          "provider_outage": 0,
+          "review_rejected": 0,
+          "shared_profile_flaw": 0,
+          "timeout": 0,
+          "verification_rejected": 0
+        },
+        "failed_rate": 0.555556,
+        "useful": 4,
+        "duplicate": 0,
+        "superseded": 0,
+        "cancelled": 12,
+        "candidates_submitted": 4
+      },
+      "queues": {
+        "verification_wait_sec": {
+          "count": 4,
+          "mean": 0,
+          "max": 0
+        },
+        "review_wait_sec": {
+          "count": 0,
+          "mean": "not_measured",
+          "max": "not_measured"
+        },
+        "resume_wait_sec": {
+          "count": 0,
+          "mean": "not_measured",
+          "max": "not_measured"
+        }
+      },
+      "correlation": {
+        "shared_profile_failures": 0,
+        "shared_failure_groups": 0,
+        "duplicate_artifacts": 0
+      },
+      "handoff": {
+        "resumes": 0,
+        "lost_work_sec": 0,
+        "overhead_sec": 0
+      },
+      "runs": [
+        {
+          "sample": 0,
+          "solved": true,
+          "end_reason": "solved",
+          "wall_time_sec": 188,
+          "agent_sec": 564,
+          "max_committed_agent_sec": 2126,
+          "attempts_started": 5,
+          "failed_attempts": 1,
+          "useful_results": 1,
+          "duplicate_artifacts": 0
+        },
+        {
+          "sample": 1,
+          "solved": true,
+          "end_reason": "solved",
+          "wall_time_sec": 240,
+          "agent_sec": 720,
+          "max_committed_agent_sec": 2458,
+          "attempts_started": 6,
+          "failed_attempts": 2,
+          "useful_results": 1,
+          "duplicate_artifacts": 0
+        },
+        {
+          "sample": 2,
+          "solved": true,
+          "end_reason": "solved",
+          "wall_time_sec": 133,
+          "agent_sec": 399,
+          "max_committed_agent_sec": 1932,
+          "attempts_started": 4,
+          "failed_attempts": 0,
+          "useful_results": 1,
+          "duplicate_artifacts": 0
+        },
+        {
+          "sample": 3,
+          "solved": true,
+          "end_reason": "solved",
+          "wall_time_sec": 262,
+          "agent_sec": 786,
+          "max_committed_agent_sec": 2498,
+          "attempts_started": 6,
+          "failed_attempts": 2,
+          "useful_results": 1,
+          "duplicate_artifacts": 0
+        }
+      ]
+    },
+    {
+      "policy": "least-attempted",
+      "samples": 4,
+      "solved_runs": 4,
+      "unsolved_runs": 0,
+      "solve_rate": 1,
+      "end_reasons": {
+        "solved": 4
+      },
+      "agent_hours_total": 0.685833,
+      "agent_hours_per_solved": 0.171458,
+      "wall_time_sec_solved_runs": {
+        "count": 4,
+        "mean": 205.75,
+        "median": 214,
+        "max": 262
+      },
+      "attempts": {
+        "started": 21,
+        "failed": 5,
+        "failed_by_reason": {
+          "agent_failed": 5,
+          "interrupted": 0,
+          "provider_outage": 0,
+          "review_rejected": 0,
+          "shared_profile_flaw": 0,
+          "timeout": 0,
+          "verification_rejected": 0
+        },
+        "failed_rate": 0.555556,
+        "useful": 4,
+        "duplicate": 0,
+        "superseded": 0,
+        "cancelled": 12,
+        "candidates_submitted": 4
+      },
+      "queues": {
+        "verification_wait_sec": {
+          "count": 4,
+          "mean": 0,
+          "max": 0
+        },
+        "review_wait_sec": {
+          "count": 0,
+          "mean": "not_measured",
+          "max": "not_measured"
+        },
+        "resume_wait_sec": {
+          "count": 0,
+          "mean": "not_measured",
+          "max": "not_measured"
+        }
+      },
+      "correlation": {
+        "shared_profile_failures": 0,
+        "shared_failure_groups": 0,
+        "duplicate_artifacts": 0
+      },
+      "handoff": {
+        "resumes": 0,
+        "lost_work_sec": 0,
+        "overhead_sec": 0
+      },
+      "runs": [
+        {
+          "sample": 0,
+          "solved": true,
+          "end_reason": "solved",
+          "wall_time_sec": 188,
+          "agent_sec": 564,
+          "max_committed_agent_sec": 2126,
+          "attempts_started": 5,
+          "failed_attempts": 1,
+          "useful_results": 1,
+          "duplicate_artifacts": 0
+        },
+        {
+          "sample": 1,
+          "solved": true,
+          "end_reason": "solved",
+          "wall_time_sec": 240,
+          "agent_sec": 720,
+          "max_committed_agent_sec": 2458,
+          "attempts_started": 6,
+          "failed_attempts": 2,
+          "useful_results": 1,
+          "duplicate_artifacts": 0
+        },
+        {
+          "sample": 2,
+          "solved": true,
+          "end_reason": "solved",
+          "wall_time_sec": 133,
+          "agent_sec": 399,
+          "max_committed_agent_sec": 1932,
+          "attempts_started": 4,
+          "failed_attempts": 0,
+          "useful_results": 1,
+          "duplicate_artifacts": 0
+        },
+        {
+          "sample": 3,
+          "solved": true,
+          "end_reason": "solved",
+          "wall_time_sec": 262,
+          "agent_sec": 786,
+          "max_committed_agent_sec": 2498,
+          "attempts_started": 6,
+          "failed_attempts": 2,
+          "useful_results": 1,
+          "duplicate_artifacts": 0
+        }
+      ]
+    }
+  ]
+}

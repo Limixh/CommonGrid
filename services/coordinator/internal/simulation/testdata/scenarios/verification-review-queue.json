@@ -1,0 +1,125 @@
+{
+  "format": "commongrid.simulation.scenario",
+  "format_version": "1.0",
+  "id": "verification-review-queue",
+  "title": "Doğrulama ve inceleme kuyruğu",
+  "description": "Üç incelemeli dal tek doğrulayıcı ve tek inceleyiciyi paylaşır; kuyruk beklemesi ölçülür.",
+  "contracts_file": "../contracts.json",
+  "root": "root",
+  "nodes": [
+    {
+      "id": "root",
+      "task_id": "sim-root",
+      "relation": "and",
+      "children": [
+        "ma",
+        "mb",
+        "mc"
+      ]
+    },
+    {
+      "id": "ma",
+      "task_id": "sim-ma",
+      "relation": "leaf",
+      "synthetic": {
+        "work_sec": {
+          "min": 100,
+          "max": 200
+        },
+        "profiles": {
+          "default": {
+            "success_probability": 0.8
+          }
+        }
+      }
+    },
+    {
+      "id": "mb",
+      "task_id": "sim-mb",
+      "relation": "leaf",
+      "synthetic": {
+        "work_sec": {
+          "min": 100,
+          "max": 200
+        },
+        "profiles": {
+          "default": {
+            "success_probability": 0.8
+          }
+        }
+      }
+    },
+    {
+      "id": "mc",
+      "task_id": "sim-mc",
+      "relation": "leaf",
+      "synthetic": {
+        "work_sec": {
+          "min": 100,
+          "max": 200
+        },
+        "profiles": {
+          "default": {
+            "success_probability": 0.8
+          }
+        }
+      }
+    }
+  ],
+  "budget": {
+    "total_agent_sec": 9000
+  },
+  "volunteers": [
+    {
+      "id": "v1",
+      "profile": "alpha",
+      "provider": "prov-x",
+      "join_sec": 0,
+      "slots": 1
+    },
+    {
+      "id": "v2",
+      "profile": "beta",
+      "provider": "prov-y",
+      "join_sec": 0,
+      "slots": 1
+    },
+    {
+      "id": "v3",
+      "profile": "gamma",
+      "provider": "prov-z",
+      "join_sec": 0,
+      "slots": 1
+    },
+    {
+      "id": "v4",
+      "profile": "delta",
+      "provider": "prov-y",
+      "join_sec": 0,
+      "slots": 1
+    },
+    {
+      "id": "v5",
+      "profile": "epsilon",
+      "provider": "prov-z",
+      "join_sec": 0,
+      "slots": 1
+    }
+  ],
+  "recommended_samples": 30,
+  "verification": {
+    "workers": 1,
+    "duration_sec": {
+      "min": 60,
+      "max": 120
+    }
+  },
+  "review": {
+    "reviewers": 1,
+    "duration_sec": {
+      "min": 300,
+      "max": 600
+    },
+    "accept_probability": 0.8
+  }
+}

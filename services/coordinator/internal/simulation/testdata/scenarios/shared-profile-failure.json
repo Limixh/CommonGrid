@@ -1,0 +1,86 @@
+{
+  "format": "commongrid.simulation.scenario",
+  "format_version": "1.0",
+  "id": "shared-profile-failure",
+  "title": "Ortak profil başarısızlığı",
+  "description": "alpha profili iki dalda da büyük olasılıkla ortak kusurludur; tek ajan alpha ile çalışır, çeşitlendiren politikalar beta'ya ulaşır.",
+  "contracts_file": "../contracts.json",
+  "root": "root",
+  "nodes": [
+    {
+      "id": "root",
+      "task_id": "sim-root",
+      "relation": "or",
+      "children": [
+        "a",
+        "b"
+      ]
+    },
+    {
+      "id": "a",
+      "task_id": "sim-a",
+      "relation": "leaf",
+      "synthetic": {
+        "work_sec": {
+          "min": 120,
+          "max": 300
+        },
+        "profiles": {
+          "default": {
+            "success_probability": 0.5
+          },
+          "alpha": {
+            "success_probability": 0.7,
+            "flaw_probability": 0.85
+          },
+          "beta": {
+            "success_probability": 0.5
+          }
+        }
+      }
+    },
+    {
+      "id": "b",
+      "task_id": "sim-b",
+      "relation": "leaf",
+      "synthetic": {
+        "work_sec": {
+          "min": 120,
+          "max": 300
+        },
+        "profiles": {
+          "default": {
+            "success_probability": 0.5
+          },
+          "alpha": {
+            "success_probability": 0.7,
+            "flaw_probability": 0.85
+          },
+          "beta": {
+            "success_probability": 0.5
+          }
+        }
+      }
+    }
+  ],
+  "budget": {
+    "total_agent_sec": 6000
+  },
+  "volunteers": [
+    {
+      "id": "v1-alpha",
+      "profile": "alpha",
+      "provider": "prov-x",
+      "join_sec": 0,
+      "slots": 1
+    },
+    {
+      "id": "v2-beta",
+      "profile": "beta",
+      "provider": "prov-y",
+      "join_sec": 0,
+      "slots": 1
+    }
+  ],
+  "recommended_samples": 30
+}
