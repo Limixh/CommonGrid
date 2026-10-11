@@ -1,0 +1,107 @@
+{
+  "format": "commongrid.simulation.scenario",
+  "format_version": "1.0",
+  "id": "provider-outage",
+  "title": "Sağlayıcı kesintisi ve gönüllü ayrılması",
+  "description": "prov-x kesintisinde çalışan denemeler yarıda kalır; handoff'lu dal devam eder, handoff'suz dal başarısız olur. Bir gönüllü erken ayrılır.",
+  "contracts_file": "../contracts.json",
+  "root": "root",
+  "nodes": [
+    {
+      "id": "root",
+      "task_id": "sim-root",
+      "relation": "or",
+      "children": [
+        "a",
+        "nohandoff"
+      ]
+    },
+    {
+      "id": "a",
+      "task_id": "sim-a",
+      "relation": "leaf",
+      "synthetic": {
+        "work_sec": {
+          "min": 300,
+          "max": 500
+        },
+        "profiles": {
+          "default": {
+            "success_probability": 0.6
+          }
+        }
+      }
+    },
+    {
+      "id": "nohandoff",
+      "task_id": "sim-nohandoff",
+      "relation": "leaf",
+      "synthetic": {
+        "work_sec": {
+          "min": 300,
+          "max": 500
+        },
+        "profiles": {
+          "default": {
+            "success_probability": 0.6
+          }
+        }
+      }
+    }
+  ],
+  "budget": {
+    "total_agent_sec": 9000
+  },
+  "volunteers": [
+    {
+      "id": "v1",
+      "profile": "alpha",
+      "provider": "prov-x",
+      "join_sec": 0,
+      "slots": 2
+    },
+    {
+      "id": "v2",
+      "profile": "beta",
+      "provider": "prov-y",
+      "join_sec": 0,
+      "slots": 1
+    },
+    {
+      "id": "v3",
+      "profile": "gamma",
+      "provider": "prov-z",
+      "join_sec": 0,
+      "slots": 1,
+      "online_sec": {
+        "min": 200,
+        "max": 400
+      }
+    }
+  ],
+  "recommended_samples": 30,
+  "outages": [
+    {
+      "provider": "prov-x",
+      "start_sec": 150,
+      "end_sec": 1500
+    }
+  ],
+  "random_outages": [
+    {
+      "provider": "prov-y",
+      "count": 1,
+      "start_sec": {
+        "min": 300,
+        "max": 900
+      },
+      "duration_sec": {
+        "min": 100,
+        "max": 300
+      }
+    }
+  ],
+  "handoff": {
+    "overhead_sec": 30
+  }
+}

@@ -1,0 +1,62 @@
+{
+  "format": "commongrid.simulation.scenario",
+  "format_version": "1.0",
+  "id": "duplicate-artifact",
+  "title": "Yinelenen artifact",
+  "description": "Tek dal; paralel başarılı denemeler aynı artifact'ı üretir ve ikinci kez yararlı sayılmaz.",
+  "contracts_file": "../contracts.json",
+  "root": "a",
+  "nodes": [
+    {
+      "id": "a",
+      "task_id": "sim-a",
+      "relation": "leaf",
+      "synthetic": {
+        "work_sec": {
+          "min": 150,
+          "max": 160
+        },
+        "profiles": {
+          "default": {
+            "success_probability": 0.9
+          }
+        },
+        "artifact_variants": 1
+      }
+    }
+  ],
+  "budget": {
+    "total_agent_sec": 4000
+  },
+  "volunteers": [
+    {
+      "id": "v1",
+      "profile": "alpha",
+      "provider": "prov-x",
+      "join_sec": 0,
+      "slots": 1
+    },
+    {
+      "id": "v2",
+      "profile": "beta",
+      "provider": "prov-y",
+      "join_sec": 0,
+      "slots": 1
+    },
+    {
+      "id": "v3",
+      "profile": "gamma",
+      "provider": "prov-z",
+      "join_sec": 0,
+      "slots": 1
+    }
+  ],
+  "recommended_samples": 30,
+  "verification": {
+    "workers": 1,
+    "duration_sec": {
+      "min": 200,
+      "max": 300
+    }
+  }
+}

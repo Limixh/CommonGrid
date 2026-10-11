@@ -1,0 +1,96 @@
+{
+  "format": "commongrid.simulation.scenario",
+  "format_version": "1.0",
+  "id": "and-all-children",
+  "title": "Tüm çocukları gereken AND",
+  "description": "Kök yalnız üç çocuk da çözülünce çözülür; c dalı zordur.",
+  "contracts_file": "../contracts.json",
+  "root": "root",
+  "nodes": [
+    {
+      "id": "root",
+      "task_id": "sim-root",
+      "relation": "and",
+      "children": [
+        "a",
+        "b",
+        "c"
+      ]
+    },
+    {
+      "id": "a",
+      "task_id": "sim-a",
+      "relation": "leaf",
+      "synthetic": {
+        "work_sec": {
+          "min": 120,
+          "max": 300
+        },
+        "profiles": {
+          "default": {
+            "success_probability": 0.6
+          }
+        }
+      }
+    },
+    {
+      "id": "b",
+      "task_id": "sim-b",
+      "relation": "leaf",
+      "synthetic": {
+        "work_sec": {
+          "min": 120,
+          "max": 300
+        },
+        "profiles": {
+          "default": {
+            "success_probability": 0.6
+          }
+        }
+      }
+    },
+    {
+      "id": "c",
+      "task_id": "sim-c",
+      "relation": "leaf",
+      "synthetic": {
+        "work_sec": {
+          "min": 120,
+          "max": 300
+        },
+        "profiles": {
+          "default": {
+            "success_probability": 0.25
+          }
+        }
+      }
+    }
+  ],
+  "budget": {
+    "total_agent_sec": 9000
+  },
+  "volunteers": [
+    {
+      "id": "v1",
+      "profile": "alpha",
+      "provider": "prov-x",
+      "join_sec": 0,
+      "slots": 1
+    },
+    {
+      "id": "v2",
+      "profile": "beta",
+      "provider": "prov-y",
+      "join_sec": 0,
+      "slots": 1
+    },
+    {
+      "id": "v3",
+      "profile": "gamma",
+      "provider": "prov-z",
+      "join_sec": 0,
+      "slots": 1
+    }
+  ],
+  "recommended_samples": 30
+}
