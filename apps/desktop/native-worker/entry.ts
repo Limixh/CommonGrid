@@ -1,12 +1,13 @@
 import { parseBoot, runCliCheck, type Frame } from "./cli-check.ts";
 import { parseSessionBoot, runProfileSession, type SessionFrame } from "./profile-session.ts";
+import { parseTaskRunBoot, runTaskRun, type TaskRunFrame } from "./task-run.ts";
 
 // Nothing runs before the native supervisor has assigned process ownership and
 // supplied one bounded boot frame. EOF is a cooperative cancellation request.
 const controller = new AbortController();
 let buffer = Buffer.alloc(0), started = false, finished = false;
 let deadline: NodeJS.Timeout | undefined;
-const emit = (frame: Frame | SessionFrame) => { if (!finished) process.stdout.write(JSON.stringify(frame) + "\n"); };
+const emit = (frame: Frame | SessionFrame | TaskRunFrame) => { if (!finished) process.stdout.write(JSON.stringify(frame) + "\n"); };
 const fail = () => {
   if (started) controller.abort("worker_failed");
   else { finished = true; process.exitCode = 1; process.stdin.destroy(); }
@@ -20,10 +21,10 @@ process.stdin.on("data", (chunk: Buffer) => {
     try {
       const message = JSON.parse(line);
       if (!started) {
-        const boot = message?.type === "profile_session_boot" ? parseSessionBoot(message) : parseBoot(message); started = true;
-        const deadlineMs = boot.type === "profile_session_boot" ? (boot.action === "login" ? 660_000 : 120_000) : 300_000;
+        const boot = message?.type === "profile_session_boot" ? parseSessionBoot(message) : message?.type === "task_run_boot" ? parseTaskRunBoot(message) : parseBoot(message); started = true;
+        const deadlineMs = boot.type === "task_run_boot" ? 1_200_000 : boot.type === "profile_session_boot" ? (boot.action === "login" ? 660_000 : 120_000) : 300_000;
         deadline = setTimeout(() => controller.abort("deadline_exceeded"), deadlineMs);
-        const work = boot.type === "profile_session_boot" ? runProfileSession(boot, controller.signal, emit) : runCliCheck(boot, controller.signal, emit);
+        const work = boot.type === "task_run_boot" ? runTaskRun(boot, controller.signal, emit) : boot.type === "profile_session_boot" ? runProfileSession(boot, controller.signal, emit) : runCliCheck(boot, controller.signal, emit);
         void work.then(() => {
           finished = true; clearTimeout(deadline); process.stdin.destroy();
         }, () => { finished = true; clearTimeout(deadline); process.exitCode = 1; process.stdin.destroy(); });
