@@ -4,7 +4,9 @@
 
 ## Güncel kanıt
 
-Profil adı/ajan seçimi ve seçili profil, native uygulama deposunda kalıcıdır. Seçili Codex profili resmi cihaz kodu akışıyla bağlanabilir; hesap kontrolü, çıkış ve iptal aynı paneldedir. Profil seçimi kendi başına hesabın bağlı olduğunu göstermez. Native worker ürün paketindeki resmi oturum modülünü kullanır; geçici cihaz kodu kalıcı metadata veya günlüğe yazılmaz. `App.tsx` katalog, ortam ve katkı ayarları modüllerine ayrıldı. Gerçek hesapla giriş tamamlama, Claude'un etkileşimli giriş bağlantısı ve bağlı profille görev başlatma sıradaki işlerdir.
+Profil adı/ajan seçimi ve seçili profil, native uygulama deposunda kalıcıdır. Seçili Codex profili resmi cihaz kodu akışıyla bağlanabilir; hesap kontrolü, çıkış ve iptal aynı paneldedir. Profil seçimi kendi başına hesabın bağlı olduğunu göstermez. Native worker ürün paketindeki resmi oturum modülünü kullanır; geçici cihaz kodu kalıcı metadata veya günlüğe yazılmaz. `App.tsx` katalog, ortam ve katkı ayarları modüllerine ayrıldı. Gerçek hesapla giriş tamamlama ve Claude'un etkileşimli giriş bağlantısı sıradaki işlerdir.
+
+Bağlı profille onaylı görev akışı [ADR 0020](../spike/adr/0020-native-approved-task-run.md) kapsamında kod olarak eklendi: ortak `task-run` sözleşmesi, ürün paketine taşınan kontrollü görev/doğrulayıcı/bellek içi diff, sabitlenmiş Codex kataloğu asset'i, native worker, Rust süpervizörü (`local_task_run_*`) ve **Onaylı görev** paneli. 2026-10-11 Linux bulut koşusunda `npm run check` (243 ürün + 204/9 deneme testi), 59 Rust testi ve 122 browser UI testi geçti. Bunlar sentetik worker bağımlılıkları, sahte Node worker'ları ve native mock'larıdır; gerçek model çağrısı, hesap, Docker görevi veya Windows/WebView2 koşusu yapılmadı. Gerçek sağlayıcı protokolüyle uçtan uca uygulama içi görev kabul edilmedi.
 
 2026-10-11 Windows/WebView2 koşusunda `npm run test:native-session-smoke` yedi kontrolü geçti: yeni profilde resmi cihaz kodunun arayüze ulaşması, giriş iptali, aynı ortamda hesapsız hesap kontrolü/çıkış ve doğrulanmış cleanup. Model çağrısı veya hesap yetkilendirmesi yapılmadı. Önceki iki giriş denemesi kod üretmeden `session_failed` ile bitti; nedenleri kesinleşmedi ve sonraki başarı geçmiş sonuçları değiştirmez. Panel bu hatayı bağlı hesap olarak göstermiyor; yeniden deneme kullanıcı işlemiyle başlar.
 
@@ -22,7 +24,7 @@ Aynı Claude profili yaklaşık 11 saat sonra [yeniden giriş olmadan status/res
 
 | İş | Kapanması için gereken kanıt | Durum |
 |---|---|---|
-| Native CLI sürüm kontrolü | Gerçek uygulamada iki resmi CLI sürümü, istek/iptal sınırları, günlük ve bağımsız cleanup doğrulaması | Windows kabulü tamamlandı; kalıcı profil seçimi ve Codex giriş paneli eklendi; bağlı profille görev kabulü bekliyor |
+| Native CLI sürüm kontrolü | Gerçek uygulamada iki resmi CLI sürümü, istek/iptal sınırları, günlük ve bağımsız cleanup doğrulaması | Windows kabulü tamamlandı; kalıcı profil seçimi, Codex giriş paneli ve onaylı görev akışı (fixture/mock) eklendi; bağlı profille gerçek görev kabulü bekliyor |
 | Güncel gerçek görev | Geçerli izole resmi profillerle gerçek dosya değişimi, 34 örneklik bağımsız kontrol, cleanup ve API'ye geçiş olmaması | Haiku ve Luna için dar görev kabulü tamamlandı |
 | Kalıcı işlem sahipliği | Restart ve host worker ölümü boyunca aynı profile yarışın engellenmesi, eski işlemin yeni kaynakları silememesi | Claim, faz günlüğü, geliştirici/manual uzlaştırma ve native bağlantı geçti; güvenilir görev kabulü, belirsiz mutasyonların güvenli uzlaştırılması ve otomatik recovery bekliyor |
 | Claude oturum sürekliliği | Doğal zaman geçişi sonrası resmi CLI görevi; yenileme veya yeniden giriş gereksiniminin auth dosyası okumadan gözlenmesi | Gecikmeli status/restart geçti; doğal yenileme bekliyor |
@@ -34,7 +36,7 @@ Yeni Haiku/Luna profilleri sonraki normal gözlemler için giriş yapmış halde
 
 ## Çalışma sırası
 
-1. Native sürüm kontrolünün ardından uygulamada görünür tek bir görev akışını tamamla: profil seçimi → resmi CLI girişi/durumu → onaylı görev → Başlat → ilerleme/iptal → doğrulanmış diff. Mevcut yönetilen CLI, görev araçları, işlem sahipliği ve doğrulayıcıyı kullan. İlk akış kabul edilen ajan/platform/görev kapsamında açılır.
+1. Uygulamadaki görev akışı (profil seçimi → resmi CLI girişi/durumu → onaylı görev → Başlat → ilerleme/iptal → doğrulanmış diff) kod ve fixture/mock testleriyle tamamlandı. Kalan: `install:cli-fixtures` + `prepare:native-launcher` sonrası Windows'ta giriş yapmış Codex/Luna profiliyle gerçek uygulama içi görev kabulü; ardından tarihli rapor. Gerçek koşu Luna dışında modele geçmez; model yoksa durur. Claude görevi, Claude girişi uygulamaya bağlanınca açılır.
 2. `App.tsx` ayrıştırması tamamlandı: katalog ve görev detayı `WorkspacePage`/`useTaskCatalog`, ortam ekranı `EnvironmentPage`, katkı ayarları `ContributionSettingsPage` içinde. Yeni giriş/görev panellerini bu modüllere bağla; mevcut arayüz davranışını koru.
 3. Akışın kendi kimlik izolasyonu, süre sınırı, iptal ve kaynak sahipliği kontrollerini tamamla. Create cevabının kaybı, daemon kesintisi veya belirsiz cleanup durumunda yeni başlangıcı engelle ve manuel inceleme göster; operatör beyanını otomatik durma kanıtı sayma. Doğal kota tükenmesi, üç platformun tümü ve her otomatik recovery yolu, dar kapsamda kabul edilen herhangi bir görevin başlaması için ortak önkoşul değildir. Oturum/limit davranışını normal kullanımda gözle; diğer ajan/platform ve recovery yollarını ayrıca tamamla. Dar kabul tüm v1'e yayılmaz; genel GO durumu değişmez.
 
