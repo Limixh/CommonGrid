@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { lstat } from "node:fs/promises";
+import { lstat, readFile } from "node:fs/promises";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { dockerCommand, DockerCommandError, TaskToolsRuntime } from "./task-runtime.ts";
@@ -22,13 +22,15 @@ export interface ManagedRuntimeAssets {
   binaries: Record<SubscriptionProvider, { binaryPath: string; sha256: string }>;
   bridgeRoot: string;
   journalRoot: string;
+  /** Pinned public Codex coding catalog; present only when the build had its source. */
+  codexCatalog?: { filePath: string; sha256: string };
 }
 const bridgeFiles = ["runtime-bridge.mjs", "tunnel-wire.mjs", "mcp.mjs", "task-broker.mjs"] as const;
 function safeAbsolutePath(value: unknown): value is string {
   return typeof value === "string" && path.isAbsolute(value) && !/[\x00\r\n]/.test(value);
 }
 export function validateManagedRuntimeAssets(value: ManagedRuntimeAssets): Readonly<ManagedRuntimeAssets> {
-  if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).sort().join(",") !== "baseImage,binaries,bridgeRoot,journalRoot" ||
+  if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).sort().join(",") !== (value.codexCatalog === undefined ? "baseImage,binaries,bridgeRoot,journalRoot" : "baseImage,binaries,bridgeRoot,codexCatalog,journalRoot") ||
       typeof value.baseImage !== "string" || !/^[a-z0-9][a-z0-9./:_-]*@sha256:[a-f0-9]{64}$/.test(value.baseImage) ||
       !safeAbsolutePath(value.bridgeRoot) || !safeAbsolutePath(value.journalRoot) || !value.binaries || typeof value.binaries !== "object" ||
       Object.keys(value.binaries).sort().join(",") !== "claude,codex") throw new Error("managed_runtime_assets_invalid");
@@ -37,8 +39,12 @@ export function validateManagedRuntimeAssets(value: ManagedRuntimeAssets): Reado
     if (!binary || typeof binary !== "object" || Array.isArray(binary) || Object.keys(binary).sort().join(",") !== "binaryPath,sha256" ||
         !safeAbsolutePath(binary.binaryPath) || typeof binary.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(binary.sha256)) throw new Error("managed_runtime_assets_invalid");
   }
+  const catalog = value.codexCatalog;
+  if (catalog !== undefined && (!catalog || typeof catalog !== "object" || Array.isArray(catalog) || Object.keys(catalog).sort().join(",") !== "filePath,sha256" ||
+      !safeAbsolutePath(catalog.filePath) || typeof catalog.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(catalog.sha256))) throw new Error("managed_runtime_assets_invalid");
   return Object.freeze({baseImage:value.baseImage, bridgeRoot:value.bridgeRoot, journalRoot:value.journalRoot,
-    binaries:Object.freeze({claude:Object.freeze({...value.binaries.claude}), codex:Object.freeze({...value.binaries.codex})})});
+    binaries:Object.freeze({claude:Object.freeze({...value.binaries.claude}), codex:Object.freeze({...value.binaries.codex})}),
+    ...(catalog ? {codexCatalog:Object.freeze({...catalog})} : {})});
 }
 export class ManagedPreparationError extends Error {
   constructor(readonly cleanupVerified: boolean, cause: unknown) {
@@ -429,6 +435,19 @@ export class ManagedCliRuntime {
     await this.verify("volume",this.toolsVolume,options);
     const script="const f=require('node:fs'),bundle=require('node:tls').rootCertificates.join('\\n')+'\\n';if(f.existsSync('/opt/cg/ca.pem')){if(f.readFileSync('/opt/cg/ca.pem','utf8')!==bundle)throw Error('invalid_bundle');}else{f.chmodSync('/opt/cg',0o755);try{f.writeFileSync('/opt/cg/ca.pem',bundle,{flag:'wx',mode:0o444});}finally{f.chmodSync('/opt/cg',0o555);}}";
     await this.installContainer(["create","--name",this.initContainer,"--label",`${labelKey}=${this.owner}`,"--label",`io.commongrid.spike.operation=${this.operation}`,"--network","none","--read-only","--user","0:0","--cap-drop","ALL","--security-opt","no-new-privileges","--memory","128m","--pids-limit","16","--mount",`type=volume,src=${this.toolsVolume},dst=/opt/cg,volume-nocopy`,this.assets.baseImage,"node","-e",script],undefined,options);
+  }
+  /** Installs or repairs the pinned public Codex coding catalog in the profile's tools volume. Never mounts auth. */
+  async installCodexCodingCatalog(options: ManagedOperationOptions = {}) { return this.mutation(() => this.installCodexCodingCatalogInternal(options),true); }
+  private async installCodexCodingCatalogInternal(options: ManagedOperationOptions) {
+    assert.equal(this.provider,"codex","managed_catalog_provider_invalid");
+    const pin=this.assets.codexCatalog; if(!pin) throw new Error("managed_catalog_asset_missing");
+    const stat=await lstat(pin.filePath); if(!stat.isFile() || stat.isSymbolicLink() || stat.size > 262_144) throw new Error("managed_catalog_asset_invalid");
+    const catalog=await readFile(pin.filePath); if(catalog.length > 262_144 || createHash("sha256").update(catalog).digest("hex") !== pin.sha256) throw new Error("managed_catalog_digest_invalid");
+    await this.beginInternal(options);
+    assert.equal(await this.ownedCommand(["container","ls","--all","--filter",`name=^/${this.container}$`,"--format","{{.Names}}"],options),"","managed_profile_busy");await this.verify("volume",this.toolsVolume,options);
+    // Public cache file: a different earlier pin is replaced atomically inside the init container only.
+    const script="const f=require('node:fs'),catalog=f.readFileSync(0,'utf8'),p='/opt/cg/catalog.json',t='/opt/cg/.catalog.tmp';f.chmodSync('/opt/cg',0o755);try{if(!f.existsSync(p)||f.readFileSync(p,'utf8')!==catalog){f.rmSync(t,{force:true});f.writeFileSync(t,catalog,{flag:'wx',mode:0o444});f.renameSync(t,p);}}finally{f.chmodSync('/opt/cg',0o555);}";
+    await this.installContainer(["create","-i","--name",this.initContainer,"--label",`${labelKey}=${this.owner}`,"--label",`${operationLabelKey}=${this.operation}`,"--network","none","--read-only","--user","0:0","--cap-drop","ALL","--security-opt","no-new-privileges","--memory","128m","--pids-limit","16","--mount",`type=volume,src=${this.toolsVolume},dst=/opt/cg,volume-nocopy`,this.assets.baseImage,"node","-e",script],Readable.from([catalog]),options);
   }
   async installClaudeHostTrust(options: ManagedHostTrustOptions, operationOptions: ManagedOperationOptions = {}) { return this.mutation(() => this.installClaudeHostTrustInternal(options,operationOptions),true); }
   private async installClaudeHostTrustInternal(options: ManagedHostTrustOptions, operationOptions: ManagedOperationOptions) {

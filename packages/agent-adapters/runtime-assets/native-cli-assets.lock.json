@@ -5,5 +5,8 @@
   "binaries": {
     "claude": {"version": "2.1.293", "file": "claude", "sha256": "8968405e26db478af44eabc4635ab5ca557057b702a54460a59c13e1b253e978"},
     "codex": {"version": "0.157.1", "file": "codex", "sha256": "3e2584f3f3829a43a0495011a1cecb2facbe64a2403e2b682351fd9c2983f970"}
-  }
+  },
+  "codex_catalog": {"model": "gpt-6-luna", "file": "codex-coding-catalog.json", "sha256": "175f81d2f94f5586f1471cceb8483fc4f93845ad9d144b4157c5e0cd97a55c31",
+    "source_url": "https://raw.githubusercontent.com/openai/codex/rust-v0.157.1/codex-rs/models-manager/models.json",
+    "source_sha256": "0178d235c589a31abd6ed0ea1e870935dc5819240eb0e813e178d3ebedf534f4"}
 }
