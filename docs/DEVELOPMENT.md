@@ -1,6 +1,6 @@
 # Geliştirme rehberi
 
-CommonGrid tam v1 hedefiyle geliştiriliyor. Şu an görev inceleme, hesap/katkı temeli, dosya teslimi, bağımsız doğrulayıcı bağlantısı, kalıcı profil seçimi, native CLI sürüm kontrolü ve Codex cihaz koduyla giriş ekranı var. Bağlı profille onaylı kontrollü görev akışı kod ve fixture/mock testleriyle eklendi. Sıradaki iş, bu akışın gerçek hesapla kabulü ve Claude'un etkileşimli giriş yolunu tamamlamak; kalan kabul işleri [GO_GATE.md](GO_GATE.md) içinde takip edilir.
+CommonGrid tam v1 hedefiyle geliştiriliyor. Şu an görev inceleme, hesap/katkı temeli, dosya teslimi, bağımsız doğrulayıcı bağlantısı, kalıcı profil seçimi, native CLI sürüm kontrolü ve Codex cihaz koduyla giriş ekranı var. Bağlı profille onaylı kontrollü görev akışı Windows uygulamasında gerçek Codex/Luna hesabıyla kabul edildi; arayüzde doğrulanmış diff gösteriliyor. Sıradaki iş Claude'un etkileşimli giriş yolunu tamamlamak; diğer platformlar ve daha geniş görev kapsamları [GO_GATE.md](GO_GATE.md) içinde takip edilir.
 
 Bu dosya kurulum ve çalışma rehberidir. Tarihli test sonuçları ve önceki kararların uygulama kayıtları [DEVELOPMENT_HISTORY.md](DEVELOPMENT_HISTORY.md) içinde korunur. Ürün gereksinimleri [spec'te](../PROJECT_SPEC1.2.md), planlanan fazlar [roadmap'te](../implementation_roadmap1.3.md), karar gerekçeleri [ADR'lerde](../spike/adr/) bulunur.
 

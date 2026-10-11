@@ -4,7 +4,7 @@
 
 ## Güncel kanıt
 
-Profil adı/ajan seçimi ve seçili profil, native uygulama deposunda kalıcıdır. Seçili Codex profili resmi cihaz kodu akışıyla bağlanabilir; hesap kontrolü, çıkış ve iptal aynı paneldedir. Profil seçimi kendi başına hesabın bağlı olduğunu göstermez. Native worker ürün paketindeki resmi oturum modülünü kullanır; geçici cihaz kodu kalıcı metadata veya günlüğe yazılmaz. `App.tsx` katalog, ortam ve katkı ayarları modüllerine ayrıldı. Gerçek hesapla giriş tamamlama ve Claude'un etkileşimli giriş bağlantısı sıradaki işlerdir.
+Profil adı/ajan seçimi ve seçili profil, native uygulama deposunda kalıcıdır. Seçili Codex profili resmi cihaz kodu akışıyla bağlanabilir; hesap kontrolü, çıkış ve iptal aynı paneldedir. Profil seçimi kendi başına hesabın bağlı olduğunu göstermez. Native worker ürün paketindeki resmi oturum modülünü kullanır; geçici cihaz kodu kalıcı metadata veya günlüğe yazılmaz. `App.tsx` katalog, ortam ve katkı ayarları modüllerine ayrıldı. Windows uygulamasında resmi Codex girişi ve tek Luna görevi gerçek hesapla kabul edildi; Claude'un etkileşimli giriş bağlantısı sıradaki iştir.
 
 Bağlı profille onaylı görev akışı [ADR 0020](../spike/adr/0020-native-approved-task-run.md) kapsamında kod olarak eklendi: ortak `task-run` sözleşmesi, ürün paketine taşınan kontrollü görev/doğrulayıcı/bellek içi diff, sabitlenmiş Codex kataloğu asset'i, native worker, Rust süpervizörü (`local_task_run_*`) ve **Onaylı görev** paneli. 2026-10-11 Linux bulut koşusunda `npm run check` (243 ürün + 204/9 deneme testi), 59 Rust testi ve 122 browser UI testi geçti. Bunlar sentetik worker bağımlılıkları, sahte Node worker'ları ve native mock'larıdır; gerçek model çağrısı, hesap, Docker görevi veya Windows/WebView2 koşusu yapılmadı. Gerçek sağlayıcı protokolüyle uçtan uca uygulama içi görev kabul edilmedi.
 
@@ -24,11 +24,13 @@ Aynı Claude profili yaklaşık 11 saat sonra [yeniden giriş olmadan status/res
 
 2026-10-11 `npm run test:native-task-smoke` gerçek Windows/WebView2 uygulamasında sekiz hesapsız kontrolü geçti: görev onayı, bağlı olmayan profil hatası, resmi cihaz girişinin iptali, görev iptali ve ardından resmi hesapsız durum kontrolü. Üç terminal işlem günlüğü, dört namespace ve üç claim kimliği için salt okunur Docker sorguları kaynak yokluğunu doğruladı; bu bağımsız envanter yalnız izole hesap profilini kapsar. Görev komutuna iptal iletimi iki sağlayıcı için 41 hedefli testle sınandı. İlk native koşu eksik Docker imaj referansında durdu; sabitlenmiş imaj hazırlanınca yeniden koşu geçti. Bu adım hesap yetkilendirmesi veya model çağrısı yapmadı; `-- --real-account` gerçek Luna görevini ayrıca sınar.
 
+`340aa74` için [gerçek hesapla Windows uygulaması kabulü](../spike/results/native-task-luna-windows-2026-10-11.json) tamamlandı: yeni resmi giriş, UI'dan onaylanan tek `gpt-6-luna` görevi, üç araç çağrısı, 34/34 bağımsız örnek, diff uygulama/hash eşleşmesi ve görev sonrası hesabın bağlı kalması. Dört terminal günlüğün altı namespace ve dört claim kimliği Docker'da yok; ayrı görev/exporter/verifier kaynakları native temizleme kanıtıyla kapsanır. Node 22.14.0 ve production frontend kullanan debug uygulamada sekiz gerçek hesap UI kontrolü geçti. Bu kabul sabit `sum.mjs` görevi ve Windows ile sınırlıdır.
+
 ## Kalan kısa liste
 
 | İş | Kapanması için gereken kanıt | Durum |
 |---|---|---|
-| Native CLI sürüm kontrolü | Gerçek uygulamada iki resmi CLI sürümü, istek/iptal sınırları, günlük ve bağımsız cleanup doğrulaması | Windows kabulü tamamlandı; kalıcı profil seçimi, Codex giriş paneli ve onaylı görev akışı (fixture/mock) eklendi; bağlı profille gerçek görev kabulü bekliyor |
+| Native CLI sürüm kontrolü ve Codex görevi | Gerçek uygulamada resmi CLI sürümleri, giriş, görev, istek/iptal sınırları, günlük ve bağımsız profil cleanup | Windows'ta CLI sürümleri ve tek Codex/Luna görevi kabul edildi; Claude girişi/görevi, diğer görevler ve diğer platformların native UI kabulü bekliyor |
 | Güncel gerçek görev | Geçerli izole resmi profillerle gerçek dosya değişimi, 34 örneklik bağımsız kontrol, cleanup ve API'ye geçiş olmaması | Haiku ve Luna için dar görev kabulü tamamlandı |
 | Kalıcı işlem sahipliği | Restart ve host worker ölümü boyunca aynı profile yarışın engellenmesi, eski işlemin yeni kaynakları silememesi | Claim, faz günlüğü, geliştirici/manual uzlaştırma ve native bağlantı geçti; güvenilir görev kabulü, belirsiz mutasyonların güvenli uzlaştırılması ve otomatik recovery bekliyor |
 | Claude oturum sürekliliği | Doğal zaman geçişi sonrası resmi CLI görevi; yenileme veya yeniden giriş gereksiniminin auth dosyası okumadan gözlenmesi | Gecikmeli status/restart geçti; doğal yenileme bekliyor |
@@ -40,7 +42,7 @@ Yeni Haiku/Luna profilleri sonraki normal gözlemler için giriş yapmış halde
 
 ## Çalışma sırası
 
-1. Uygulamadaki görev akışı (profil seçimi → resmi CLI girişi/durumu → onaylı görev → Başlat → ilerleme/iptal → doğrulanmış diff) kod ve fixture/mock testleriyle tamamlandı. Kalan: `install:cli-fixtures` + `prepare:native-launcher` sonrası Windows'ta giriş yapmış Codex/Luna profiliyle gerçek uygulama içi görev kabulü; ardından tarihli rapor. Gerçek koşu Luna dışında modele geçmez; model yoksa durur. Claude görevi, Claude girişi uygulamaya bağlanınca açılır.
+1. Uygulamadaki görev akışı (profil seçimi → resmi CLI girişi/durumu → onaylı görev → Başlat → ilerleme/iptal → doğrulanmış diff) Windows'ta gerçek Codex/Luna hesabıyla kabul edildi. Sıradaki ürün işi Claude'un resmi etkileşimli girişini uygulamaya bağlamak ve aynı akışı Haiku ile sınamak; diğer görev türleri ve platformlar ayrıca genişletilecek. Gerçek koşu ucuz model dışında modele geçmez; model yoksa durur.
 2. `App.tsx` ayrıştırması tamamlandı: katalog ve görev detayı `WorkspacePage`/`useTaskCatalog`, ortam ekranı `EnvironmentPage`, katkı ayarları `ContributionSettingsPage` içinde. Yeni giriş/görev panellerini bu modüllere bağla; mevcut arayüz davranışını koru.
 3. Akışın kendi kimlik izolasyonu, süre sınırı, iptal ve kaynak sahipliği kontrollerini tamamla. Create cevabının kaybı, daemon kesintisi veya belirsiz cleanup durumunda yeni başlangıcı engelle ve manuel inceleme göster; operatör beyanını otomatik durma kanıtı sayma. Doğal kota tükenmesi, üç platformun tümü ve her otomatik recovery yolu, dar kapsamda kabul edilen herhangi bir görevin başlaması için ortak önkoşul değildir. Oturum/limit davranışını normal kullanımda gözle; diğer ajan/platform ve recovery yollarını ayrıca tamamla. Dar kabul tüm v1'e yayılmaz; genel GO durumu değişmez.
 
