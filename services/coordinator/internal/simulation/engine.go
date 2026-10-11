@@ -222,9 +222,29 @@ type runState struct {
 	verifyQ, reviewQ       []*candidate
 	verifyBusy, reviewBusy int
 	sharedGroups           map[string]bool
+	execution              *executionBudget
 }
 
+const (
+	maxRunEvents        = 100_000
+	maxSimulationEvents = 1_000_000
+)
+
+type executionLimitError struct{}
+
+func (executionLimitError) Error() string {
+	return "simulation execution limit exceeded; reduce samples, horizon or budget"
+}
+
+// Bound actual work, rather than assuming a large virtual horizon is cheap.
+// Simulate shares this allowance across every policy and sampled world.
+type executionBudget struct{ events int }
+
 func (r *runState) push(e *event) {
+	if r.seq >= maxRunEvents || r.execution.events >= maxSimulationEvents {
+		panic(executionLimitError{})
+	}
+	r.execution.events++
 	r.seq++
 	e.seq = r.seq
 	heap.Push(&r.q, e)
@@ -232,7 +252,12 @@ func (r *runState) push(e *event) {
 
 // RunOnce simulates one policy on one world. It is deterministic.
 func RunOnce(sc *Scenario, spec PolicySpec, world World, runIndex int) *RunResult {
+	return runOnce(sc, spec, world, runIndex, &executionBudget{})
+}
+
+func runOnce(sc *Scenario, spec PolicySpec, world World, runIndex int, execution *executionBudget) *RunResult {
 	r := &runState{
+		execution:    execution,
 		sc:           sc,
 		world:        world,
 		policy:       spec.New(),
@@ -718,6 +743,9 @@ func (r *runState) accept(c *candidate) {
 // every unsolved branch below it.
 func (r *runState) markSolved(n *nstate) {
 	n.solved = true
+	if len(n.children) == 0 {
+		r.cancelLeafWork(n)
+	}
 	for _, c := range n.children {
 		r.closeBranch(c)
 	}
@@ -755,6 +783,12 @@ func (r *runState) closeBranch(n *nstate) {
 	if len(n.children) > 0 {
 		return
 	}
+	r.cancelLeafWork(n)
+}
+
+// Stop competing attempts as soon as their leaf is accepted, even when an
+// unfinished AND sibling keeps the root open.
+func (r *runState) cancelLeafWork(n *nstate) {
 	for _, att := range r.attempts {
 		if att.leaf != n {
 			continue

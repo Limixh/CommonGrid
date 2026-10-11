@@ -182,7 +182,11 @@ type Options struct {
 func Simulate(sc *Scenario, opts Options) (rep *Report, err error) {
 	defer func() {
 		if p := recover(); p != nil {
-			rep, err = nil, fmt.Errorf("simulation invariant violated: %v", p)
+			if limit, ok := p.(executionLimitError); ok {
+				rep, err = nil, limit
+			} else {
+				rep, err = nil, fmt.Errorf("simulation invariant violated: %v", p)
+			}
 		}
 	}()
 	samples := opts.Samples
@@ -212,12 +216,13 @@ func Simulate(sc *Scenario, opts Options) (rep *Report, err error) {
 		Samples: samples,
 	}
 	results := make([][]*RunResult, len(opts.Policies))
+	execution := &executionBudget{}
 	for i := 0; i < samples; i++ {
 		world := NewWorld(opts.Seed, i)
 		digest := world.Digest(sc)
 		rep.Worlds = append(rep.Worlds, WorldInfo{Sample: i, Digest: digest})
 		for p, spec := range opts.Policies {
-			res := RunOnce(sc, spec, world, i)
+			res := runOnce(sc, spec, world, i, execution)
 			if res.WorldDigest != digest {
 				return nil, fmt.Errorf("policy %s saw a different world in sample %d", spec.ID, i)
 			}

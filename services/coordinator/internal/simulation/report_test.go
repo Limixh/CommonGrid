@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -24,7 +25,7 @@ func simulateJSON(t *testing.T, name string, seed int64, samples int) []byte {
 
 func TestSameInputAndSeedGiveByteIdenticalJSON(t *testing.T) {
 	for _, path := range fixtureNames(t) {
-		name := strings.TrimSuffix(path[strings.LastIndex(path, "/")+1:], ".json")
+		name := strings.TrimSuffix(filepath.Base(path), ".json")
 		first := simulateJSON(t, name, 11, 6)
 		if second := simulateJSON(t, name, 11, 6); !bytes.Equal(first, second) {
 			t.Fatalf("%s: two runs differ", name)
@@ -153,5 +154,14 @@ func TestSimulateRejectsBadOptions(t *testing.T) {
 	rep, err := Simulate(sc, Options{Seed: 1, Policies: allPolicies(t)})
 	if err != nil || rep.Samples != sc.RecommendedSamples {
 		t.Fatalf("default sample count: %v %v", rep, err)
+	}
+}
+
+func TestLargeFailureScenarioStopsWithoutReturningAPartialReport(t *testing.T) {
+	sc := miniScenario(t, "a", []obj{leafNode("a", "sim-a", 0, 1, 1, nil)},
+		[]obj{volunteer("v1", "alpha", "prov-x", nil)}, 1_000_000, nil)
+	rep, err := Simulate(sc, Options{Seed: 1, Samples: 1, Policies: []PolicySpec{policy(t, "single")}})
+	if rep != nil || err == nil || !strings.Contains(err.Error(), "execution limit exceeded") {
+		t.Fatalf("expected execution limit with no partial report, got report=%v error=%v", rep != nil, err)
 	}
 }

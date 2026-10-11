@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -28,6 +29,8 @@ const (
 	maxSamples           = 10000
 	maxContractsFileSize = 8 << 20
 	maxScenarioFileSize  = 4 << 20
+	maxVirtualSec        = int64(365 * 24 * 3600)
+	maxBudgetAgentSec    = int64(1_000_000_000_000)
 )
 
 var scenarioIDPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,95}$`)
@@ -39,8 +42,8 @@ type Range struct {
 }
 
 func (r Range) validate(name string) error {
-	if r.Min < 1 || r.Max < r.Min {
-		return fmt.Errorf("%s: need 1 <= min <= max", name)
+	if r.Min < 1 || r.Max < r.Min || r.Max > maxVirtualSec {
+		return fmt.Errorf("%s: need 1 <= min <= max <= %d", name, maxVirtualSec)
 	}
 	return nil
 }
@@ -176,7 +179,7 @@ func Parse(raw []byte, baseDir string) (*Scenario, error) {
 	if err := decoder.Decode(&sc); err != nil {
 		return nil, fmt.Errorf("scenario: %w", err)
 	}
-	if decoder.More() {
+	if err := decoder.Decode(new(any)); err != io.EOF {
 		return nil, errors.New("scenario: trailing data")
 	}
 	sum := sha256.Sum256(raw)
@@ -413,15 +416,15 @@ func (m *LeafModel) validate(id string) error {
 func inUnit(p float64) bool { return p >= 0 && p <= 1 }
 
 func (sc *Scenario) validateCapacity() error {
-	if sc.Budget.TotalAgentSec < 1 {
-		return errors.New("scenario: budget.total_agent_sec must be positive")
+	if sc.Budget.TotalAgentSec < 1 || sc.Budget.TotalAgentSec > maxBudgetAgentSec {
+		return fmt.Errorf("scenario: budget.total_agent_sec must be 1..%d", maxBudgetAgentSec)
 	}
 	if len(sc.Volunteers) == 0 || len(sc.Volunteers) > 1000 {
 		return errors.New("scenario: 1..1000 volunteers required")
 	}
 	seen := map[string]bool{}
 	for _, v := range sc.Volunteers {
-		if v.ID == "" || seen[v.ID] || v.Profile == "" || v.Provider == "" || v.JoinSec < 0 || v.Slots < 0 || v.Slots > 50 {
+		if v.ID == "" || seen[v.ID] || v.Profile == "" || v.Provider == "" || v.JoinSec < 0 || v.JoinSec > maxVirtualSec || v.Slots < 0 || v.Slots > 50 {
 			return fmt.Errorf("scenario: bad volunteer %q", v.ID)
 		}
 		seen[v.ID] = true
@@ -431,21 +434,24 @@ func (sc *Scenario) validateCapacity() error {
 			}
 		}
 	}
+	if len(sc.Outages) > 1000 || len(sc.RandomOutages) > 100 {
+		return errors.New("scenario: at most 1000 outages and 100 random outage rules are allowed")
+	}
 	for _, o := range sc.Outages {
-		if o.Provider == "" || o.StartSec < 0 || o.EndSec <= o.StartSec {
+		if o.Provider == "" || o.StartSec < 0 || o.EndSec <= o.StartSec || o.EndSec > maxVirtualSec {
 			return errors.New("scenario: bad outage window")
 		}
 	}
 	for _, o := range sc.RandomOutages {
-		if o.Provider == "" || o.Count < 1 || o.Count > 100 || o.StartSec.Min < 0 || o.StartSec.Max < o.StartSec.Min {
+		if o.Provider == "" || o.Count < 1 || o.Count > 100 || o.StartSec.Min < 0 || o.StartSec.Max < o.StartSec.Min || o.StartSec.Max > maxVirtualSec {
 			return errors.New("scenario: bad random outage")
 		}
 		if err := o.DurationSec.validate("random outage duration_sec"); err != nil {
 			return err
 		}
 	}
-	if sc.Verification.Workers < 0 || sc.Review.Reviewers < 0 || sc.Handoff.OverheadSec < 0 || sc.HorizonSec < 0 {
-		return errors.New("scenario: negative stage or horizon value")
+	if sc.Verification.Workers < 0 || sc.Verification.Workers > 1000 || sc.Review.Reviewers < 0 || sc.Review.Reviewers > 1000 || sc.Handoff.OverheadSec < 0 || sc.HorizonSec < 0 || sc.HorizonSec > maxVirtualSec {
+		return errors.New("scenario: stage workers must be 0..1000, overhead nonnegative and horizon 0..31536000")
 	}
 	for name, r := range map[string]*Range{"verification.duration_sec": sc.Verification.DurationSec, "review.duration_sec": sc.Review.DurationSec} {
 		if r != nil {

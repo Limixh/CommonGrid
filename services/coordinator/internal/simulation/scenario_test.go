@@ -2,6 +2,7 @@ package simulation
 
 import (
 	"encoding/json"
+	"math"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -84,6 +85,19 @@ func TestScenarioRejectsInvalidInput(t *testing.T) {
 		"no contracts source":               func(d obj) { delete(d, "contracts_file") },
 		"absolute contracts file":           func(d obj) { d["contracts_file"] = "/etc/passwd" },
 		"handoff overhead above time limit": func(d obj) { d["handoff"] = obj{"overhead_sec": 600} },
+		"overflowing budget":                func(d obj) { d["budget"] = obj{"total_agent_sec": int64(math.MaxInt64)} },
+		"overflowing work range": func(d obj) {
+			nodesOf(d)[1].(obj)["synthetic"].(obj)["work_sec"] = obj{"min": 1, "max": int64(math.MaxInt64)}
+		},
+		"overflowing join time": func(d obj) { d["volunteers"].([]any)[0].(obj)["join_sec"] = int64(math.MaxInt64) },
+		"overflowing online duration": func(d obj) {
+			d["volunteers"].([]any)[0].(obj)["online_sec"] = obj{"min": 1, "max": int64(math.MaxInt64)}
+		},
+		"overflowing random outage start": func(d obj) {
+			d["random_outages"] = []obj{{"provider": "x", "count": 1, "start_sec": obj{"min": 0, "max": int64(math.MaxInt64)}, "duration_sec": obj{"min": 1, "max": 1}}}
+		},
+		"overflowing verification duration": func(d obj) { d["verification"] = obj{"duration_sec": obj{"min": 1, "max": int64(math.MaxInt64)}} },
+		"unbounded horizon":                 func(d obj) { d["horizon_sec"] = int64(math.MaxInt64) },
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -91,6 +105,15 @@ func TestScenarioRejectsInvalidInput(t *testing.T) {
 				t.Fatal("scenario should be rejected")
 			}
 		})
+	}
+}
+
+func TestScenarioRejectsEveryKindOfTrailingData(t *testing.T) {
+	raw := scenarioDoc(t, func(obj) {})
+	for _, suffix := range []string{"]", "}", "{}", "null", "garbage"} {
+		if _, err := Parse(append(append([]byte(nil), raw...), suffix...), scenarioDir); err == nil {
+			t.Fatalf("scenario accepted trailing %q", suffix)
+		}
 	}
 }
 

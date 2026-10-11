@@ -14,6 +14,8 @@ node scripts/go.mjs test ./internal/simulation ./cmd/simulate
 
 `--seed` zorunludur; `--samples` verilmezse senaryonun `recommended_samples` değeri kullanılır. Çıkış varsayılan olarak stdout'a gider. Üretilen raporlar commit edilmez; yalnız `internal/simulation/testdata/golden` altındaki test golden dosyası bilinçli takip edilir.
 
+Süre aralıkları, katılma/kesinti zamanları ve horizon en fazla 365 gün; bütçe en fazla 1.000.000.000.000 ajan-saniyedir. Bir koşu en fazla 100.000, tüm karşılaştırma toplam 1.000.000 olay oluşturabilir. Sınır aşıldığında araç hata döndürür ve kısmi rapor üretmez; örneklem, horizon veya bütçe azaltılmalıdır. Bu sınırlar taşmayı ve kısa süreli başarısız denemelerin sınırsız CPU/bellek tüketimini önler.
+
 ## Senaryo formatı
 
 `commongrid.simulation.scenario` sürüm `1.0`; canlı görev şemasından ayrı sürümlenir, bilinmeyen alan reddedilir. Görev sözleşmeleri `contracts_file` (katalog biçimi, senaryoya göre göreli) veya satır içi `contracts` ile verilir ve her biri `contract.Validator` ile (şema, semantik, `contract_hash`) doğrulanır. AND/OR ilişkileri ve sentetik sonuçlar yalnız senaryoda bulunur.

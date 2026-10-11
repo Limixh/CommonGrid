@@ -419,3 +419,48 @@ func TestTimeLimitWithoutHandoffTimesOut(t *testing.T) {
 		t.Fatalf("expected timeouts: %+v", res)
 	}
 }
+
+func TestAcceptedLeafStopsCompetingWorkBeforeANDSiblingsFinish(t *testing.T) {
+	sc := miniScenario(t, "root", []obj{
+		innerNode("root", "sim-root", "and", "a", "b"),
+		leafNode("a", "sim-a", 1, 100, 590, nil),
+		leafNode("b", "sim-b", 1, 500, 500, nil),
+	}, twoLeafVolunteers(), 3000, nil)
+	var seed int64
+	var acceptedAt int64
+	for seed = 1; seed < 100; seed++ {
+		world := NewWorld(seed, 0)
+		first := pick(world.Attempt("sim-a", 0).Work, Range{100, 590})
+		second := pick(world.Attempt("sim-a", 1).Work, Range{100, 590})
+		if first < 400 && second > first+1 {
+			acceptedAt = first + 1
+			break
+		}
+	}
+	if acceptedAt == 0 {
+		t.Fatal("no world with a pending competing attempt found")
+	}
+	res := runPolicy(t, sc, "round-robin", seed, 0)
+	auditRun(t, sc, res)
+	if !res.Solved || res.WallSec != 501 || res.Cancelled < 1 || res.Useful != 2 {
+		t.Fatalf("expected a cancelled competitor while b completes: %+v", res)
+	}
+	for _, entry := range res.Ledger {
+		if entry.Task == "sim-a" && entry.End > acceptedAt {
+			t.Fatalf("accepted leaf consumed compute after %d: %+v", acceptedAt, entry)
+		}
+	}
+}
+
+func TestExecutionBudgetIsSharedAcrossRuns(t *testing.T) {
+	budget := &executionBudget{events: maxSimulationEvents - 1}
+	first := &runState{execution: budget}
+	first.push(&event{at: 1})
+	second := &runState{execution: budget}
+	defer func() {
+		if _, ok := recover().(executionLimitError); !ok {
+			t.Fatal("second run must share the exhausted execution allowance")
+		}
+	}()
+	second.push(&event{at: 1})
+}
