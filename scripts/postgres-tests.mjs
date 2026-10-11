@@ -3,18 +3,29 @@
 import { createHash, randomBytes } from "node:crypto";
 import { existsSync, openSync, closeSync } from "node:fs";
 import { mkdir, readFile, readdir, writeFile, unlink } from "node:fs/promises";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:net";
+import { setTimeout as delay } from "node:timers/promises";
 import path from "node:path";
 import { root, runGo } from "./go.mjs";
 
+const arguments_ = process.argv.slice(2);
+if (arguments_.some((arg) => arg !== "--cloud-ui") || new Set(arguments_).size !== arguments_.length) {
+  throw new Error("Usage: node scripts/postgres-tests.mjs [--cloud-ui]");
+}
+const cloudUI = arguments_.includes("--cloud-ui");
 const runDir = path.join(root, ".local/postgres-tests", `run-${Date.now()}-${process.pid}`);
 await mkdir(runDir, { recursive: true });
 const tmp = path.join(root, ".tools/tmp");
 await mkdir(tmp, { recursive: true });
 const env = { ...process.env, GOCACHE: path.join(root, ".tools/go-cache"), GOMODCACHE: path.join(root, ".tools/go-mod"), GOTMPDIR: tmp, CG_REQUIRE_DATABASE_TESTS: "1" };
+const readyFile = path.join(runDir, "cloud-ui-ready.json");
+// Do not allow inherited UI-mode state to affect the ordinary database suite.
+delete env.CG_CLOUD_UI_READY_FILE;
+if (cloudUI) env.CG_CLOUD_UI_READY_FILE = readyFile;
 const migrationsDir = new URL("../services/coordinator/internal/store/migrations/", import.meta.url);
 let pgctl, dataDir, started = false;
+const postgresCleanup = { owned: false, status: "not_applicable", attempts: 0 };
 function controlled(command, args, capture = false) {
   const logFd = capture ? undefined : openSync(path.join(runDir, "setup.log"), "a");
   let result;
@@ -27,25 +38,76 @@ function controlled(command, args, capture = false) {
   return capture ? result.stdout : undefined;
 }
 function stop() {
-  if (started) {
+  if (started && postgresCleanup.attempts < 2) {
+    postgresCleanup.attempts++;
     const result = spawnSync(pgctl, ["-D", dataDir, "-m", "immediate", "-w", "-t", "15", "stop"], { windowsHide: true, stdio: "ignore", timeout: 20_000 });
-    started = false;
-    if (result.status !== 0) console.error(`Owned PostgreSQL test server cleanup failed; data directory: ${dataDir}`);
+    if (!result.error && result.status === 0) {
+      started = false;
+      postgresCleanup.status = "verified";
+    } else {
+      postgresCleanup.status = "failed";
+      console.error(`Owned PostgreSQL test server cleanup failed; data directory: ${dataDir}`);
+    }
   }
+  return postgresCleanup;
 }
 process.on("exit", stop);
-let goChild;
+let goChild, uiChild;
 let interrupted = false;
+function terminateTree(child) {
+  if (!child?.pid || child.exitCode !== null || child.signalCode !== null) return;
+  if (process.platform === "win32") {
+    spawnSync("taskkill", ["/pid", String(child.pid), "/t", "/f"], { windowsHide: true, stdio: "ignore", timeout: 10_000 });
+  } else {
+    // Cloud-mode children own a process group; kill only that group.
+    try { cloudUI ? process.kill(-child.pid, "SIGKILL") : child.kill("SIGTERM"); }
+    catch (error) { if (error.code !== "ESRCH") throw error; }
+  }
+}
 function interrupt() {
   interrupted = true;
-  if (goChild?.pid && goChild.exitCode === null) {
-    if (process.platform === "win32") spawnSync("taskkill", ["/pid", String(goChild.pid), "/t", "/f"], { windowsHide: true, stdio: "ignore" });
-    else goChild.kill("SIGTERM");
-  }
+  terminateTree(uiChild);
+  terminateTree(goChild);
   stop();
 }
 process.on("SIGINT", interrupt);
 process.on("SIGTERM", interrupt);
+
+async function bounded(promise, timeoutMs, message) {
+  let timer;
+  try {
+    return await Promise.race([promise, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(message)), timeoutMs); })]);
+  } finally { clearTimeout(timer); }
+}
+
+async function waitForCloudReady(completion) {
+  const deadline = Date.now() + 120_000;
+  while (Date.now() < deadline) {
+    if (interrupted) throw new Error("Cloud UI acceptance interrupted");
+    // Check completion before the file so stale readiness cannot mask exit.
+    if (goChild.exitCode !== null || goChild.signalCode !== null) throw new Error("Cloud UI Go test exited before readiness");
+    let body;
+    try { body = await readFile(readyFile, "utf8"); }
+    catch (error) { if (error.code !== "ENOENT") throw new Error("Cloud UI readiness file could not be read"); }
+    if (body !== undefined) {
+      let metadata;
+      try { metadata = JSON.parse(body); }
+      catch { throw new Error("Cloud UI readiness metadata is malformed"); }
+      // Only the loopback origin is extracted here. IDs remain in the owned
+      // ready file for the smoke script; no auth/session data is printed.
+      let url;
+      try { url = new URL(metadata?.url); }
+      catch { throw new Error("Cloud UI readiness URL is malformed"); }
+      if (url.protocol !== "http:" || !["127.0.0.1", "localhost", "[::1]"].includes(url.hostname) ||
+          !url.port || Number(url.port) < 1 || url.username || url.password || url.search || url.hash || url.pathname !== "/") {
+        throw new Error("Cloud UI readiness URL must be a credential-free loopback HTTP origin");
+      }
+      return url.origin;
+    }
+    await Promise.race([delay(250), completion.then(() => { throw new Error("Cloud UI Go test exited before readiness"); })]);
+  }
+  throw new Error("Cloud UI readiness timed out after 120 seconds");
+}
 
 try {
   let serverVersion = "external dedicated test database";
@@ -83,15 +145,63 @@ try {
     await new Promise((resolve) => listener.close(resolve));
     // Only generated numeric port/loopback flags reach pg_ctl's option string.
     started = true;
+    postgresCleanup.owned = true;
+    postgresCleanup.status = "pending";
     controlled(pgctl, ["-D", dataDir, "-l", path.join(runDir, "server.log"), "-w", "-t", "30", "-o", `-h 127.0.0.1 -p ${port} -F`, "start"]);
     env.CG_TEST_DATABASE_URL = `postgresql://cgtest:${password}@127.0.0.1:${port}/postgres?sslmode=disable`;
   }
   console.log(`Testing domain transactions on ${serverVersion}`);
   let stdout = "", stderr = "";
-  goChild = runGo(["test", "./internal/store", "./internal/outbox", "./internal/httpapi", "-count=1", "-json"], { env, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
-  goChild.stdout.on("data", (chunk) => { stdout += chunk; });
+  const goArguments = cloudUI
+    ? ["test", "./internal/httpapi", "-run", "^TestPostgresCloudContributionAndCatalog$", "-count=1", "-json", "-timeout", "30m"]
+    : ["test", "./internal/store", "./internal/outbox", "./internal/httpapi", "-count=1", "-json"];
+  goChild = runGo(goArguments, { env, stdio: ["ignore", "pipe", "pipe"], windowsHide: true, ...(cloudUI && process.platform !== "win32" ? { detached: true } : {}) });
+  let pendingLines = "";
+  goChild.stdout.on("data", (chunk) => {
+    stdout += chunk;
+    if (!cloudUI) return;
+    pendingLines += chunk;
+    const lines = pendingLines.split(/\r?\n/);
+    pendingLines = lines.pop();
+    for (const line of lines) {
+      try {
+        const event = JSON.parse(line);
+        if (["run", "pass", "fail", "skip"].includes(event.Action)) console.log(`Go ${event.Action}: ${event.Test ?? event.Package}`);
+      } catch { /* Raw output remains in the owned log, never streamed. */ }
+    }
+  });
   goChild.stderr.on("data", (chunk) => { stderr += chunk; });
-  const code = await new Promise((resolve, reject) => { goChild.once("error", reject); goChild.once("exit", (code) => resolve(code ?? 1)); });
+  const goCompletion = new Promise((resolve) => {
+    goChild.once("error", () => resolve(1));
+    goChild.once("close", (code) => resolve(code ?? 1));
+  });
+  let cloudFailure, cloudUIPassed = false;
+  if (cloudUI) {
+    try {
+      const apiURL = await waitForCloudReady(goCompletion);
+      console.log("Cloud UI fixture ready; starting native acceptance");
+      uiChild = spawn(process.execPath, ["--import", "tsx", path.join(root, "scripts/native-cloud-ui-smoke.mts"), "--api-url", apiURL, "--ready-file", readyFile],
+        { cwd: root, env: process.env, windowsHide: true, stdio: "inherit", ...(process.platform !== "win32" ? { detached: true } : {}) });
+      const uiCompletion = new Promise((resolve) => {
+        uiChild.once("error", () => resolve(1));
+        uiChild.once("close", (code) => resolve(code ?? 1));
+      });
+      const uiCode = await bounded(Promise.race([uiCompletion,
+        goCompletion.then(() => { throw new Error("Cloud UI Go test exited during native acceptance"); })]),
+        25 * 60_000, "Cloud UI native acceptance timed out");
+      if (uiCode !== 0 || interrupted) throw new Error("Cloud UI native acceptance failed");
+      cloudUIPassed = true;
+    } catch (error) {
+      cloudFailure = error;
+      terminateTree(uiChild);
+      terminateTree(goChild);
+    } finally {
+      await writeFile(readyFile + ".stop", "stop\n");
+    }
+  }
+  let code;
+  try { code = cloudUI ? await bounded(goCompletion, 30_000, "Cloud UI Go test did not stop after acceptance") : await goCompletion; }
+  catch (error) { cloudFailure = error; terminateTree(goChild); code = await bounded(goCompletion, 10_000, "Cloud UI Go test cleanup timed out"); }
   await writeFile(path.join(runDir, "go-test.jsonl"), stdout);
   await writeFile(path.join(runDir, "go-test.stderr.log"), stderr);
   const events = stdout.split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line));
@@ -102,13 +212,27 @@ try {
   for (const name of (await readdir(migrationsDir)).filter((name) => name.endsWith(".sql")).sort()) {
     migrationHashes[name] = createHash("sha256").update(await readFile(new URL(name, migrationsDir))).digest("hex");
   }
-  const report = { checked_at: new Date().toISOString(), platform: process.platform, server_version: serverVersion, migrations_sha256: migrationHashes, passed, skipped, failed, success: code === 0 && skipped.length === 0 && !interrupted, independent_artifact_scanner: env.CG_REQUIRE_TRIVY_TESTS === "1" ? "required_pinned_trivy" : "explicit_fixture", verifier_harness: "trusted_fixture_only", execution_enabled: false, isolation_gate: "not_evaluated", real_account_tested: false, real_model_inference: false };
+  // The Go process has fully exited. Verify owned PostgreSQL shutdown before
+  // finalizing success; finally/exit may retry a failed stop once at most.
+  stop();
+  // Match databaseAPI's opt-in exactly: either pinned-scanner variable also
+  // requests Trivy, including incomplete configuration that the Go test rejects.
+  const independentScanner = env.CG_REQUIRE_TRIVY_TESTS === "1" || Boolean(env.CG_TEST_TRIVY_BINARY || env.CG_TEST_TRIVY_SHA256);
+  const report = { checked_at: new Date().toISOString(), platform: process.platform, server_version: serverVersion, migrations_sha256: migrationHashes, passed, skipped, failed, success: code === 0 && skipped.length === 0 && !interrupted && postgresCleanup.status !== "failed" && (!cloudUI || (cloudUIPassed && !cloudFailure)), postgres_cleanup: { ...postgresCleanup }, independent_artifact_scanner: independentScanner ? "required_pinned_trivy" : "explicit_fixture", verifier_harness: "trusted_fixture_only", execution_enabled: false, isolation_gate: "not_evaluated", real_account_tested: false, real_model_inference: false, ...(cloudUI ? { cloud_ui_acceptance: cloudUIPassed && !cloudFailure ? "passed" : "failed" } : {}) };
   await writeFile(path.join(runDir, "report.json"), JSON.stringify(report, null, 2)+"\n");
   if (!report.success) {
-    for (const event of events) if (event.Action === "output" && (failed.includes(event.Test) || !event.Test)) process.stderr.write(event.Output ?? "");
-    if (stderr) process.stderr.write(stderr);
+    if (cloudUI) console.error(cloudFailure?.message ?? "Cloud UI database acceptance failed; inspect the owned run logs");
+    else {
+      for (const event of events) if (event.Action === "output" && (failed.includes(event.Test) || !event.Test)) process.stderr.write(event.Output ?? "");
+      if (stderr) process.stderr.write(stderr);
+    }
     throw new Error(`PostgreSQL integration failed; report: ${path.join(runDir, "report.json")}`);
   }
   console.log(`PASS: ${passed.length} tests, no skipped database tests`);
   console.log(`Report: ${path.join(runDir, "report.json")}`);
-} finally { stop(); }
+} finally {
+  if (cloudUI) {
+    try { await writeFile(readyFile + ".stop", "stop\n"); }
+    finally { terminateTree(uiChild); terminateTree(goChild); stop(); }
+  } else { stop(); }
+}

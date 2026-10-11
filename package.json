@@ -34,6 +34,7 @@
     "prepare:native-launcher": "node scripts/native-launcher-assets.mjs",
     "test:spike": "node scripts/spike.mjs test",
     "test:db": "node scripts/postgres-tests.mjs",
+    "test:native-cloud-ui": "node scripts/postgres-tests.mjs --cloud-ui",
     "db:migrate": "node scripts/go.mjs run ./cmd/db migrate",
     "spike:recovery": "node scripts/spike.mjs recovery",
     "spike:routing": "node spike/cli-routing/probe.mjs",
