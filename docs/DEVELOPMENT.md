@@ -45,6 +45,7 @@ Windows başlatıcısı Docker Desktop Linux motorunun sabit yerel named pipe'ı
 | npm run test:product | Ürün paketleri, Go sunucusu ve geliştirme araçları; gerçek AI yok |
 | npm run test:spike-fixtures | CLI protokolü, oturum, kota, broker ve deneme sınırları; kayıtlı/sentetik cevaplar, gerçek AI yok |
 | npm run test:db | Ayrılmış gerçek PostgreSQL; normal DATABASE_URL kullanılmaz |
+| npm run test:native-cloud-ui | Windows/WebView2: gerçek PostgreSQL/coordinator ile 65 görev, sayfalama, bağımlılık ve katkı/checkpoint panelleri; 780 px izole gizli debug uygulaması. OAuth kimliği ve verifier açık fixture; model çağrısı yok |
 | npm run test:ui | Önce install:browsers; tarayıcıda görev/hesap/katkı ve işlem günlüğü incelemesi |
 | npm run test:native | Rust okuyucu ve IPC sınırı; yerel Rust toolchain gerekir |
 | npm run test:native-smoke | Windows/WebView2 üzerinde paketlenmiş asset ve gerçek native günlük komutu; yeni sentetik uygulama diziniyle gizli pencere |

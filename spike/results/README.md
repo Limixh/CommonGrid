@@ -1,9 +1,10 @@
 # F0 test kayıtları
 
-2026-10-08–2026-10-11, Windows x64 / Europe-Istanbul ve ayrı uzak CI kayıtları. JSON kayıtlarında zamanlar UTC olarak tutulur; yerel gün Europe/Istanbul (+03:00) ile belirlenir. Örneğin 8 Ekim 21:xx UTC, yerel 9 Ekim 00:xx; 9 Ekim 08:xx UTC, yerel 9 Ekim 11:xx saatidir.
+2026-10-08–2026-10-12, Windows x64 / Europe-Istanbul ve ayrı uzak CI kayıtları. JSON kayıtlarında zamanlar UTC olarak tutulur; yerel gün Europe/Istanbul (+03:00) ile belirlenir. Örneğin 8 Ekim 21:xx UTC, yerel 9 Ekim 00:xx; 9 Ekim 08:xx UTC, yerel 9 Ekim 11:xx saatidir.
 
 | Kayıt | Kanıt | Sınır |
 |---|---|---|
+| [cloud-tasks-local-windows-2026-10-12.json](cloud-tasks-local-windows-2026-10-12.json) | Dört Claude teslimi ve yerel düzeltmeler: genel kontrol, 47 UI testi, 113 PostgreSQL testi; gerçek coordinator ile Windows/WebView2'de 65 görev, 50+15 sayfalama, katkı/checkpoint panelleri ve 780 px görünüm | Native API test bağlantısı; OAuth/scanner/verifier fixture. Gerçek hesap/model ve canlı milestone/simülatör entegrasyonu kapsam dışı |
 | [native-task-luna-windows-2026-10-11.json](native-task-luna-windows-2026-10-11.json) | `340aa74` Windows uygulamasında resmi giriş, tek Luna görevi, üç araç çağrısı, 34/34 doğrulama, diff hash eşleşmesi ve bağımsız profil cleanup; hesapsız ve gerçek hesap koşuları sekizer UI kontrolünü geçti | Tek kontrollü görev; debug native/production frontend, yeni izole depo. Diğer görevler/platformlar ve Claude girişi bu kabulün dışında |
 | [github-foundations-9d9e7ed-2026-10-11.json](github-foundations-9d9e7ed-2026-10-11.json) | `9d9e7ed` için 11 başarılı CI işi; üç OS native test/derleme, 377 Node ve 40 browser UI testi, Linux'ta 20 CLI protokol kontrolü ve 54 Docker grubu | Gerçek Windows UI kabulü ayrı kayıttadır; hesap/model veya genel görev çalıştırma kabulü değildir |
 | [native-cli-launcher-node22-windows-2026-10-11.json](native-cli-launcher-node22-windows-2026-10-11.json) | `9d9e7ed` ve Node 22.23.3 ile gerçek Windows uygulamasında dokuz native kontrol; iki resmi CLI sürümü, iptal ve bağımsız cleanup. Node 22.23.3/22.14.0 için ayrı ayrı 19 Rust testi geçti | Yeni sürüm kontrolü profilleri; hesap/model çağrısı yok. Node yol hatası, ara StorageFull ve kapalı Docker koşuları başarısız olarak korunur; yönetilen giriş ve uygulamadan görev başlatma sonraki ürün adımı |

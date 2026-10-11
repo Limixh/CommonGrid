@@ -1,0 +1,58 @@
+{
+  "schema_version": "1.0",
+  "checked_at": "2026-10-11T21:30:06.997Z",
+  "local_date": "2026-10-12",
+  "timezone": "Europe/Istanbul",
+  "purpose": "local_review_and_acceptance_of_four_claude_cloud_tasks",
+  "success": true,
+  "cloud_head": "631f9d3",
+  "reviewed_cloud_merges": ["10891de", "7e99441", "9f64dbf", "631f9d3"],
+  "review_fixes": ["c6007ca", "94b3bca", "6d465b2"],
+  "validated_harness_commit": "8404277",
+  "checks": {
+    "npm_run_check": "passed",
+    "go_vet": "passed",
+    "relevant_playwright_tests": {"passed": 47, "failed": 0},
+    "postgresql_suite": {"version": "18.6", "passed": 113, "skipped": 0, "failed": 0},
+    "native_cloud_ui": {
+      "passed": 4,
+      "platform": "windows_webview2",
+      "debug_unbundled_executable": true,
+      "production_frontend_assets": true,
+      "configured_width_css_px": 780,
+      "catalog_records": 65,
+      "catalog_page_sizes": [50, 15],
+      "status_filter_and_cross_page_dependency_navigation": "passed",
+      "lease_and_submission_artifact_details": "passed",
+      "unicode_checkpoint_summary_and_instructions": "passed",
+      "read_only_compatible_checkpoint_lookup": "passed",
+      "horizontal_overflow_checks": "passed",
+      "screenshots_visually_reviewed": true,
+      "api_response_mocks": false,
+      "actual_postgresql_and_coordinator_http": true,
+      "owned_app_cleanup": "termination_reported",
+      "owned_postgresql_cleanup": "verified"
+    }
+  },
+  "milestone_decision": {
+    "previous_pass_with_missing_current_result": "unconfirmed",
+    "previous_pass_with_current_fail_or_blocked": "regressed",
+    "missing_evidence_retains_previous_passed_weight": false
+  },
+  "scope_limits": [
+    "Native panel tests inject a test-only CDP fetch binding forwarding unchanged real coordinator HTTP bodies/statuses; production platform login/network transport is not accepted by this test.",
+    "OAuth identity exchange, artifact scanner and verifier are explicit fixtures. PostgreSQL, stored sessions, vault bytes, HTTP handlers and WebView2 rendering are real.",
+    "No official CLI, real account, model inference or paid API call is requested by these tests.",
+    "Milestone calculation and simulation are separate packages; live orchestrator integration is not delivered here. Simulation results remain synthetic.",
+    "Owned application termination was reported; absence of every WebView descendant is not independently proven.",
+    "Earlier failed setup/transport/assertion runs remain in ignored local directories; only the final completed native run is counted here.",
+    "Remote GitHub Actions results are not used for this acceptance because the account quota was reported exhausted."
+  ],
+  "reproduce": [
+    "npm run check",
+    "node scripts/go.mjs vet ./...",
+    "node scripts/ui-tests.mjs test --workers=4 tests/ui/contribution-details.spec.ts tests/ui/task-dependencies.spec.ts tests/ui/account.spec.ts tests/ui/workspace.spec.ts",
+    "npm run test:db",
+    "npm run test:native-cloud-ui"
+  ]
+}
