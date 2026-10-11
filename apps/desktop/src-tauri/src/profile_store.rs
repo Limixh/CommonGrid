@@ -188,7 +188,16 @@ static TEMP_SEQUENCE: AtomicUsize = AtomicUsize::new(0);
 
 // Multiple application instances share an advisory OS lock. The stable lock
 // file is never deleted or replaced, and its handle releases on process exit.
-fn mutation_lock(root: &Path) -> Result<fs::File, &'static str> {
+#[derive(Debug)]
+struct MutationLock(fs::File);
+impl Drop for MutationLock {
+    fn drop(&mut self) {
+        // A concurrent process spawn can inherit the descriptor before exec.
+        // Release the lock now instead of waiting for every duplicate to close.
+        let _ = self.0.unlock();
+    }
+}
+fn mutation_lock(root: &Path) -> Result<MutationLock, &'static str> {
     root_ready(root, true)?;
     let path = root.join(".profiles.lock");
     let file = match OpenOptions::new()
@@ -211,7 +220,7 @@ fn mutation_lock(root: &Path) -> Result<fs::File, &'static str> {
         return Err(UNAVAILABLE);
     }
     file.try_lock().map_err(|_| CONFLICT)?;
-    Ok(file)
+    Ok(MutationLock(file))
 }
 
 // Check each existing ancestor even when the profile directory is absent.

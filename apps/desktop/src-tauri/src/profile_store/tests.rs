@@ -334,6 +334,24 @@ fn independent_file_handles_cannot_mutate_until_the_owner_handle_is_dropped() {
     assert_eq!(read(&fixture.root()).unwrap().revision, 1);
 }
 
+#[cfg(unix)]
+#[test]
+fn mutation_guard_releases_the_lock_while_a_duplicate_descriptor_survives() {
+    let fixture = Fixture::new();
+    let first = mutation_lock(&fixture.root()).unwrap();
+    // dup and fork retain references to the same Unix advisory lock. Keep one
+    // alive to model a concurrently spawned child that has not reached exec.
+    let duplicate = first.0.try_clone().unwrap();
+    assert_eq!(mutation_lock(&fixture.root()).unwrap_err(), CONFLICT);
+    drop(first);
+    let next = mutation_lock(&fixture.root()).unwrap();
+    assert_eq!(mutation_lock(&fixture.root()).unwrap_err(), CONFLICT);
+    drop(next);
+    drop(duplicate);
+    create(&fixture.root(), request(ID, 0)).unwrap();
+    assert_eq!(read(&fixture.root()).unwrap().revision, 1);
+}
+
 #[test]
 fn unsafe_lock_file_is_rejected_without_replacing_its_target() {
     let fixture = Fixture::new();
