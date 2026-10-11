@@ -4,7 +4,12 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdtemp, mkdir, writeFile, rm, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { ManagedCliRuntime, ManagedPreparationError, validateManagedRuntimeAssets, type ManagedRuntimeAssets } from "../src/managed-runtime.ts";
+import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
+import childProcess from "node:child_process";
+import { syncBuiltinESMExports } from "node:module";
+import { ManagedCliRuntime, ManagedPreparationError, startBridge, validateManagedRuntimeAssets, type ManagedRuntimeAssets } from "../src/managed-runtime.ts";
+import type { TaskToolsRuntime } from "../src/task-runtime.ts";
 
 const image=`node:22@sha256:${"a".repeat(64)}`;
 const digest=(bytes:string)=>createHash("sha256").update(bytes).digest("hex");
@@ -74,4 +79,58 @@ test("failed preparation reports only verified independent cleanup and retains c
       assert.equal(cleanupCalls,2);
     }finally{ManagedCliRuntime.prototype.beginOperation=begin;ManagedCliRuntime.prototype.destroy=destroy;}
   });
+});
+
+test("signal-enabled Claude bridge close waits for the aborted task callback to finish cleanup", async () => {
+  const controller = new AbortController();
+  let started!: () => void, finishCleanup!: () => void, commandAborted = false, active = false;
+  const began = new Promise<void>(resolve => { started = resolve; });
+  const task = {async exec(_argv: string[], options: {signal?: AbortSignal} = {}) {
+    active = true;
+    return new Promise((resolve, reject) => {
+      finishCleanup = () => { active = false; reject(new Error("fixture_task_cancelled")); };
+      options.signal?.addEventListener("abort", () => { commandAborted = true; }, {once: true});
+      started();
+    });
+  }} as unknown as TaskToolsRuntime;
+  const child = Object.assign(new EventEmitter(), {stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough(),
+    kill() { setImmediate(() => child.emit("close", 0)); return true; }});
+  const runtime = {provider: "claude", async retainOperation() { return () => {}; }, async verifyOperation() { return "a".repeat(64); },
+    async beginNamespaceExec() { return randomUUID(); }} as unknown as ManagedCliRuntime;
+  const originalSpawn = childProcess.spawn;
+  let bridge: Awaited<ReturnType<typeof startBridge>> | undefined;
+  try {
+    childProcess.spawn = ((command, args) => {
+      assert.equal(command, "docker"); assert.ok(Array.isArray(args) && args.includes("/opt/cg/runtime-bridge.mjs"));
+      setImmediate(() => child.stdout.write('{"kind":"ready"}\n')); return child as never;
+    }) as typeof childProcess.spawn;
+    syncBuiltinESMExports();
+    bridge = await startBridge(runtime, task, controller.signal);
+  } finally { childProcess.spawn = originalSpawn; syncBuiltinESMExports(); }
+  try {
+    child.stdout.write(JSON.stringify({kind: "task", id: "task-1", arguments: {argv: ["node", "slow-task-fixture"], timeout_ms: 30000}}) + "\n");
+    await began; controller.abort("cancelled");
+    let closed = false;
+    const closing = Promise.resolve(bridge.close()).then(() => { closed = true; });
+    await new Promise<void>(resolve => setImmediate(resolve));
+    assert.equal(commandAborted, true, "bridge callback must propagate the operation abort to task execution");
+    assert.equal(closed, false, "close must await asynchronous task namespace cleanup");
+    assert.equal(active, true);
+    finishCleanup(); await closing;
+    assert.equal(active, false); assert.equal(bridge.stats.task_calls, 1); assert.equal(bridge.stats.control_failure, false);
+  } finally { finishCleanup?.(); await bridge.close(); }
+});
+
+test("existing bridge callers without a signal retain synchronous close", async () => {
+  const child = Object.assign(new EventEmitter(), {stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough(),
+    kill() { setImmediate(() => child.emit("close", 0)); return true; }});
+  const runtime = {provider: "codex", async retainOperation() { return () => {}; }, async verifyOperation() { return "a".repeat(64); },
+    async beginNamespaceExec() { return randomUUID(); }} as unknown as ManagedCliRuntime;
+  const originalSpawn = childProcess.spawn;
+  try {
+    childProcess.spawn = (() => { setImmediate(() => child.stdout.write('{"kind":"ready"}\n')); return child as never; }) as typeof childProcess.spawn;
+    syncBuiltinESMExports();
+    const bridge = await startBridge(runtime);
+    assert.equal(bridge.close(), undefined);
+  } finally { childProcess.spawn = originalSpawn; syncBuiltinESMExports(); }
 });

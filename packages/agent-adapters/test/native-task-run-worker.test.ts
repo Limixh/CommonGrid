@@ -4,14 +4,18 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
+import { createInterface } from "node:readline";
 import { test } from "node:test";
 import { BindingFailure, type ProfileBinding } from "../../../apps/desktop/native-worker/profile-bindings.ts";
 import { verifyAssets, type Boot } from "../../../apps/desktop/native-worker/cli-check.ts";
 import { parseTaskRunBoot, runTaskRun, taskRunBindingRoot, type TaskRunBoot, type TaskRunDependencies, type TaskRunFrame, type TaskRunRuntime, type TaskRunSandbox } from "../../../apps/desktop/native-worker/task-run.ts";
 import { ControlledTaskCleanupError, applyControlledPatch, controlledBaseline, createControlledPatch, controlledVerifierCases } from "../src/controlled-task.ts";
-import { TaskToolLimitError, type ProviderTurnOptions } from "../src/controlled-task-session.ts";
+import { TaskToolLimitError, runControlledProviderTurn, type ProviderProcessFactory, type ProviderTurnOptions } from "../src/controlled-task-session.ts";
 import type { ManagedRuntimeAssets } from "../src/managed-runtime.ts";
 import { ProviderFailure } from "../src/session-protocol.ts";
+import { executeTaskTool } from "../src/task-tool.ts";
 import { acceptTaskRunUpdate, taskRunMaxFrameBytes, taskRunMaxToolCalls, taskRunObservedModels, taskRunRequestedModels, validateTaskRunStatus, type TaskRunProvider, type TaskRunStatus } from "../src/task-run-protocol.ts";
 import pins from "../runtime-assets/native-cli-assets.lock.json";
 
@@ -249,6 +253,106 @@ test("cancellation at every phase reports cancelled with verified cleanup and no
   const early = new AbortController(); early.abort("cancelled"); const immediate = fixture(); await immediate.run(early.signal);
   assert.deepEqual(immediate.calls, []); assert.equal(result(immediate.frames).outcome, "cancelled");
 });
+test("cancelling an executing callback settles its queue before releasing profile ownership", async () => {
+  const f = fixture(), controller = new AbortController();
+  let started!: () => void, active = false, commandAborted = false, quiescent = false;
+  const began = new Promise<void>(resolve => { started = resolve; });
+  const seed = f.sandbox.exec;
+  f.sandbox.exec = async (argv, options = {}) => {
+    if (argv[1] !== "slow-task-fixture") return seed(argv, options);
+    active = true; f.calls.push("task-start");
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { active = false; resolve({code: 0, stdout: "", stderr: ""}); }, 1000);
+      const abort = () => {
+        clearTimeout(timer); commandAborted = true;
+        // Model asynchronous command termination/namespace cleanup. A cancelled
+        // callback must settle this work before the operation claim is released.
+        setImmediate(() => { active = false; f.calls.push("task-abort-settled"); reject(new Error("fixture_command_cancelled")); });
+      };
+      options.signal?.addEventListener("abort", abort, {once: true}); started();
+    });
+  };
+  f.runtime.verifyOperation = async () => "a".repeat(64);
+  f.runtime.beginNamespaceExec = async () => randomUUID();
+  const spawnProcess: ProviderProcessFactory = () => {
+    const child = Object.assign(new EventEmitter(), {stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough(),
+      kill() { setImmediate(() => child.emit("close", 0)); return true; }});
+    createInterface({input: child.stdin}).on("line", line => {
+      const message = JSON.parse(line), write = (value: unknown) => child.stdout.write(JSON.stringify(value) + "\n");
+      const reply = (result: unknown) => write({id: message.id, result});
+      switch (message.method) {
+        case "initialize": reply({}); break;
+        case "account/read": reply({account: {type: "chatgpt"}}); break;
+        case "model/list": reply({data: [{model: "gpt-6-luna", hidden: false}]}); break;
+        case "thread/start": reply({thread: {id: "thread-1"}, model: "gpt-6-luna"}); break;
+        case "turn/start":
+          reply({turn: {id: "turn-1"}});
+          write({id: "tool-1", method: "item/tool/call", params: {threadId: "thread-1", tool: "task_exec", arguments: {argv: ["node", "slow-task-fixture"], timeout_ms: 30000}}});
+          break;
+      }
+    });
+    return child as never;
+  };
+  f.deps.provider = async turn => {
+    try { await runControlledProviderTurn({...turn, spawnProcess, deadlineMs: 2000}); }
+    finally { quiescent = turn.trace.quiescent; }
+  };
+  const close = f.sandbox.close;
+  f.sandbox.close = async () => { assert.equal(active, false, "command must settle before sandbox cleanup"); await close(); };
+  const finish = f.runtime.finishOperation;
+  f.runtime.finishOperation = async options => {
+    assert.equal(quiescent, true, "real provider callback queue must be quiescent before finishing ownership");
+    assert.equal(active, false); await finish(options);
+  };
+  const running = f.run(controller.signal);
+  await began; controller.abort("cancelled"); await running;
+  assert.equal(commandAborted, true, "the native execution callback must propagate cancellation into the task runtime");
+  assert.ok(f.calls.indexOf("task-abort-settled") < f.calls.indexOf("sandbox-close"));
+  assert.deepEqual(f.calls.slice(-3), ["stop", "release", "finish"]);
+  assert.ok(!f.calls.includes("snapshot") && !f.calls.includes("verify"));
+  assert.deepEqual(result(f.frames), {type: "result", outcome: "cancelled", error_code: "cancelled", cleanup: "verified", result: null});
+  supervise(f.boot, f.frames);
+});
+
+test("Claude cancellation awaits the separate bridge callback before cleaning its sandbox", async () => {
+  const f = fixture({provider: "claude"}), controller = new AbortController();
+  let started!: () => void, dispatch!: () => void, active = false, commandAborted = false, bridgeSettled = false;
+  let callback: Promise<unknown> | undefined;
+  const began = new Promise<void>(resolve => { started = resolve; });
+  const seed = f.sandbox.exec;
+  f.sandbox.exec = async (argv, options = {}) => {
+    if (argv[1] !== "slow-task-fixture") return seed(argv, options);
+    active = true;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { active = false; resolve({code: 0, stdout: "", stderr: ""}); }, 1000);
+      options.signal?.addEventListener("abort", () => {
+        clearTimeout(timer); commandAborted = true;
+        setImmediate(() => { active = false; f.calls.push("task-abort-settled"); reject(new Error("fixture_command_cancelled")); });
+      }, {once: true}); started();
+    });
+  };
+  f.deps.bridge = async (_runtime, sandbox, signal) => {
+    dispatch = () => { callback = executeTaskTool(sandbox, {argv: ["node", "slow-task-fixture"], timeout_ms: 30000}, signal); };
+    return {stats: f.stats, async close() { f.calls.push("bridge-close"); await callback; bridgeSettled = true; }};
+  };
+  f.deps.provider = async turn => {
+    turn.observer.model(taskRunObservedModels.claude[0]); turn.observer.toolCall(1); dispatch();
+    await new Promise<void>((_resolve, reject) => turn.signal.addEventListener("abort", () => reject(new ProviderFailure("canceled")), {once: true}));
+  };
+  const close = f.sandbox.close;
+  f.sandbox.close = async () => {
+    assert.equal(active, false, "sandbox cleanup cannot race the bridge callback's command cleanup");
+    assert.equal(bridgeSettled, true); await close();
+  };
+  const running = f.run(controller.signal);
+  await began; controller.abort("cancelled"); await running;
+  assert.equal(commandAborted, true);
+  assert.ok(f.calls.indexOf("task-abort-settled") < f.calls.indexOf("sandbox-close"));
+  assert.deepEqual(f.calls.slice(-3), ["stop", "release", "finish"]);
+  assert.deepEqual(result(f.frames), {type: "result", outcome: "cancelled", error_code: "cancelled", cleanup: "verified", result: null});
+  supervise(f.boot, f.frames);
+});
+
 test("any cleanup that cannot be verified becomes needs_review with unknown cleanup, never success", async () => {
   type Arrange = (f: ReturnType<typeof fixture>, controller: AbortController) => void;
   const faults: Array<[string, Arrange, string[]]> = [

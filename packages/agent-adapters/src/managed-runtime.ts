@@ -665,15 +665,24 @@ export class ManagedCliRuntime {
   }
 }
 
-export async function startBridge(runtime: ManagedCliRuntime, task?: TaskToolsRuntime) {
+export async function startBridge(runtime: ManagedCliRuntime, task?: TaskToolsRuntime, signal?: AbortSignal) {
   const release=await runtime.retainOperation();
   let containerId:string;
   try { containerId=await runtime.verifyOperation(); } catch(error) { release(); throw error; }
   try { await runtime.beginNamespaceExec(containerId); } catch(error) { release(); throw error; }
   const child = spawn("docker",["exec","-i",containerId,"node","/opt/cg/runtime-bridge.mjs"],{windowsHide:true,stdio:["pipe","pipe","pipe"]});
-  const control = attachManagedControl(child, {provider:runtime.provider, ...(task ? {execute: (arguments_: unknown) => executeTaskTool(task, arguments_)} : {})});
-  const close=() => { control.close(); release(); };
+  let taskCallback: Promise<unknown> | undefined;
+  const control = attachManagedControl(child, {provider:runtime.provider, ...(task ? {execute: (arguments_: unknown) => {
+    taskCallback = executeTaskTool(task, arguments_, signal); return taskCallback;
+  }} : {})});
+  const close=() => {
+    control.close();
+    // Native task cancellation must settle relay callbacks before the caller
+    // closes the sandbox. Legacy non-task/session callers keep synchronous close.
+    if (signal && taskCallback) return taskCallback.then(() => { release(); });
+    release();
+  };
   child.once("close",release);
-  try { await control.ready; assert.equal(control.stats.control_failure,false,"managed_bridge_failed"); release(); } catch (error) { close(); throw error; }
+  try { await control.ready; assert.equal(control.stats.control_failure,false,"managed_bridge_failed"); release(); } catch (error) { await close(); throw error; }
   return {stats:control.stats,close,child:control.child};
 }

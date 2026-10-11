@@ -28,7 +28,7 @@ export function taskRunBindingRoot(boot: Pick<TaskRunBoot, "profile_registry_roo
 }
 export type TaskRunRuntime = Pick<ManagedCliRuntime, "beginOperation" | "start" | "stop" | "finishOperation" | "retainOperation" | "verifyOperation" | "beginNamespaceExec" | "exec" | "installCodexCodingCatalog">;
 export type TaskRunSandbox = Pick<TaskToolsRuntime, "exec" | "close" | "inspect" | "container" | "volume">;
-export interface TaskRunBridge { stats: ProviderTurnOptions["bridgeStats"]; close(): void }
+export interface TaskRunBridge { stats: ProviderTurnOptions["bridgeStats"]; close(): void | Promise<void> }
 export interface TaskRunDependencies {
   bindings(root: string): Pick<ProfileBindings, "read">;
   assets(boot: TaskRunBoot): Promise<ManagedRuntimeAssets>;
@@ -36,7 +36,7 @@ export interface TaskRunDependencies {
   /** Restores the already bound runtime; a task never prepares or creates one. */
   restore(binding: ProfileBinding, assets: ManagedRuntimeAssets): TaskRunRuntime;
   sandbox(image: string): Promise<TaskRunSandbox>;
-  bridge(runtime: TaskRunRuntime, sandbox: TaskRunSandbox): Promise<TaskRunBridge>;
+  bridge(runtime: TaskRunRuntime, sandbox: TaskRunSandbox, signal: AbortSignal): Promise<TaskRunBridge>;
   provider(options: ProviderTurnOptions): Promise<void>;
   snapshot(sandbox: TaskRunSandbox, image: string): Promise<string>;
   verify(source: string, image: string, signal: AbortSignal): Promise<ControlledVerifierResult>;
@@ -47,7 +47,7 @@ const dependencies: TaskRunDependencies = {
   prerequisite: verifyDockerPrerequisite,
   restore: (binding, assets) => ManagedCliRuntime.restore({owner: binding.owner, provider: binding.provider}, {assets}),
   sandbox: image => TaskToolsRuntime.create({image, cpu: 1, memoryMb: 256}, 600_000),
-  bridge: (runtime, sandbox) => startBridge(runtime as ManagedCliRuntime, sandbox as TaskToolsRuntime),
+  bridge: (runtime, sandbox, signal) => startBridge(runtime as ManagedCliRuntime, sandbox as TaskToolsRuntime, signal),
   provider: runControlledProviderTurn,
   snapshot: (sandbox, image) => snapshotControlledCandidate(sandbox, image),
   verify: (source, image, signal) => verifyControlledCandidate(source, image, undefined, signal),
@@ -123,12 +123,12 @@ export async function runTaskRun(boot: TaskRunBoot, signal: AbortSignal, emit: (
     catch (failure) { if (failure instanceof AggregateError && failure.message === "sandbox_cleanup_failed") cleanupFailed = holdOwnership = true; throw failure; }
     signal.throwIfAborted();
     await seedControlledTask(sandbox); signal.throwIfAborted();
-    bridge = await deps.bridge(runtime, sandbox); assertBridgeHealthy(bridge.stats); signal.throwIfAborted();
+    bridge = await deps.bridge(runtime, sandbox, signal); assertBridgeHealthy(bridge.stats); signal.throwIfAborted();
     emit({type: "progress", phase: "running"});
     const task = sandbox;
     // The supervisor accepts model/activity only while running: a late callback is dropped.
     accepting = true;
-    try { await deps.provider({provider: boot.provider, runtime, execute: arguments_ => executeTaskTool(task as TaskToolsRuntime, arguments_), bridgeStats: bridge.stats, signal, trace,
+    try { await deps.provider({provider: boot.provider, runtime, execute: arguments_ => executeTaskTool(task as TaskToolsRuntime, arguments_, signal), bridgeStats: bridge.stats, signal, trace,
       observer: {
         model: model => { if (accepting && seen.observed === null && (taskRunObservedModels[boot.provider] as readonly string[]).includes(model)) { seen.observed = model; emit({type: "model", observed: model}); } },
         toolCall: count => { if (!accepting) return; if (count > taskRunMaxToolCalls) throw new TaskToolLimitError(); if (count > seen.toolCalls) { seen.toolCalls = count; emit({type: "activity", tool_calls: count}); } },
@@ -137,7 +137,7 @@ export async function runTaskRun(boot: TaskRunBoot, signal: AbortSignal, emit: (
     if (seen.observed === null || seen.toolCalls < 1) throw new ProviderFailure("protocol");
     emit({type: "progress", phase: "verifying"});
     // The provider process and relay are gone before the workspace is frozen.
-    bridge.close();
+    await bridge.close();
     const source = await deps.snapshot(sandbox, assets.baseImage).catch(stepFailure(signal, "worker_failed")); signal.throwIfAborted();
     const verdict = await deps.verify(source, assets.baseImage, signal).catch(stepFailure(signal, "verifier_failed")); signal.throwIfAborted();
     if (verdict.candidate_sha256 !== sha256(source)) throw new TaskRunFailure("verifier_failed");
@@ -157,7 +157,7 @@ export async function runTaskRun(boot: TaskRunBoot, signal: AbortSignal, emit: (
     emit({type: "progress", phase: "cleaning"});
     const cleanupSignal = AbortSignal.timeout(35_000);
     try { if (bridge) assertBridgeHealthy(bridge.stats); } catch { error ??= "provider_failed"; result = null; }
-    try { bridge?.close(); } catch { error ??= "provider_failed"; result = null; }
+    try { await bridge?.close(); } catch { error ??= "provider_failed"; result = null; }
     // Ownership is only released after the sandbox is gone and no tool callback is still running.
     if (sandbox) { try { await sandbox.close(); } catch { cleanupFailed = holdOwnership = true; } }
     if (!trace.quiescent) cleanupFailed = holdOwnership = true;

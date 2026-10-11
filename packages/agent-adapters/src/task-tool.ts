@@ -14,10 +14,10 @@ export function validateTaskTool(value: unknown): TaskToolArguments {
     throw new Error("invalid_tool_arguments");
   return { argv: [...argv], ...(timeout !== undefined ? { timeout_ms: timeout as number } : {}) };
 }
-export async function executeTaskTool(runtime: TaskToolsRuntime, value: unknown) {
+export async function executeTaskTool(runtime: Pick<TaskToolsRuntime, "exec">, value: unknown, signal?: AbortSignal) {
   try {
     const arguments_ = validateTaskTool(value);
-    const result = await runtime.exec(arguments_.argv, { timeoutMs: arguments_.timeout_ms });
+    const result = await runtime.exec(arguments_.argv, { timeoutMs: arguments_.timeout_ms, ...(signal ? {signal} : {}) });
     return { exit_code: result.code, stdout: result.stdout, stderr: result.stderr };
   } catch { return { error: "task_tool_failed" }; }
 }
