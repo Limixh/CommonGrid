@@ -20,7 +20,11 @@
 | Gerileme | `pass` iken şimdi `fail` veya `blocked` olan milestone `regressed` |
 | Kazanım | Önceki ölçümde `pass` olmayıp şimdi `pass` olan `gained`. Önceki ölçüm yoksa karşılaştırma yapılmaz |
 | Boş tanım | `progress_available=false`, ilerleme 0, sınır `no_milestones_defined`. Tamamlanmış veya yüzde yüz sayılmaz. Test grubu eşit ağırlıklandırması yoktur |
-| Sınırlar | `milestones_not_measured` (sonucu olmayan milestone var), `defined_weight_below_one` (toplam ağırlık 1'den az, ilerleme 1'e ulaşamaz) |
+| Sınırlar | `milestones_not_measured` (sonucu olmayan milestone var), `defined_weight_below_one` (tam ağırlık toplamı 1'den az; yeniden normalize edilmez) |
+
+Eksik yeni sonuç önceki `pass` ağırlığını korumaz: güncel `passed_weight` yalnız güncel `pass` sonuçlarından hesaplanır. `unconfirmed` listesi bu kanıt eksikliğini `regressed` listesindeki açık `fail`/`blocked` sonuçlarından ayırır. Eksik kritik sonuç da 0,5 sınırını uygular.
+
+Float64 yuvarlama veya sözleşmenin toplam ağırlık toleransı, geçmeyen çok küçük bir milestone'u sayısal olarak gizleyebilir. Tüm milestone'lar geçmemişken yuvarlanan `progress` değeri 1 çıkarsa bunun yerine en yakın daha küçük float64 ile sınırlandırılır; `passed_weight` tam toplamdan bir kez yuvarlanmaya devam eder. Yüzde biçimlendirmesi bu küçük farkı yine `%100` gösterebilir. Çağıran tamamlanma kararı ve yüzde etiketi için milestone durumlarını ve `limits` kodlarını birlikte kullanmalıdır; yalnız yuvarlanmış yüzde tamamlanma kanıtı değildir.
 
 Reddedilenler `*RejectionError` ile döner, `errors.Is` ile ayrılır: `ErrContextMismatch` (görev kimliği, sürüm, hash, base commit), `ErrInvalidMeasurement` (artifact hash biçimi), `ErrUnknownMilestone`, `ErrDuplicateMilestone`, `ErrInvalidStatus`, `ErrInvalidContract`. Birden çok hata varsa hangisinin döneceği sonuç sırasına bağlı değildir.
 

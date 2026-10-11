@@ -5,6 +5,7 @@ import (
 	"errors"
 	"go/parser"
 	"go/token"
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -199,6 +200,10 @@ func TestContextMismatchRejected(t *testing.T) {
 	for _, artifact := range []string{"", "xyz", strings.ToUpper(testHash), artifactOne + "0"} {
 		in := Input{Contract: task(definition), Current: measurement(artifact, results)}
 		assertRejected(t, in, ErrInvalidMeasurement, "current")
+		prev := measurement(artifact, results)
+		in.Current = measurement(artifactOne, results)
+		in.Previous = &prev
+		assertRejected(t, in, ErrInvalidMeasurement, "previous")
 	}
 }
 
@@ -220,9 +225,12 @@ func TestInvalidContractRejected(t *testing.T) {
 		"duplicate milestone": {func(c *contract.TaskContract) {
 			c.Progress.Milestones = append(c.Progress.Milestones, c.Progress.Milestones[0])
 		}, ErrDuplicateMilestone},
-		"zero weight":     {func(c *contract.TaskContract) { c.Progress.Milestones[0].Weight = 0 }, ErrInvalidContract},
-		"negative weight": {func(c *contract.TaskContract) { c.Progress.Milestones[0].Weight = -0.1 }, ErrInvalidContract},
-		"weight above 1":  {func(c *contract.TaskContract) { c.Progress.Milestones[0].Weight = 1.5 }, ErrInvalidContract},
+		"zero weight":       {func(c *contract.TaskContract) { c.Progress.Milestones[0].Weight = 0 }, ErrInvalidContract},
+		"negative weight":   {func(c *contract.TaskContract) { c.Progress.Milestones[0].Weight = -0.1 }, ErrInvalidContract},
+		"NaN weight":        {func(c *contract.TaskContract) { c.Progress.Milestones[0].Weight = math.NaN() }, ErrInvalidContract},
+		"positive infinity": {func(c *contract.TaskContract) { c.Progress.Milestones[0].Weight = math.Inf(1) }, ErrInvalidContract},
+		"negative infinity": {func(c *contract.TaskContract) { c.Progress.Milestones[0].Weight = math.Inf(-1) }, ErrInvalidContract},
+		"weight above 1":    {func(c *contract.TaskContract) { c.Progress.Milestones[0].Weight = 1.5 }, ErrInvalidContract},
 		"weights exceed 1": {func(c *contract.TaskContract) {
 			c.Progress.Milestones = append(c.Progress.Milestones, contract.Milestone{Id: "b", Name: "b", Check: "c", Weight: 0.5})
 		}, ErrInvalidContract},
@@ -448,6 +456,107 @@ func TestPreviousArtifactContextIsKeptSeparate(t *testing.T) {
 	same := measurement(artifactOne, []res{{"a", "pass"}, {"b", "pass"}})
 	if report, err = Evaluate(Input{Contract: task(definition), Current: measurement(artifactOne, []res{{"a", "pass"}, {"b", "pass"}}), Previous: &same}); err != nil || len(report.Regressed) != 0 || len(report.Gained) != 0 {
 		t.Fatalf("unchanged re-measurement: %v %+v", err, report)
+	}
+}
+
+// Missing evidence must remove the old pass from current progress without
+// claiming that the milestone was proven broken. Explicit checker failures
+// do prove a regression; a missing critical result still blocks completion.
+func TestPreviousPassNeedsCurrentEvidence(t *testing.T) {
+	for _, verdict := range []Status{StatusFail, StatusBlocked, StatusNotMeasured} {
+		t.Run(string(verdict), func(t *testing.T) {
+			definition := []ms{{ID: "critical", Weight: 0.2, Critical: true}, {ID: "other", Weight: 0.8}}
+			previous := measurement(artifactTwo, []res{{"critical", "pass"}, {"other", "pass"}})
+			current := measurement(artifactOne, []res{{"other", "pass"}})
+			if verdict != StatusNotMeasured {
+				current.Results = append(current.Results, Result{MilestoneID: "critical", Status: verdict})
+			}
+			report, err := Evaluate(Input{Contract: task(definition), Current: current, Previous: &previous})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if report.PassedWeight != 0.8 || report.PreviousPassedWeight != 1 || report.Progress != 0.5 || !report.CriticalCapApplied || !reflect.DeepEqual(report.CriticalBlockers, []string{"critical"}) {
+				t.Fatalf("current progress retained old evidence or missed critical cap: %+v", report)
+			}
+			state := report.Milestones[0]
+			if state.Status != verdict || state.PreviousStatus != StatusPass || len(report.Gained) != 0 {
+				t.Fatalf("milestone evidence: %+v", report)
+			}
+			if verdict == StatusNotMeasured {
+				if state.Change != ChangeUnconfirmed || len(report.Regressed) != 0 || !reflect.DeepEqual(report.Unconfirmed, []string{"critical"}) || !reflect.DeepEqual(report.Unmeasured, []string{"critical"}) || !reflect.DeepEqual(report.Limits, []Limit{LimitUnmeasured}) {
+					t.Fatalf("missing evidence treated as proven regression: %+v", report)
+				}
+			} else if state.Change != ChangeRegressed || !reflect.DeepEqual(report.Regressed, []string{"critical"}) || len(report.Unconfirmed) != 0 || len(report.Unmeasured) != 0 || len(report.Limits) != 0 {
+				t.Fatalf("explicit failure not treated as regression: %+v", report)
+			}
+		})
+	}
+}
+
+func TestMissingTinyMilestoneCannotReportComplete(t *testing.T) {
+	for _, tiny := range []float64{5e-13, math.SmallestNonzeroFloat64} {
+		t.Run(strconv.FormatFloat(tiny, 'g', -1, 64), func(t *testing.T) {
+			definition := []ms{{ID: "main", Weight: 1}, {ID: "tiny", Weight: tiny}}
+			previous := measurement(artifactTwo, []res{{"main", "pass"}, {"tiny", "pass"}})
+			report, err := Evaluate(Input{Contract: task(definition), Current: measurement(artifactOne, []res{{"main", "pass"}}), Previous: &previous})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if report.PassedWeight != 1 || report.Progress != math.Nextafter(1, 0) || !reflect.DeepEqual(report.Limits, []Limit{LimitUnmeasured}) || !reflect.DeepEqual(report.Unconfirmed, []string{"tiny"}) || len(report.Regressed) != 0 {
+				t.Fatalf("tolerated/rounded weight hid missing evidence: %+v", report)
+			}
+		})
+	}
+}
+
+func TestFloatRoundingCannotHideIncompleteProgress(t *testing.T) {
+	for _, verdict := range []Status{StatusFail, StatusBlocked, StatusPass} {
+		t.Run(string(verdict), func(t *testing.T) {
+			report, err := Evaluate(Input{
+				Contract: task([]ms{{ID: "main", Weight: 1}, {ID: "tiny", Weight: math.SmallestNonzeroFloat64}}),
+				Current:  measurement(artifactOne, []res{{"main", "pass"}, {"tiny", string(verdict)}}),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := math.Nextafter(1, 0)
+			if verdict == StatusPass {
+				want = 1
+			}
+			if report.Progress != want || report.PassedWeight != 1 {
+				t.Fatalf("tiny verdict hidden by float rounding: %+v", report)
+			}
+		})
+	}
+}
+
+func TestPassedWeightRoundsOnlyAfterExactSum(t *testing.T) {
+	report, err := Evaluate(Input{
+		Contract: task([]ms{{ID: "a", Weight: 0.1}, {ID: "b", Weight: 0.2}, {ID: "c", Weight: 0.3}}),
+		Current:  measurement(artifactOne, []res{{"a", "pass"}, {"b", "pass"}, {"c", "pass"}}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.TotalWeight != 0.6 || report.PassedWeight != 0.6 || report.Progress != 0.6 || !reflect.DeepEqual(report.Limits, []Limit{LimitWeightBelowOne}) {
+		t.Fatalf("weights normalized or rounded before summing: %+v", report)
+	}
+}
+
+func TestInvalidPreviousResultsRejected(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		results []res
+		kind    error
+	}{
+		{"unknown", []res{{"ghost", "pass"}}, ErrUnknownMilestone},
+		{"duplicate", []res{{"a", "pass"}, {"a", "fail"}}, ErrDuplicateMilestone},
+		{"output-only status", []res{{"a", "not_measured"}}, ErrInvalidStatus},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			previous := measurement(artifactTwo, tc.results)
+			assertRejected(t, Input{Contract: task([]ms{{ID: "a", Weight: 1}}), Current: measurement(artifactOne, []res{{"a", "pass"}}), Previous: &previous}, tc.kind, "previous")
+		})
 	}
 }
 

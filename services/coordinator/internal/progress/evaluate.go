@@ -163,8 +163,11 @@ type Report struct {
 	PassedWeight         float64 `json:"passed_weight"`
 	PreviousPassedWeight float64 `json:"previous_passed_weight,omitempty"`
 	// Progress is the value to show: PassedWeight, at most 0.5 while a
-	// critical milestone is unresolved. It is 0 and meaningless when
-	// ProgressAvailable is false.
+	// critical milestone is unresolved. Incomplete evidence cannot show 1,
+	// even when float rounding or tolerance hides the difference. Consumers
+	// must honor Limits and milestone statuses when formatting percentages or
+	// deciding completion. It is 0 and meaningless when ProgressAvailable is
+	// false.
 	Progress          float64 `json:"progress"`
 	ProgressAvailable bool    `json:"progress_available"`
 	// CriticalCapApplied is true only when the 0.5 cap lowered Progress.
@@ -292,6 +295,14 @@ func Evaluate(in Input) (Report, error) {
 		report.CriticalCapApplied = true
 	}
 	report.Progress = toFloat(shown)
+	// A tolerated weight total above 1 can leave the passing subtotal at 1
+	// despite an unresolved milestone. Rounding can also turn an exact sum
+	// below 1 into float64(1). Preserve unresolved milestone evidence in
+	// displayed progress; passed weights retain their documented exact-sum,
+	// round-once behavior.
+	if report.Progress == 1 && passed.Cmp(total) < 0 {
+		report.Progress = math.Nextafter(1, 0)
+	}
 	if len(report.Unmeasured) > 0 {
 		report.Limits = append(report.Limits, LimitUnmeasured)
 	}
