@@ -1,12 +1,29 @@
+import { useEffect, useRef } from "react";
 import { Icon } from "./Icon";
 import type { UIWords } from "./language";
+import { TaskDependenciesPanel, StatusBadge } from "./TaskDependenciesPanel";
+import { kindLabel, statusOf, TASK_STATUSES, statusLabel } from "./task-dependencies";
 import type { Settings, Page } from "./ui-types";
 import type { TaskCatalog } from "./useTaskCatalog";
 
 type WorkspacePageProps = { catalog: TaskCatalog; settings: Settings; t: UIWords; setPage: (page: Page) => void };
 
 export function WorkspacePage({ catalog, settings, t, setPage }: WorkspacePageProps) {
-  const { projects, tasks, status, source, setSelected, query, setQuery, type, setType, project, setProject, tab, setTab, strategy, setStrategy, filtered, task, loadCatalog } = catalog;
+  const { projects, tasks, statuses, status, source, setSelected, query, setQuery, type, setType, project, setProject, statusFilter, setStatusFilter, tab, setTab, strategy, setStrategy, filtered, task, loadCatalog, pagers, duplicates, loadMoreTasks, loadMoreProjects, revealTask } = catalog;
+  const detailHeading = useRef<HTMLHeadingElement>(null);
+  const focusDetail = useRef(false);
+  const visibleIds = new Set(filtered.map((item) => item.id));
+  // After a relation link the old button may be gone, so keyboard users land on the new task heading.
+  useEffect(() => {
+    if (focusDetail.current) { focusDetail.current = false; detailHeading.current?.focus(); }
+  }, [task?.id]);
+  function openRelation(id: string) {
+    focusDetail.current = true;
+    revealTask(id);
+    if (task?.id === id) { focusDetail.current = false; detailHeading.current?.focus(); }
+  }
+  const taskMore = pagers.tasks;
+  const projectMore = pagers.projects;
   return (
     <div className="workspace-content">
       <section className="hero">
@@ -38,8 +55,8 @@ export function WorkspacePage({ catalog, settings, t, setPage }: WorkspacePagePr
       </section>
       {status === "ready" && <section className="stats-strip" aria-label="Catalog statistics">
         {[
-          [projects.length, t.projects, "grid"],
-          [tasks.length, t.contracts, "file"],
+          [projects.length + (projectMore.hasMore ? "+" : ""), t.projects, "grid"],
+          [tasks.length + (taskMore.hasMore ? "+" : ""), t.contracts, "file"],
           [2, t.supported, "chip"],
         ].map(([value, label, icon]) => (
           <div className="stat" key={String(label)}>
@@ -87,6 +104,25 @@ export function WorkspacePage({ catalog, settings, t, setPage }: WorkspacePagePr
                   {p.title}
                 </option>
               ))}
+            </select>
+          </div>
+          {status === "ready" && (projectMore.hasMore || projectMore.state === "error" || projectMore.loop || projectMore.capped) && (
+            <div className="td-projects-more">
+              {projectMore.hasMore && (
+                <button className="secondary-button" onClick={() => void loadMoreProjects()} disabled={projectMore.state === "loading"}>
+                  {projectMore.state === "loading" ? t.loadingMore : projectMore.state === "error" ? t.moreRetry + ": " + t.loadMoreProjects : t.loadMoreProjects}
+                </button>
+              )}
+              {projectMore.state === "error" && <p className="td-error" role="alert">{t.moreError}</p>}
+              {projectMore.loop && <p className="td-error" role="alert">{t.pagingLoop}</p>}
+              {projectMore.capped && <p role="status">{t.catalogCapped}</p>}
+            </div>
+          )}
+          <div className="td-toolbar">
+            <select aria-label={t.statusFilter} value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+              <option value="all">{t.statusAll}</option>
+              {TASK_STATUSES.map((s) => <option key={s} value={s}>{statusLabel(t, s)}</option>)}
+              <option value="unknown">{t.statusUnknown}</option>
             </select>
           </div>
           <div
@@ -149,11 +185,12 @@ export function WorkspacePage({ catalog, settings, t, setPage }: WorkspacePagePr
                     <span className="task-project">
                       {
                         projects.find((p) => p.id === item.project_id)
-                          ?.title
+                          ?.title ?? item.project_id
                       }
                     </span>
+                    <StatusBadge status={statusOf(statuses, item.id)} t={t} />
                     <span className="kind-badge">
-                      {item.kind === "plan" ? t.plan : t.solve}
+                      {kindLabel(t, item.kind)}
                     </span>
                   </div>
                   <h3>{item.title}</h3>
@@ -177,6 +214,19 @@ export function WorkspacePage({ catalog, settings, t, setPage }: WorkspacePagePr
               ))}
             </div>
           )}
+          {status === "ready" && (taskMore.hasMore || taskMore.state === "error" || taskMore.loop || taskMore.capped || duplicates > 0) && (
+            <div className="td-pager">
+              {taskMore.hasMore && (
+                <button className="secondary-button" onClick={() => void loadMoreTasks()} disabled={taskMore.state === "loading"}>
+                  {taskMore.state === "loading" ? t.loadingMore : taskMore.state === "error" ? t.moreRetry + ": " + t.loadMoreTasks : t.loadMoreTasks}
+                </button>
+              )}
+              {taskMore.state === "error" && <p className="td-error" role="alert">{t.moreError}</p>}
+              {taskMore.loop && <p className="td-error" role="alert">{t.pagingLoop}</p>}
+              {taskMore.capped && <p role="status">{t.catalogCapped}</p>}
+              {duplicates > 0 && <p role="status">{duplicates} {t.duplicatesIgnored}</p>}
+            </div>
+          )}
           {source && <p className="fixture-note">
             <Icon name="file" size={14} />
             {source === "database" ? t.databaseNote : t.example}
@@ -189,7 +239,12 @@ export function WorkspacePage({ catalog, settings, t, setPage }: WorkspacePagePr
                 <span>{t.selected}</span>
                 <span>v{task.task_version}</span>
               </div>
-              <h2>{task.title}</h2>
+              <h2 id="task-detail-heading" ref={detailHeading} tabIndex={-1}>{task.title}</h2>
+              <div className="detail-facts">
+                <span>{t.kindLabel}: <strong>{kindLabel(t, task.kind)}</strong></span>
+                <span>{t.nodeLabel}: <code>{task.node_id}</code></span>
+                <span title={t.statusNote}>{t.statusLabel}: <StatusBadge status={statusOf(statuses, task.id)} t={t} /></span>
+              </div>
               <div className="detail-tabs">
                 <button
                   className={tab === "overview" ? "selected" : ""}
@@ -280,6 +335,7 @@ export function WorkspacePage({ catalog, settings, t, setPage }: WorkspacePagePr
                       <p className="muted-note">{t.noMilestones}</p>
                     )}
                   </div>
+                  <TaskDependenciesPanel task={task} tasks={tasks} visibleIds={visibleIds} statuses={statuses} hasMore={taskMore.hasMore} loadingMore={taskMore.state === "loading"} t={t} onOpen={openRelation} onLoadMore={() => void loadMoreTasks()} />
                   <h4>{t.files}</h4>
                   <div className="file-manifest">
                     {task.workspace.entry_files.map((file) => (
