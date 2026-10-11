@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { AccountExpired, accountJSON, boundedText, type Account } from "./account-api";
+import { ContributionDetailPanel } from "./ContributionDetailPanel";
+import type { ResumeTarget } from "./contribution-client";
 
 const words = {
   tr: {
@@ -46,12 +48,16 @@ function readReceipt(value: unknown, kind: Kind): Receipt {
   if (!Number.isFinite(Date.parse(created))) throw new Error("Unexpected record date");
   return { id: boundedText(kind === "checkpoints" ? metadata.checkpoint_id : raw.id), task: boundedText(metadata.task_id), state: boundedText(kind === "leases" ? raw.state : raw.status, 64), created };
 }
-export function AccountPanel({ account, language, contributions = false }: { account: Account; language: "tr" | "en"; contributions?: boolean }) {
+type Opened = { owner: string; kind: Kind; id: string };
+export function AccountPanel({ account, language, contributions = false, resumeTarget = null }: { account: Account; language: "tr" | "en"; contributions?: boolean; resumeTarget?: ResumeTarget | null }) {
   const t = words[language];
   const [kind, setKind] = useState<Kind>("leases");
   const [records, setRecords] = useState<Receipts | null>(null);
   const [retry, setRetry] = useState(0);
   const controller = useRef<AbortController | null>(null);
+  const [opened, setOpened] = useState<Opened | null>(null);
+  const openers = useRef(new Map<string, HTMLButtonElement>());
+  const returnTo = useRef("");
   const owner = account.state.status === "authenticated" ? account.state.session.user.id : "";
   async function load(ownerID: string, selectedKind: Kind, after = "") {
     controller.current?.abort();
@@ -73,10 +79,21 @@ export function AccountPanel({ account, language, contributions = false }: { acc
     } finally { window.clearTimeout(timeout); }
   }
   useEffect(() => {
-    setRecords(null);
+    setRecords(null); setOpened(null);
     if (owner && contributions) void load(owner, kind);
     return () => { controller.current?.abort(); controller.current = null; };
   }, [owner, contributions, kind, retry]);
+  // Focus returns to the record that opened the panel once the panel has gone.
+  useEffect(() => {
+    if (opened || !returnTo.current) return;
+    const target = openers.current.get(returnTo.current);
+    returnTo.current = "";
+    target?.focus();
+  }, [opened]);
+  const panel = opened && opened.owner === owner && opened.kind === kind ? opened : null;
+  const close = () => { returnTo.current = panel ? panel.id : ""; setOpened(null); };
+  const expireAll = () => { setRecords(null); setOpened(null); account.expire(); };
+  const statusLabel = (state: string) => state === "expired" ? t.expiredStatus : knownStates.has(state) ? t[state as keyof typeof t] : t.unknown;
   const visible = records?.owner === owner && records.kind === kind ? records : null;
   const providerName = (provider: string) => provider === "github" ? "GitHub" : "Google";
   return <div className="settings-content account-content">
@@ -99,7 +116,8 @@ export function AccountPanel({ account, language, contributions = false }: { acc
           <div className="filter-tabs" role="group" aria-label={t.contributions}>{(["leases", "submissions", "checkpoints"] as const).map((item, index) => <button key={item} className={kind === item ? "selected" : ""} aria-pressed={kind === item} onClick={() => setKind(item)}>{[t.attempts, t.submissions, t.checkpoints][index]}</button>)}</div>
           {!visible || visible.status === "loading" ? <div className="empty-state" role="status">{t.recordsLoading}</div>
             : visible.status === "error" ? <div className="empty-state" role="alert"><p>{t.recordsError}</p><button className="secondary-button" onClick={() => setRetry((value) => value + 1)}>{t.retry}</button></div>
-            : <>{!visible.items.length ? <div className="empty-state" role="status">{t.empty}</div> : <ul className="receipt-list">{visible.items.map((record) => <li className="receipt-card" key={record.id}><div><strong>{t.task}: {record.task}</strong><p>{t.created}: {new Date(record.created).toLocaleString(language)}</p></div><span className="receipt-status" aria-label={t.status}>{record.state === "expired" ? t.expiredStatus : knownStates.has(record.state) ? t[record.state as keyof typeof t] : t.unknown}</span></li>)}</ul>}{visible.next && <button className="secondary-button" disabled={visible.pending} onClick={() => void load(owner, kind, visible.next)}>{visible.pending ? t.recordsLoading : t.more}</button>}</>}
+            : <div className={panel ? "contribution-layout has-detail" : "contribution-layout"}><div>{!visible.items.length ? <div className="empty-state" role="status">{t.empty}</div> : <ul className="receipt-list">{visible.items.map((record) => <li className={panel?.id === record.id ? "receipt-card opened" : "receipt-card"} key={record.id}><button className="receipt-open" ref={(node) => { if (node) openers.current.set(record.id, node); else openers.current.delete(record.id); }} aria-expanded={panel?.id === record.id} aria-controls="contribution-detail" onClick={() => setOpened({ owner, kind, id: record.id })}><strong>{t.task}: {record.task}</strong><span className="receipt-date">{t.created}: {new Date(record.created).toLocaleString(language)}</span></button><span className="receipt-status" aria-label={t.status}>{statusLabel(record.state)}</span></li>)}</ul>}{visible.next && <button className="secondary-button" disabled={visible.pending} onClick={() => void load(owner, kind, visible.next)}>{visible.pending ? t.recordsLoading : t.more}</button>}</div>
+              {panel && <ContributionDetailPanel key={`${panel.owner}:${panel.kind}:${panel.id}`} kind={panel.kind} recordID={panel.id} language={language} statusLabel={statusLabel} resumeTarget={resumeTarget} onClose={close} onExpired={expireAll} />}</div>}
         </section>}
       </>}
     <p className="muted-note">{t.privacy}</p>

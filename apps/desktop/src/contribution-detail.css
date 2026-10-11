@@ -1,0 +1,28 @@
+.contribution-layout { display: grid; gap: 20px; align-items: start; }
+@media (min-width: 1100px) {
+  .contribution-layout.has-detail { grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); }
+}
+.receipt-open { display: block; min-width: 0; flex: 1; padding: 0; margin: 0; border: 0; border-radius: 4px; background: none; color: inherit; text-align: left; overflow-wrap: anywhere; }
+.receipt-open strong { display: block; font-size: 12px; }
+.receipt-open .receipt-date { display: block; color: var(--muted); font-size: 11px; margin-top: 9px; }
+.receipt-card.opened { border-color: var(--green); }
+.contribution-detail { padding: 22px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); min-width: 0; overflow-wrap: anywhere; }
+.contribution-detail:focus-visible { outline: 2px solid var(--green); outline-offset: 3px; }
+.contribution-detail h2 { margin: 0; font-size: 16px; }
+.contribution-detail h3 { margin: 22px 0 10px; font-size: 13px; }
+.detail-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 18px; flex-wrap: wrap; }
+.detail-state { padding: 18px 0; }
+.detail-fields { display: grid; gap: 10px; margin: 0; }
+.detail-row { display: grid; grid-template-columns: minmax(110px, 0.4fr) minmax(0, 1fr); gap: 12px; font-size: 12px; }
+.detail-row dt { color: var(--muted); }
+.detail-row dd { margin: 0; min-width: 0; }
+.detail-row code { font-size: 11px; word-break: break-all; }
+.detail-text { margin: 0; padding: 12px; max-height: 260px; overflow: auto; border: 1px solid var(--line); border-radius: 5px; font: inherit; font-size: 12px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
+.detail-expired { margin-top: 14px; color: #d49e90; font-size: 12px; line-height: 1.7; }
+.resume-check { margin-top: 26px; padding-top: 4px; border-top: 1px solid var(--line); }
+.resume-check .secondary-button { margin-top: 14px; }
+.resume-result { margin-top: 16px; padding: 14px; border: 1px solid var(--line); border-radius: 5px; font-size: 12px; line-height: 1.7; }
+@media (max-width: 600px) {
+  .contribution-detail { padding: 16px; }
+  .detail-row { grid-template-columns: 1fr; gap: 2px; }
+}

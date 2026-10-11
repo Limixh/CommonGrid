@@ -111,7 +111,7 @@ export function App() {
         ) : page === "agents" ? (
           <EnvironmentPage language={settings.language} doctor={doctor} loadDoctor={loadDoctor} managedProfiles={<ManagedProfilesPanel language={settings.language} />} />
         ) : page === "account" || page === "contributions" ? (
-          <AccountPanel account={account} language={settings.language} contributions={page === "contributions"} />
+          <AccountPanel account={account} language={settings.language} contributions={page === "contributions"} resumeTarget={status === "ready" && catalog.task ? { task: catalog.task, strategyId: catalog.strategy } : null} />
         ) : (
           <ContributionSettingsPage draft={draft} setDraft={setDraft} notice={notice} setNotice={setNotice} save={save} t={t} />
         )}
