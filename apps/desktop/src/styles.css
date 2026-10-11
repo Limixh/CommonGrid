@@ -1294,3 +1294,27 @@ h1 span {
 .profile-session-challenge p { margin: 0; }
 .profile-session-challenge code { font-size: 20px; letter-spacing: 2px; overflow-wrap: anywhere; }
 .profile-session-challenge button { justify-self: start; }
+.task-run-panel { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--line); }
+.task-run-panel h3, .task-run-card h4 { margin: 0; }
+.task-run-card { display: grid; gap: 12px; padding: 16px; margin-top: 16px; border: 1px solid var(--line); border-radius: 12px; }
+.task-run-card p, .task-run-card dl, .task-run-card dd, .task-run-card ul { margin: 0; }
+.task-run-card dl { display: grid; gap: 12px; }
+.task-run-card dt, .task-run-hashes dt { color: var(--muted); font-size: 13px; margin-bottom: 4px; }
+.task-run-card ul { padding-left: 18px; }
+.task-run-quota { color: var(--muted); font-size: 13px; }
+.task-run-approval { display: flex; align-items: flex-start; gap: 10px; margin-top: 16px; }
+.task-run-approval input { margin-top: 3px; }
+.task-run-progress { display: grid; gap: 6px; padding: 16px; margin-top: 16px; border: 1px solid var(--line); border-radius: 12px; }
+.task-run-result span { color: var(--muted); font-size: 13px; }
+.task-run-result p { margin: 0; }
+.task-run-verified { display: grid; gap: 12px; margin-top: 16px; }
+.task-run-hashes { display: flex; flex-wrap: wrap; gap: 16px 32px; margin: 0; }
+.task-run-hashes dd { margin: 0; }
+.task-run-hashes code { overflow-wrap: anywhere; }
+.task-run-diff { margin: 0; padding: 12px 0; overflow-x: auto; max-height: 420px; overflow-y: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; line-height: 1.6; }
+.task-run-diff-line { display: block; padding: 0 14px; white-space: pre; width: max-content; min-width: 100%; }
+.task-run-diff-add { background: rgba(120, 190, 120, 0.16); color: #b8ddb3; }
+.task-run-diff-del { background: rgba(212, 120, 110, 0.16); color: #e0a39a; }
+.task-run-diff-hunk { color: #8fb5c9; }
+.task-run-diff-meta { color: var(--muted); }
+.task-run-panel button:disabled { opacity: 0.45; }

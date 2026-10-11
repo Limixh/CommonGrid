@@ -5,6 +5,7 @@ import {
 } from "@commongrid/agent-adapters/managed-profiles";
 import { createManagedProfile, managedProfilesNative, readManagedProfiles, selectManagedProfile } from "./managed-profile-client";
 import { ProfileSessionPanel } from "./ProfileSessionPanel";
+import { TaskRunPanel } from "./TaskRunPanel";
 
 const words = {
   tr: {
@@ -104,5 +105,6 @@ export function ManagedProfilesPanel({language}: {language: "tr" | "en"}) {
         <button className="secondary-button" disabled={!enabled || retry} onClick={() => void observe("select", profile.profile_id)}>{t.select}</button>}
     </li>)}</ul>}
     {selectedProfile && <ProfileSessionPanel key={selectedProfile.profile_id} language={language} profile={selectedProfile} />}
+    {selectedProfile && <TaskRunPanel key={"task-" + selectedProfile.profile_id} language={language} profile={selectedProfile} />}
   </section>;
 }
