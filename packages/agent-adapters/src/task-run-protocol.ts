@@ -77,7 +77,7 @@ const bytes = (value: string) => new TextEncoder().encode(value).byteLength;
 // NUL, bidi controls or carriage returns, beginning with the fixed header.
 export function validTaskRunPatch(value: unknown): value is string {
   return typeof value === "string" && value.length > 0 && bytes(value) <= taskRunMaxPatchBytes &&
-    value.startsWith("diff --git a/sum.mjs b/sum.mjs\n") && !/[\0\r‪-‮⁦-⁩]/.test(value);
+    value.startsWith("diff --git a/sum.mjs b/sum.mjs\n") && !/[\0\r\u202a-\u202e\u2066-\u2069]/.test(value);
 }
 export function validateTaskRunResult(value: unknown, outcome: TaskRunOutcome): TaskRunResult {
   if (!exact(value, ["verifier", "candidate_sha256", "patch_sha256", "patch"]) || typeof value.candidate_sha256 !== "string" || !sha256.test(value.candidate_sha256)) invalid();
