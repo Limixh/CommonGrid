@@ -4,6 +4,7 @@ use crate::{
     launcher::{node_name, resources, uuid},
     launcher_process::OwnedWorker,
     profile_store::{self, Provider},
+    task_run::TaskRun,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -13,7 +14,7 @@ use std::{
     path::PathBuf,
     sync::{
         atomic::{AtomicUsize, Ordering},
-        mpsc, Arc, Mutex,
+        mpsc, Arc, Mutex, OnceLock, Weak,
     },
     thread,
     time::{Duration, Instant},
@@ -111,11 +112,13 @@ struct Inner {
 pub(crate) struct ProfileSession {
     inner: Mutex<Inner>,
     start_jobs: AtomicUsize,
+    task_runs: OnceLock<Weak<TaskRun>>,
 }
 impl Default for ProfileSession {
     fn default() -> Self {
         Self {
             start_jobs: AtomicUsize::new(0),
+            task_runs: OnceLock::new(),
             inner: Mutex::new(Inner {
                 status: Status {
                     schema_version: "1.0",
@@ -138,7 +141,7 @@ impl Drop for StartSlot {
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Start {
+pub(crate) struct Start {
     schema_version: String,
     request_id: String,
     profile_id: String,
@@ -254,6 +257,9 @@ impl ProfileSession {
             }
         }
     }
+    pub(crate) fn link_task_run(&self, runs: Weak<TaskRun>) {
+        let _ = self.task_runs.set(runs);
+    }
     pub fn status(&self) -> Status {
         self.inner
             .lock()
@@ -264,7 +270,7 @@ impl ProfileSession {
                 operation: None,
             })
     }
-    fn start(
+    pub(crate) fn start(
         self: &Arc<Self>,
         request: Start,
         root: PathBuf,
@@ -300,6 +306,15 @@ impl ProfileSession {
             }
         }
         if inner.requests.contains(&request.request_id) || inner.requests.len() >= 1024 {
+            return Err(DENIED);
+        }
+        // Checked while holding this lock; the task run checks the same way.
+        if self
+            .task_runs
+            .get()
+            .and_then(Weak::upgrade)
+            .is_some_and(|runs| runs.active())
+        {
             return Err(DENIED);
         }
         let operation = Operation {

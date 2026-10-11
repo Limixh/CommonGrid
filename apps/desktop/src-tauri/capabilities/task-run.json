@@ -1,0 +1,8 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "task-run",
+  "description": "Approved task runs on the selected profile from the local main webview only.",
+  "local": true,
+  "webviews": ["main"],
+  "permissions": ["local-task-run"]
+}

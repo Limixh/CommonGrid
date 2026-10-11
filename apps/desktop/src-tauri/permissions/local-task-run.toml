@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "local-task-run"
+description = "Start, observe and cancel one approved controlled task run on the saved selected local profile. No caller prompts, models, paths, credentials, shell or URL arguments."
+commands.allow = ["local_task_run_start", "local_task_run_status", "local_task_run_cancel"]
