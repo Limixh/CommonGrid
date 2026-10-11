@@ -1,0 +1,59 @@
+{
+  "task_id": "task-1",
+  "task_version": 3,
+  "contract_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "base_commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "artifact_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+  "has_previous": true,
+  "previous_artifact_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+  "milestones": [
+    {
+      "id": "crit",
+      "name": "name crit",
+      "weight": 0.2,
+      "critical": true,
+      "status": "blocked",
+      "previous_status": "pass",
+      "change": "regressed"
+    },
+    {
+      "id": "a",
+      "name": "name a",
+      "weight": 0.4,
+      "critical": false,
+      "status": "pass",
+      "previous_status": "fail",
+      "change": "gained"
+    },
+    {
+      "id": "b",
+      "name": "name b",
+      "weight": 0.3,
+      "critical": false,
+      "status": "pass",
+      "previous_status": "not_measured",
+      "change": "gained"
+    }
+  ],
+  "total_weight": 0.9,
+  "passed_weight": 0.7,
+  "previous_passed_weight": 0.2,
+  "progress": 0.5,
+  "progress_available": true,
+  "critical_cap_applied": true,
+  "critical_blockers": [
+    "crit"
+  ],
+  "gained": [
+    "a",
+    "b"
+  ],
+  "regressed": [
+    "crit"
+  ],
+  "unconfirmed": [],
+  "unmeasured": [],
+  "limits": [
+    "defined_weight_below_one"
+  ]
+}

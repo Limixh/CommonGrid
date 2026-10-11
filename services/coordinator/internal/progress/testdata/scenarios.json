@@ -1,0 +1,133 @@
+[
+  {
+    "name": "80 percent passes but critical fails: shown progress is capped at 0.5",
+    "milestones": [{"id": "crit", "weight": 0.2, "critical": true}, {"id": "a", "weight": 0.4}, {"id": "b", "weight": 0.4}],
+    "current": [{"id": "crit", "status": "fail"}, {"id": "a", "status": "pass"}, {"id": "b", "status": "pass"}],
+    "expect": {"available": true, "passed_weight": 0.8, "progress": 0.5, "cap": true, "blockers": ["crit"]}
+  },
+  {
+    "name": "critical passes: cap is lifted",
+    "milestones": [{"id": "crit", "weight": 0.2, "critical": true}, {"id": "a", "weight": 0.4}, {"id": "b", "weight": 0.4}],
+    "current": [{"id": "crit", "status": "pass"}, {"id": "a", "status": "pass"}, {"id": "b", "status": "pass"}],
+    "expect": {"available": true, "passed_weight": 1, "progress": 1, "cap": false, "blockers": []}
+  },
+  {
+    "name": "cap does not raise a low value",
+    "milestones": [{"id": "crit", "weight": 0.5, "critical": true}, {"id": "a", "weight": 0.25}, {"id": "b", "weight": 0.25}],
+    "current": [{"id": "crit", "status": "fail"}, {"id": "a", "status": "pass"}],
+    "expect": {"available": true, "passed_weight": 0.25, "progress": 0.25, "cap": false, "blockers": ["crit"], "unmeasured": ["b"], "limits": ["milestones_not_measured"]}
+  },
+  {
+    "name": "exactly 0.5 passed with critical open is not reduced",
+    "milestones": [{"id": "crit", "weight": 0.5, "critical": true}, {"id": "a", "weight": 0.5}],
+    "current": [{"id": "crit", "status": "fail"}, {"id": "a", "status": "pass"}],
+    "expect": {"available": true, "passed_weight": 0.5, "progress": 0.5, "cap": false, "blockers": ["crit"]}
+  },
+  {
+    "name": "blocked critical milestone is unresolved and not a pass",
+    "milestones": [{"id": "crit", "weight": 0.1, "critical": true}, {"id": "a", "weight": 0.9}],
+    "current": [{"id": "crit", "status": "blocked"}, {"id": "a", "status": "pass"}],
+    "expect": {"available": true, "passed_weight": 0.9, "progress": 0.5, "cap": true, "blockers": ["crit"]}
+  },
+  {
+    "name": "blocked non-critical milestone adds no weight",
+    "milestones": [{"id": "a", "weight": 0.5}, {"id": "b", "weight": 0.5}],
+    "current": [{"id": "a", "status": "pass"}, {"id": "b", "status": "blocked"}],
+    "expect": {"available": true, "passed_weight": 0.5, "progress": 0.5, "cap": false, "blockers": []}
+  },
+  {
+    "name": "weights are not re-normalized",
+    "milestones": [{"id": "a", "weight": 0.3}, {"id": "b", "weight": 0.3}],
+    "current": [{"id": "a", "status": "pass"}, {"id": "b", "status": "pass"}],
+    "expect": {"available": true, "passed_weight": 0.6, "progress": 0.6, "cap": false, "blockers": [], "limits": ["defined_weight_below_one"]}
+  },
+  {
+    "name": "no results at all: everything unmeasured, critical unresolved",
+    "milestones": [{"id": "crit", "weight": 0.5, "critical": true}, {"id": "a", "weight": 0.5}],
+    "current": [],
+    "expect": {"available": true, "passed_weight": 0, "progress": 0, "cap": false, "blockers": ["crit"], "unmeasured": ["crit", "a"], "limits": ["milestones_not_measured"]}
+  },
+  {
+    "name": "empty definition is not complete and not 100 percent",
+    "milestones": [],
+    "current": [],
+    "expect": {"available": false, "passed_weight": 0, "progress": 0, "cap": false, "blockers": [], "limits": ["no_milestones_defined"]}
+  },
+  {
+    "name": "empty definition rejects any result as unknown",
+    "milestones": [],
+    "current": [{"id": "anything", "status": "pass"}],
+    "expect": {"error": "unknown_milestone"}
+  },
+  {
+    "name": "fake milestone id is rejected",
+    "milestones": [{"id": "a", "weight": 1}],
+    "current": [{"id": "a", "status": "pass"}, {"id": "bonus", "status": "pass"}],
+    "expect": {"error": "unknown_milestone"}
+  },
+  {
+    "name": "duplicate result is rejected even when identical",
+    "milestones": [{"id": "a", "weight": 1}],
+    "current": [{"id": "a", "status": "pass"}, {"id": "a", "status": "pass"}],
+    "expect": {"error": "duplicate_milestone"}
+  },
+  {
+    "name": "not_measured cannot be submitted",
+    "milestones": [{"id": "a", "weight": 1}],
+    "current": [{"id": "a", "status": "not_measured"}],
+    "expect": {"error": "invalid_status"}
+  },
+  {
+    "name": "status spelling is exact",
+    "milestones": [{"id": "a", "weight": 1}],
+    "current": [{"id": "a", "status": "PASS"}],
+    "expect": {"error": "invalid_status"}
+  },
+  {
+    "name": "empty status is rejected",
+    "milestones": [{"id": "a", "weight": 1}],
+    "current": [{"id": "a", "status": ""}],
+    "expect": {"error": "invalid_status"}
+  },
+  {
+    "name": "pass to blocked is a regression and loses the weight",
+    "milestones": [{"id": "a", "weight": 0.5}, {"id": "b", "weight": 0.5}],
+    "previous": [{"id": "a", "status": "pass"}, {"id": "b", "status": "pass"}],
+    "current": [{"id": "a", "status": "blocked"}, {"id": "b", "status": "pass"}],
+    "expect": {"available": true, "passed_weight": 0.5, "previous_passed_weight": 1, "progress": 0.5, "cap": false, "blockers": [], "regressed": ["a"], "gained": []}
+  },
+  {
+    "name": "pass to fail is a regression, fail to pass is a gain",
+    "milestones": [{"id": "a", "weight": 0.25}, {"id": "b", "weight": 0.25}, {"id": "c", "weight": 0.5}],
+    "previous": [{"id": "a", "status": "pass"}, {"id": "b", "status": "fail"}, {"id": "c", "status": "blocked"}],
+    "current": [{"id": "a", "status": "fail"}, {"id": "b", "status": "pass"}, {"id": "c", "status": "pass"}],
+    "expect": {"available": true, "passed_weight": 0.75, "previous_passed_weight": 0.25, "progress": 0.75, "cap": false, "blockers": [], "regressed": ["a"], "gained": ["b", "c"]}
+  },
+  {
+    "name": "pass to not measured is unconfirmed, not a regression",
+    "milestones": [{"id": "a", "weight": 0.5}, {"id": "b", "weight": 0.5}],
+    "previous": [{"id": "a", "status": "pass"}, {"id": "b", "status": "pass"}],
+    "current": [{"id": "b", "status": "pass"}],
+    "expect": {"available": true, "passed_weight": 0.5, "previous_passed_weight": 1, "progress": 0.5, "cap": false, "blockers": [], "regressed": [], "gained": [], "unconfirmed": ["a"], "unmeasured": ["a"], "limits": ["milestones_not_measured"]}
+  },
+  {
+    "name": "unmeasured previous then pass counts as gained",
+    "milestones": [{"id": "a", "weight": 0.5}, {"id": "b", "weight": 0.5}],
+    "previous": [{"id": "b", "status": "pass"}],
+    "current": [{"id": "a", "status": "pass"}, {"id": "b", "status": "pass"}],
+    "expect": {"available": true, "passed_weight": 1, "previous_passed_weight": 0.5, "progress": 1, "cap": false, "blockers": [], "gained": ["a"], "regressed": []}
+  },
+  {
+    "name": "previous with an unknown milestone is rejected",
+    "milestones": [{"id": "a", "weight": 1}],
+    "previous": [{"id": "ghost", "status": "pass"}],
+    "current": [{"id": "a", "status": "pass"}],
+    "expect": {"error": "unknown_milestone"}
+  },
+  {
+    "name": "weights that are not exactly representable sum exactly to 1",
+    "milestones": [{"id": "a", "weight": 0.1}, {"id": "b", "weight": 0.2}, {"id": "c", "weight": 0.3}, {"id": "d", "weight": 0.4}],
+    "current": [{"id": "a", "status": "pass"}, {"id": "b", "status": "pass"}, {"id": "c", "status": "pass"}, {"id": "d", "status": "pass"}],
+    "expect": {"available": true, "passed_weight": 1, "progress": 1, "cap": false, "blockers": []}
+  }
+]
