@@ -1,7 +1,7 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import {
-  validateProfileSessionStart, validateProfileSessionCancel, validateProfileSessionStatus, unavailableProfileSession,
-  type ProfileSessionStartRequest, type ProfileSessionCancelRequest, type ProfileSessionStatus,
+  validateProfileSessionStart, validateProfileSessionCancel, validateProfileSessionSubmit, validateProfileSessionStatus, unavailableProfileSession,
+  type ProfileSessionStartRequest, type ProfileSessionCancelRequest, type ProfileSessionSubmitRequest, type ProfileSessionStatus,
 } from "@commongrid/agent-adapters/profile-session";
 
 export const profileSessionNative = () => isTauri();
@@ -39,6 +39,21 @@ export async function openProfileSessionDevice(signal: AbortSignal): Promise<voi
   if (!profileSessionNative()) throw new Error("profile_session_unavailable");
   // Native owns the fixed official URL and validates the active Codex login.
   if (await boundedInvoke("local_profile_session_open_device", {}, signal) !== true) throw new Error("profile_session_contract_invalid");
+}
+export async function openProfileSessionClaude(request: ProfileSessionCancelRequest, signal: AbortSignal): Promise<void> {
+  const checked = validateProfileSessionCancel(request);
+  signal.throwIfAborted();
+  if (!profileSessionNative()) throw new Error("profile_session_unavailable");
+  // Native validates the active operation and opens its stored official URL.
+  if (await boundedInvoke("local_profile_session_open_claude", {request: checked}, signal) !== true) throw new Error("profile_session_contract_invalid");
+}
+export async function submitProfileSessionCode(request: ProfileSessionSubmitRequest, signal: AbortSignal) {
+  const checked = validateProfileSessionSubmit(request);
+  const status = await checkedInvoke("local_profile_session_submit_code", {request: checked}, signal);
+  if (status.availability === "available" && (!status.operation || status.operation.request_id !== checked.request_id ||
+    status.operation.provider !== "claude" || status.operation.action !== "login" ||
+    status.operation.revision <= checked.expected_revision || status.operation.challenge !== null)) throw new Error("profile_session_contract_invalid");
+  return status;
 }
 export async function cancelProfileSession(request: ProfileSessionCancelRequest, signal: AbortSignal) {
   const checked = validateProfileSessionCancel(request);

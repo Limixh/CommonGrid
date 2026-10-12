@@ -1,0 +1,65 @@
+{
+  "schema_version": "1.0",
+  "checked_at": "2026-10-12T14:22:14.527Z",
+  "purpose": "real_native_claude_oauth_login_cancel_and_official_session_status",
+  "provider": "claude",
+  "success": true,
+  "stage": "logout",
+  "checks": [
+    "real_native_ui_checks_unmaterialized_selected_profile_without_claiming_authentication",
+    "real_official_claude_oauth_challenge_reaches_native_profile_ui",
+    "cancel_hides_device_code_and_verifies_owned_session_cleanup",
+    "runtime_binding_persists_only_public_owner_metadata_distinct_from_profile_id",
+    "official_cli_status_reuses_materialized_profile_after_cancel_and_retains_no_login_claim",
+    "official_cli_logout_has_verified_unauthenticated_postcondition",
+    "native_account_panel_is_readable_after_cleanup_without_device_code"
+  ],
+  "device_challenge_seen": false,
+  "claude_oauth_challenge_seen": true,
+  "device_code_recorded": false,
+  "authorization_url_recorded": false,
+  "real_native_ipc": true,
+  "mocked_native_ipc": false,
+  "real_account_authorized": false,
+  "real_model_inference": false,
+  "user_account_imported": false,
+  "default_user_app_store_accessed": false,
+  "browser_open_requested": false,
+  "process_cleanup": {
+    "method": "windows_taskkill",
+    "status": "termination_reported",
+    "helperExitCode": 0
+  },
+  "scope_limits": [
+    "Isolated app directories and a fresh public profile; no user authorization or model inference",
+    "Official device-login cancellation and signed-out status/logout only; authenticated completion requires user approval in the official provider flow",
+    "Owned process termination report does not independently prove every WebView descendant is absent"
+  ],
+  "source_baseline": "de4ff31825df323be55c2840ccac91ae940f5e65",
+  "source_state": "reviewed_working_tree_before_feature_commit",
+  "validation": {
+    "general_check": "passed",
+    "rust_tests": {
+      "passed": 67,
+      "failed": 0
+    },
+    "ui": {
+      "initial_run": {
+        "passed": 86,
+        "failed": 1
+      },
+      "corrected_claude_subset": {
+        "passed": 13,
+        "failed": 0
+      },
+      "note": "English refresh locator corrected; all 87 distinct profile/task UI checks passed across runs."
+    },
+    "smoke_scripts_typecheck": "passed"
+  },
+  "previous_attempt": {
+    "success": false,
+    "stage": "device_login",
+    "error_code": "image_missing",
+    "resolution": "Pulled the exact pinned image reference, then repeated the fresh-profile native smoke."
+  }
+}

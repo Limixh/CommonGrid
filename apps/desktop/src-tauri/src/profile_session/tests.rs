@@ -119,6 +119,219 @@ fn wait(owner: &ProfileSession, phase: Phase) -> Operation {
     }
 }
 const PASS: &str = r#"import{createInterface}from'node:readline';import path from'node:path';const lines=createInterface({input:process.stdin});lines.once('line',line=>{const b=JSON.parse(line);const keys=['type','schema_version','request_id','profile_id','provider','action','journal_root','assets_root','profile_registry_root'];if(Object.keys(b).sort().join()!==keys.sort().join()||b.type!=='profile_session_boot'||b.schema_version!=='1.0'||b.provider!=='codex'||b.action!=='status'||path.basename(b.profile_registry_root)!=='managed-profiles'||path.basename(b.journal_root)!=='managed-operation-journal'||path.basename(b.assets_root)!=='assets')process.exit(2);for(const phase of ['preparing','checking','cleaning'])console.log(JSON.stringify({type:'progress',phase}));console.log(JSON.stringify({type:'result',outcome:'passed',session_state:'unauthenticated',error_code:null,cleanup:'verified'}));lines.close();process.stdin.destroy();});"#;
+fn claude_url() -> String {
+    let mut url = tauri::Url::parse("https://claude.com/cai/oauth/authorize").unwrap();
+    url.query_pairs_mut().extend_pairs([
+        ("code", "true"),
+        ("client_id", "9d1c250a-e61b-44d9-88ed-5944d1962f5e"),
+        ("response_type", "code"),
+        ("redirect_uri", "https://platform.claude.com/oauth/code/callback"),
+        ("scope", "org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload user:plugins"),
+        ("code_challenge", &"B".repeat(43)),
+        ("code_challenge_method", "S256"),
+        ("state", &"A".repeat(43)),
+    ]);
+    url.into()
+}
+fn claude_waiting() -> (ProfileSession, mpsc::Receiver<String>, mpsc::Receiver<()>) {
+    let owner = ProfileSession::default();
+    let (code_tx, codes) = mpsc::sync_channel(1);
+    let (cancel_tx, cancellation) = mpsc::sync_channel(1);
+    {
+        let mut inner = owner.inner.lock().unwrap();
+        inner.cancel = Some(cancel_tx);
+        inner.code_input = Some(code_tx);
+        inner.status.operation = Some(Operation {
+            request_id: ID.into(),
+            profile_id: PROFILE.into(),
+            provider: Provider::Claude,
+            action: Action::Login,
+            revision: 4,
+            phase: Phase::WaitingForLogin,
+            outcome: None,
+            session_state: SessionState::Unknown,
+            challenge: Some(Challenge::Claude(ClaudeChallenge {
+                authorization_url: claude_url(),
+            })),
+            error_code: None,
+            cleanup: Cleanup::Pending,
+        });
+    }
+    (owner, codes, cancellation)
+}
+fn submit(revision: u32, code: String) -> SubmitCode {
+    SubmitCode {
+        schema_version: "1.0".into(),
+        request_id: ID.into(),
+        expected_revision: revision,
+        code,
+    }
+}
+fn open_claude(revision: u32) -> OpenClaude {
+    OpenClaude {
+        schema_version: "1.0".into(),
+        request_id: ID.into(),
+        expected_revision: revision,
+    }
+}
+#[test]
+fn claude_challenge_and_code_are_bound_to_the_pinned_official_flow() {
+    let good = claude_url();
+    assert_eq!(claude_url_state(&good).unwrap(), "A".repeat(43));
+    assert!(Challenge::Claude(ClaudeChallenge {
+        authorization_url: good.clone()
+    })
+    .valid_for(Provider::Claude));
+    assert!(!Challenge::Claude(ClaudeChallenge {
+        authorization_url: good.clone()
+    })
+    .valid_for(Provider::Codex));
+    for hostile in [
+        good.replace("https://claude.com/", "http://claude.com/"),
+        good.replace("https://claude.com/", "https://claude.com:443/"),
+        good.replace("https://claude.com/", "https://claude.com.example.invalid/"),
+        good.replace("https://claude.com/", "https://user@claude.com/"),
+        good.replace("/cai/oauth/authorize?", "/oauth/authorize?"),
+        good.replace("code=true", "code=false"),
+        good.replace("code_challenge_method=S256", "code_challenge_method=plain"),
+        good.replace("user%3Aplugins", "user%3Aprivileged"),
+        good.replace("platform.claude.com", "example.invalid"),
+        format!("{good}&state={}", "A".repeat(43)),
+        format!("{good}&private=unknown"),
+        format!("{good}#fragment"),
+        format!("{good}\n"),
+        format!("{good}\\"),
+        "X".repeat(2049),
+    ] {
+        assert!(claude_url_state(&hostile).is_none());
+    }
+    let code = format!("FIXTURE_AUTHORIZATION#{}", "A".repeat(43));
+    assert_eq!(claude_code_state(&code), Some("A".repeat(43).as_str()));
+    for hostile in [
+        format!("{code}\n"),
+        format!(" {code}"),
+        format!("{code}#extra"),
+        format!("bad.code#{}", "A".repeat(43)),
+        format!("#{}", "A".repeat(43)),
+        format!("token#{}", "A".repeat(42)),
+        format!("{}#{}", "X".repeat(2048), "A".repeat(43)),
+        format!("token\0#{}", "A".repeat(43)),
+    ] {
+        assert!(claude_code_state(&hostile).is_none());
+    }
+    for challenge in [
+        json!({"authorization_url":good,"user_code":"PRIVATE"}),
+        json!({"authorization_url":good,"extra":true}),
+    ] {
+        assert!(
+            serde_json::from_value::<Frame>(json!({"type":"challenge","challenge":challenge}))
+                .is_err()
+        );
+    }
+}
+#[test]
+fn claude_submit_is_one_shot_revision_checked_transient_and_state_matched() {
+    let (owner, codes, _cancel) = claude_waiting();
+    assert_eq!(
+        owner.claude_open_target(&open_claude(4)).unwrap(),
+        claude_url()
+    );
+    assert!(owner.claude_open_target(&open_claude(3)).is_err());
+    assert!(!owner.can_open_device());
+    let code = format!("FIXTURE_AUTHORIZATION#{}", "A".repeat(43));
+    assert!(owner.submit_code(submit(3, code.clone())).is_err());
+    assert!(owner
+        .submit_code(submit(4, format!("FIXTURE#{}", "B".repeat(43))))
+        .is_err());
+    assert!(codes.try_recv().is_err());
+    let result = owner.submit_code(submit(4, code.clone())).unwrap();
+    let operation = result.operation.as_ref().unwrap();
+    assert_eq!(operation.revision, 5);
+    assert_eq!(operation.phase, Phase::WaitingForLogin);
+    assert!(operation.challenge.is_none());
+    assert!(!serde_json::to_string(&result)
+        .unwrap()
+        .contains("FIXTURE_AUTHORIZATION"));
+    assert_eq!(codes.try_recv().unwrap(), code);
+    assert!(owner.submit_code(submit(5, code)).is_err());
+    assert!(owner.claude_open_target(&open_claude(5)).is_err());
+    let mut result = None;
+    assert!(!owner.frame(
+        ID,
+        Frame::Challenge {
+            challenge: Challenge::Claude(ClaudeChallenge {
+                authorization_url: claude_url()
+            })
+        },
+        &mut result
+    ));
+    owner.force_review();
+    assert!(owner.inner.lock().unwrap().code_input.is_none());
+}
+#[test]
+fn claude_controls_reject_wrong_operation_and_close_on_cancellation_or_shutdown() {
+    for fault in ["provider", "action", "phase", "id", "cancel", "shutdown"] {
+        let (owner, codes, _cancel) = claude_waiting();
+        match fault {
+            "cancel" => {
+                owner
+                    .cancel(Cancel {
+                        schema_version: "1.0".into(),
+                        request_id: ID.into(),
+                        expected_revision: 4,
+                    })
+                    .unwrap();
+            }
+            "shutdown" => {
+                owner.shutdown();
+            }
+            _ => {
+                let mut inner = owner.inner.lock().unwrap();
+                let operation = inner.status.operation.as_mut().unwrap();
+                match fault {
+                    "provider" => operation.provider = Provider::Codex,
+                    "action" => operation.action = Action::Status,
+                    "phase" => operation.phase = Phase::Cleaning,
+                    "id" => operation.request_id = PROFILE.into(),
+                    _ => unreachable!(),
+                }
+            }
+        }
+        assert!(owner
+            .submit_code(submit(4, format!("FIXTURE#{}", "A".repeat(43))))
+            .is_err());
+        assert!(owner.claude_open_target(&open_claude(4)).is_err());
+        assert!(codes.try_recv().is_err());
+    }
+}
+#[test]
+fn owned_claude_fixture_receives_only_the_bounded_operation_input() {
+    let fixture = Fixture::new();
+    fixture.registry("claude");
+    let source = r#"import{createInterface}from'node:readline';const lines=createInterface({input:process.stdin});let boot;lines.on('line',line=>{const b=JSON.parse(line);if(!boot){boot=b;if(b.provider!=='claude'||b.action!=='login')process.exit(2);for(const phase of ['preparing','checking'])console.log(JSON.stringify({type:'progress',phase}));console.log(JSON.stringify({type:'challenge',challenge:{authorization_url:AUTHORIZATION_URL}}));}else{if(Object.keys(b).sort().join()!=='code,request_id,type'||b.type!=='claude_login_code'||b.request_id!==boot.request_id||b.code!=='FIXTURE_AUTHORIZATION#'+'A'.repeat(43))process.exit(3);console.log(JSON.stringify({type:'progress',phase:'cleaning'}));console.log(JSON.stringify({type:'result',outcome:'passed',session_state:'authenticated',error_code:null,cleanup:'verified'}));lines.close();process.stdin.destroy();}});"#
+        .replace("AUTHORIZATION_URL", &serde_json::to_string(&claude_url()).unwrap());
+    let root = fixture.resources(&source);
+    let owner = Owner::new();
+    owner
+        .start(start(Action::Login), root, fixture.directory.clone())
+        .unwrap();
+    let operation = wait(&owner, Phase::WaitingForLogin);
+    owner
+        .submit_code(submit(
+            operation.revision,
+            format!("FIXTURE_AUTHORIZATION#{}", "A".repeat(43)),
+        ))
+        .unwrap();
+    let result = wait(&owner, Phase::Finished);
+    assert_eq!(result.outcome, Some(Outcome::Passed));
+    assert_eq!(result.session_state, SessionState::Authenticated);
+    assert_eq!(result.cleanup, Cleanup::Verified);
+    assert!(result.challenge.is_none());
+    assert!(!serde_json::to_string(&owner.status())
+        .unwrap()
+        .contains("FIXTURE_AUTHORIZATION"));
+    assert!(owner.inner.lock().unwrap().code_input.is_none());
+}
 #[test]
 fn exact_preflight_rejects_nested_large_and_caller_owned_inputs() {
     let valid = json!({"request":{"schema_version":"1.0","request_id":ID,"profile_id":PROFILE,"action":"login"}});
@@ -145,28 +358,53 @@ fn exact_preflight_rejects_nested_large_and_caller_owned_inputs() {
         &json!({"url":"https://example.invalid"}),
         Shape::Status
     ));
+    let code = format!("FIXTURE_AUTHORIZATION#{}", "A".repeat(43));
+    assert!(preflight(
+        &json!({"request":{"schema_version":"1.0","request_id":ID,"expected_revision":4,"code":code}}),
+        Shape::SubmitCode
+    ));
+    assert!(preflight(
+        &json!({"request":{"schema_version":"1.0","request_id":ID,"expected_revision":4}}),
+        Shape::OpenClaude
+    ));
+    for hostile in [
+        json!(null),
+        json!([code.clone()]),
+        json!(format!("{code}\r\n")),
+        json!("x".repeat(100000)),
+        json!(true),
+    ] {
+        assert!(!preflight(
+            &json!({"request":{"schema_version":"1.0","request_id":ID,"expected_revision":4,"code":hostile}}),
+            Shape::SubmitCode
+        ));
+    }
+    assert!(!preflight(
+        &json!({"request":{"schema_version":"1.0","request_id":ID,"expected_revision":4,"url":claude_url()}}),
+        Shape::OpenClaude
+    ));
 }
 #[test]
 fn result_and_challenge_contracts_fail_closed() {
-    let good = Challenge {
+    let good = DeviceChallenge {
         verification_url: "https://auth.openai.com/codex/device".into(),
         user_code: "ABCD-1234".into(),
     };
     assert!(good.valid());
     for challenge in [
-        Challenge {
+        DeviceChallenge {
             verification_url: "https://auth.openai.com/codex/device?secret=private".into(),
             ..good.clone()
         },
-        Challenge {
+        DeviceChallenge {
             user_code: "abcD".into(),
             ..good.clone()
         },
-        Challenge {
+        DeviceChallenge {
             user_code: "X".repeat(33),
             ..good.clone()
         },
-        Challenge {
+        DeviceChallenge {
             user_code: "ABC\nPRIVATE".into(),
             ..good.clone()
         },
@@ -317,10 +555,10 @@ fn shutdown_clears_transient_challenge_before_worker_cleanup() {
             phase: Phase::WaitingForLogin,
             outcome: None,
             session_state: SessionState::Unknown,
-            challenge: Some(Challenge {
+            challenge: Some(Challenge::Codex(DeviceChallenge {
                 verification_url: "https://auth.openai.com/codex/device".into(),
                 user_code: "FIXTURE-1234".into(),
-            }),
+            })),
             error_code: None,
             cleanup: Cleanup::Pending,
         });
@@ -335,10 +573,10 @@ fn shutdown_clears_transient_challenge_before_worker_cleanup() {
     assert!(owner.frame(
         ID,
         Frame::Challenge {
-            challenge: Challenge {
+            challenge: Challenge::Codex(DeviceChallenge {
                 verification_url: "https://auth.openai.com/codex/device".into(),
                 user_code: "LATE-1234".into()
-            }
+            })
         },
         &mut result
     ));
@@ -405,7 +643,9 @@ fn main_only_acl_and_wrappers_reject_remote_extra_raw_and_url_payloads() {
             local_profile_session_start,
             local_profile_session_status,
             local_profile_session_cancel,
-            local_profile_session_open_device
+            local_profile_session_open_device,
+            local_profile_session_submit_code,
+            local_profile_session_open_claude
         ])
         .build(context)
         .unwrap();
@@ -462,6 +702,14 @@ fn main_only_acl_and_wrappers_reject_remote_extra_raw_and_url_payloads() {
             json!({"request":{"schema_version":"1.0","request_id":ID,"expected_revision":0}}),
         ),
         ("local_profile_session_open_device", json!({})),
+        (
+            "local_profile_session_submit_code",
+            json!({"request":{"schema_version":"1.0","request_id":ID,"expected_revision":0,"code":format!("FIXTURE#{}", "A".repeat(43))}}),
+        ),
+        (
+            "local_profile_session_open_claude",
+            json!({"request":{"schema_version":"1.0","request_id":ID,"expected_revision":0}}),
+        ),
     ] {
         assert!(invoke(&other, local, command, InvokeBody::Json(body.clone())).is_err());
         for remote in [

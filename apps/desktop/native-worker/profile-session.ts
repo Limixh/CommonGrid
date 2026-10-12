@@ -1,7 +1,7 @@
 import path from "node:path";
-import type { ProfileSessionAction, ProfileSessionError, ProfileSessionProvider } from "../../../packages/agent-adapters/src/profile-session-protocol.ts";
+import { validateClaudeAuthorizationUrl, validateClaudeLoginCode, type ProfileSessionAction, type ProfileSessionError, type ProfileSessionProvider, type ProfileSessionChallenge } from "../../../packages/agent-adapters/src/profile-session-protocol.ts";
 import { ManagedCliRuntime, ManagedPreparationError, startBridge, type ManagedPrepareOptions, type ManagedRuntimeAssets } from "../../../packages/agent-adapters/src/managed-runtime.ts";
-import { claudeStatus, codexRpc, type ProviderSessionOptions } from "../../../packages/agent-adapters/src/provider-session.ts";
+import { claudeManagedLogin, claudeStatus, codexRpc, type ProviderSessionOptions } from "../../../packages/agent-adapters/src/provider-session.ts";
 import { assertBridgeHealthy, ProviderFailure } from "../../../packages/agent-adapters/src/session-protocol.ts";
 import { verifyAssets, verifyDockerPrerequisite } from "./cli-check.ts";
 import { BindingFailure, ProfileBindings, uuid, type ProfileBinding } from "./profile-bindings.ts";
@@ -11,9 +11,35 @@ export interface SessionBoot {
   provider: ProfileSessionProvider; action: ProfileSessionAction; journal_root: string; assets_root: string; profile_registry_root: string;
 }
 export type SessionFrame = {type: "progress"; phase: "preparing" | "checking" | "cleaning"} |
-  {type: "challenge"; challenge: {verification_url: "https://auth.openai.com/codex/device"; user_code: string}} |
+  {type: "challenge"; challenge: ProfileSessionChallenge} |
   {type: "result"; outcome: "passed" | "cancelled" | "failed" | "needs_review"; session_state: "authenticated" | "unauthenticated" | "unknown"; error_code: ProfileSessionError | null; cleanup: "verified" | "unknown"};
 class SessionFailure extends Error { constructor(readonly code: ProfileSessionError) { super(code); } }
+/** One operation, one transient input. No queued input before an active challenge. */
+export class ClaudeLoginMailbox {
+  private pending?: {url:string;resolve:(code:string)=>void;reject:(error:ProviderFailure)=>void;signal:AbortSignal;abort:()=>void};
+  private used=false;
+  private closed=false;
+  constructor(private readonly requestId:string) {}
+  wait(challenge:Readonly<{authorization_url:string}>,signal:AbortSignal):Promise<string> {
+    if(this.closed||this.used||this.pending||signal.aborted) return Promise.reject(new ProviderFailure(signal.aborted?"canceled":"protocol"));
+    const url=validateClaudeAuthorizationUrl(challenge.authorization_url);
+    return new Promise((resolve,reject)=>{
+      const abort=()=>this.close();this.pending={url,resolve,reject,signal,abort};
+      signal.addEventListener("abort",abort,{once:true});if(signal.aborted)abort();
+    });
+  }
+  submit(value:unknown):void {
+    const frame=value as {type:string;request_id:string;code:string};
+    if(!frame||typeof frame!=="object"||Array.isArray(frame)||Object.keys(frame).sort().join()!=="code,request_id,type"||
+      frame.type!=="claude_login_code"||frame.request_id!==this.requestId||this.closed||this.used||!this.pending) throw new ProviderFailure("protocol");
+    const code=validateClaudeLoginCode(frame.code,this.pending.url),pending=this.pending;
+    this.pending=undefined;this.used=true;pending.signal.removeEventListener("abort",pending.abort);pending.resolve(code);
+  }
+  close():void {
+    this.closed=true;const pending=this.pending;this.pending=undefined;
+    if(pending){pending.signal.removeEventListener("abort",pending.abort);pending.reject(new ProviderFailure("canceled"));}
+  }
+}
 const bootKeys = ["type", "schema_version", "request_id", "profile_id", "provider", "action", "journal_root", "assets_root", "profile_registry_root"].sort().join();
 export function parseSessionBoot(value: unknown): SessionBoot {
   const boot = value as SessionBoot;
@@ -52,7 +78,7 @@ export async function executeProfileSession(runtime: SessionRuntime, boot: Sessi
     if (!("authenticated" in result) || typeof result.authenticated !== "boolean") throw new SessionFailure("session_failed");
     return result;
   }
-  if (boot.action === "login") throw new SessionFailure("unsupported");
+  if (boot.action === "login") return claudeManagedLogin(runtime, options);
   if (boot.action === "logout") {
     const result = await runtime.exec(["/opt/cg/claude", "auth", "logout"], 30_000, {signal: options.signal, maxBytes: 4096});
     if (result.code !== 0) throw new SessionFailure("session_failed");
@@ -78,7 +104,8 @@ function errorCode(error: unknown, signal: AbortSignal): ProfileSessionError {
   if (["asset_missing", "asset_invalid", "docker_unavailable", "image_missing"].includes(code as string)) return code as ProfileSessionError;
   return "worker_failed";
 }
-export async function runProfileSession(boot: SessionBoot, signal: AbortSignal, emit: (frame: SessionFrame) => void, deps: SessionDependencies = dependencies): Promise<void> {
+export async function runProfileSession(boot: SessionBoot, signal: AbortSignal, emit: (frame: SessionFrame) => void, deps: SessionDependencies = dependencies,
+  interaction: Pick<ProviderSessionOptions,"onClaudeAuthorization"> = {}): Promise<void> {
   let runtime: SessionRuntime | undefined, bridge: SessionBridge | undefined, release: (() => void) | undefined;
   let reserved: ProfileBinding | undefined, prepared = false, preparing = false, published = false, cleanupVerified = true;
   let sessionState: "authenticated" | "unauthenticated" | "unknown" = "unknown", error: ProfileSessionError | null = null;
@@ -86,7 +113,7 @@ export async function runProfileSession(boot: SessionBoot, signal: AbortSignal, 
   emit({type: "progress", phase: "preparing"});
   try {
     signal.throwIfAborted();
-    if (boot.provider === "claude" && boot.action === "login") throw new SessionFailure("unsupported");
+    if (boot.provider === "claude" && boot.action === "login" && !interaction.onClaudeAuthorization) throw new SessionFailure("unsupported");
     store = deps.bindings(profileBindingRoot(boot));
     const binding = await store.read(boot.profile_id, boot.provider);
     signal.throwIfAborted();
@@ -110,6 +137,13 @@ export async function runProfileSession(boot: SessionBoot, signal: AbortSignal, 
         if (boot.provider !== "codex" || boot.action !== "login" || challenge.verification_url !== "https://auth.openai.com/codex/device" ||
           typeof challenge.user_code !== "string" || !/^[A-Z0-9-]{4,32}$/.test(challenge.user_code)) throw new SessionFailure("session_failed");
         emit({type: "challenge", challenge: {verification_url: challenge.verification_url, user_code: challenge.user_code}});
+      }, onClaudeAuthorization: async (challenge,loginSignal) => {
+        signal.throwIfAborted(); assertBridgeHealthy(bridge!.stats);
+        if(boot.provider!=="claude"||boot.action!=="login"||!interaction.onClaudeAuthorization)throw new SessionFailure("session_failed");
+        const authorization_url=validateClaudeAuthorizationUrl(challenge.authorization_url);
+        const pending=interaction.onClaudeAuthorization(Object.freeze({authorization_url}),loginSignal);
+        emit({type:"challenge",challenge:{authorization_url}});
+        return pending;
       }});
     signal.throwIfAborted(); assertBridgeHealthy(bridge.stats);
     if (typeof result.authenticated !== "boolean" || (boot.action === "login" && !result.authenticated) || (boot.action === "logout" && result.authenticated)) throw new SessionFailure("session_failed");

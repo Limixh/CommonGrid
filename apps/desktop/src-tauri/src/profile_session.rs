@@ -1,5 +1,6 @@
 //! Narrow supervisor for one saved profile's managed CLI session. The webview
-//! never supplies executable paths, runtime owners, credentials or arguments.
+//! never supplies executable paths, runtime owners or arguments. A transient
+//! Claude login code is accepted only for its matching active challenge.
 use crate::{
     launcher::{node_name, resources, uuid},
     launcher_process::OwnedWorker,
@@ -68,11 +69,11 @@ enum Cleanup {
 }
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
-struct Challenge {
+struct DeviceChallenge {
     verification_url: String,
     user_code: String,
 }
-impl Challenge {
+impl DeviceChallenge {
     fn valid(&self) -> bool {
         self.verification_url == "https://auth.openai.com/codex/device"
             && (4..=32).contains(&self.user_code.len())
@@ -80,6 +81,123 @@ impl Challenge {
                 .user_code
                 .bytes()
                 .all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit() || byte == b'-')
+    }
+}
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct ClaudeChallenge {
+    authorization_url: String,
+}
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(untagged)]
+enum Challenge {
+    Codex(DeviceChallenge),
+    Claude(ClaudeChallenge),
+}
+fn base64url(value: &str) -> bool {
+    value.len() == 43
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+}
+fn claude_url_state(value: &str) -> Option<String> {
+    if value.len() > 2048
+        || !value.starts_with("https://claude.com/cai/oauth/authorize?")
+        || value
+            .bytes()
+            .any(|byte| !byte.is_ascii() || byte <= b' ' || byte == 127 || byte == b'\\')
+    {
+        return None;
+    }
+    let url = tauri::Url::parse(value).ok()?;
+    if url.scheme() != "https"
+        || url.host_str() != Some("claude.com")
+        || url.path() != "/cai/oauth/authorize"
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.port().is_some()
+        || url.fragment().is_some()
+    {
+        return None;
+    }
+    let pairs = url.query_pairs().collect::<Vec<_>>();
+    let fields = [
+        "code",
+        "client_id",
+        "response_type",
+        "redirect_uri",
+        "scope",
+        "code_challenge",
+        "code_challenge_method",
+        "state",
+    ];
+    if pairs.len() != fields.len()
+        || fields.iter().any(|field| {
+            pairs
+                .iter()
+                .filter(|(key, _)| key.as_ref() == *field)
+                .count()
+                != 1
+        })
+    {
+        return None;
+    }
+    let get = |key: &str| {
+        pairs
+            .iter()
+            .find(|(field, _)| field.as_ref() == key)
+            .map(|(_, value)| value.as_ref())
+    };
+    if get("code") != Some("true")
+        || get("client_id") != Some("9d1c250a-e61b-44d9-88ed-5944d1962f5e")
+        || get("response_type") != Some("code")
+        || get("redirect_uri") != Some("https://platform.claude.com/oauth/code/callback")
+        || get("code_challenge_method") != Some("S256")
+        || !get("code_challenge").is_some_and(base64url)
+    {
+        return None;
+    }
+    let scopes = get("scope")?.split(' ').collect::<Vec<_>>();
+    let expected = [
+        "org:create_api_key",
+        "user:profile",
+        "user:inference",
+        "user:sessions:claude_code",
+        "user:mcp_servers",
+        "user:file_upload",
+        "user:plugins",
+    ];
+    if scopes.len() != expected.len()
+        || expected
+            .iter()
+            .any(|scope| scopes.iter().filter(|value| **value == *scope).count() != 1)
+    {
+        return None;
+    }
+    let state = get("state")?;
+    base64url(state).then(|| state.to_owned())
+}
+fn claude_code_state(code: &str) -> Option<&str> {
+    if code.len() > 2048 {
+        return None;
+    }
+    let (authorization, state) = code.split_once('#')?;
+    (!authorization.is_empty()
+        && authorization
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+        && base64url(state))
+    .then_some(state)
+}
+impl Challenge {
+    fn valid_for(&self, provider: Provider) -> bool {
+        match (self, provider) {
+            (Self::Codex(challenge), Provider::Codex) => challenge.valid(),
+            (Self::Claude(challenge), Provider::Claude) => {
+                claude_url_state(&challenge.authorization_url).is_some()
+            }
+            _ => false,
+        }
     }
 }
 #[derive(Clone, Debug, Serialize)]
@@ -106,6 +224,8 @@ struct Inner {
     status: Status,
     cancel: Option<mpsc::SyncSender<()>>,
     cancel_requested: bool,
+    code_input: Option<mpsc::SyncSender<String>>,
+    code_submitted: bool,
     shutting_down: bool,
     requests: HashSet<String>,
 }
@@ -127,6 +247,8 @@ impl Default for ProfileSession {
                 },
                 cancel: None,
                 cancel_requested: false,
+                code_input: None,
+                code_submitted: false,
                 shutting_down: false,
                 requests: HashSet::new(),
             }),
@@ -150,6 +272,22 @@ pub(crate) struct Start {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Cancel {
+    schema_version: String,
+    request_id: String,
+    expected_revision: u32,
+}
+// Deliberately neither Debug nor Serialize: the submitted code is input only.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SubmitCode {
+    schema_version: String,
+    request_id: String,
+    expected_revision: u32,
+    code: String,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct OpenClaude {
     schema_version: String,
     request_id: String,
     expected_revision: u32,
@@ -331,19 +469,23 @@ impl ProfileSession {
             cleanup: Cleanup::Pending,
         };
         let (tx, rx) = mpsc::sync_channel(1);
+        let (code_tx, code_rx) = mpsc::sync_channel(1);
         inner.requests.insert(operation.request_id.clone());
         inner.cancel = Some(tx);
         inner.cancel_requested = false;
+        inner.code_input = Some(code_tx);
+        inner.code_submitted = false;
         inner.status.operation = Some(operation.clone());
         let answer = inner.status.clone();
         drop(inner);
         let owner = Arc::clone(self);
-        thread::spawn(move || owner.run(operation, root, store, rx));
+        thread::spawn(move || owner.run(operation, root, store, rx, code_rx));
         Ok(answer)
     }
     fn request_cancel(inner: &mut Inner) {
         if inner.cancel.is_some() && !inner.cancel_requested {
             inner.cancel_requested = true;
+            inner.code_input = None;
             if let Some(operation) = &mut inner.status.operation {
                 operation.challenge = None;
                 operation.revision += 1;
@@ -370,6 +512,71 @@ impl ProfileSession {
         Self::request_cancel(&mut inner);
         Ok(inner.status.clone())
     }
+    fn submit_code(&self, request: SubmitCode) -> Result<Status, &'static str> {
+        if request.schema_version != "1.0"
+            || !uuid(&request.request_id)
+            || request.expected_revision > MAX_REVISION
+        {
+            return Err(DENIED);
+        }
+        let state = claude_code_state(&request.code).ok_or(DENIED)?;
+        let mut inner = self.inner.lock().map_err(|_| DENIED)?;
+        if inner.cancel_requested || inner.shutting_down || inner.code_submitted {
+            return Err(DENIED);
+        }
+        let operation = inner.status.operation.as_ref().ok_or(DENIED)?;
+        if operation.request_id != request.request_id
+            || operation.revision != request.expected_revision
+            || operation.provider != Provider::Claude
+            || operation.action != Action::Login
+            || operation.phase != Phase::WaitingForLogin
+        {
+            return Err(DENIED);
+        }
+        let Some(Challenge::Claude(challenge)) = operation.challenge.as_ref() else {
+            return Err(DENIED);
+        };
+        if claude_url_state(&challenge.authorization_url).as_deref() != Some(state) {
+            return Err(DENIED);
+        }
+        inner
+            .code_input
+            .as_ref()
+            .ok_or(DENIED)?
+            .try_send(request.code)
+            .map_err(|_| DENIED)?;
+        inner.code_submitted = true;
+        let operation = inner.status.operation.as_mut().ok_or(DENIED)?;
+        operation.challenge = None;
+        operation.revision += 1;
+        Ok(inner.status.clone())
+    }
+    fn claude_open_target(&self, request: &OpenClaude) -> Result<String, &'static str> {
+        if request.schema_version != "1.0"
+            || !uuid(&request.request_id)
+            || request.expected_revision > MAX_REVISION
+        {
+            return Err(DENIED);
+        }
+        let inner = self.inner.lock().map_err(|_| DENIED)?;
+        if inner.cancel_requested || inner.shutting_down {
+            return Err(DENIED);
+        }
+        let operation = inner.status.operation.as_ref().ok_or(DENIED)?;
+        if operation.request_id != request.request_id
+            || operation.revision != request.expected_revision
+            || operation.provider != Provider::Claude
+            || operation.action != Action::Login
+            || operation.phase != Phase::WaitingForLogin
+        {
+            return Err(DENIED);
+        }
+        let Some(Challenge::Claude(challenge)) = operation.challenge.as_ref() else {
+            return Err(DENIED);
+        };
+        claude_url_state(&challenge.authorization_url).ok_or(DENIED)?;
+        Ok(challenge.authorization_url.clone())
+    }
     pub fn shutdown(&self) -> bool {
         let Ok(mut inner) = self.inner.lock() else {
             return true;
@@ -392,7 +599,10 @@ impl ProfileSession {
                     operation.provider == Provider::Codex
                         && operation.action == Action::Login
                         && operation.phase == Phase::WaitingForLogin
-                        && operation.challenge.as_ref().is_some_and(Challenge::valid)
+                        && operation
+                            .challenge
+                            .as_ref()
+                            .is_some_and(|challenge| challenge.valid_for(Provider::Codex))
                 })
         })
     }
@@ -410,6 +620,7 @@ impl ProfileSession {
                 }
             }
             inner.cancel = None;
+            inner.code_input = None;
         }
     }
     fn terminal(
@@ -453,6 +664,7 @@ impl ProfileSession {
                         Self::terminal(operation, outcome, state, error, cleanup);
                     }
                     inner.cancel = None;
+                    inner.code_input = None;
                 }
             }
         }
@@ -469,6 +681,7 @@ impl ProfileSession {
             return false;
         };
         let cancelled = inner.cancel_requested;
+        let code_submitted = inner.code_submitted;
         let Some(operation) = &mut inner.status.operation else {
             return false;
         };
@@ -493,12 +706,14 @@ impl ProfileSession {
             }
             Frame::Challenge { challenge }
                 if result.is_none()
-                    && operation.provider == Provider::Codex
                     && operation.action == Action::Login
-                    && challenge.valid() =>
+                    && challenge.valid_for(operation.provider) =>
             {
                 if cancelled {
                     return true;
+                }
+                if code_submitted {
+                    return false;
                 }
                 if !matches!(operation.phase, Phase::Checking | Phase::WaitingForLogin) {
                     return false;
@@ -529,7 +744,14 @@ impl ProfileSession {
             _ => false,
         }
     }
-    fn run(&self, operation: Operation, root: PathBuf, store: PathBuf, cancel: mpsc::Receiver<()>) {
+    fn run(
+        &self,
+        operation: Operation,
+        root: PathBuf,
+        store: PathBuf,
+        cancel: mpsc::Receiver<()>,
+        codes: mpsc::Receiver<String>,
+    ) {
         let id = operation.request_id.as_str();
         let deadline = Instant::now()
             + Duration::from_secs(if operation.action == Action::Login {
@@ -658,6 +880,31 @@ impl ProfileSession {
             if failure.is_some() || cancellation.is_some_and(|(until, _)| Instant::now() >= until) {
                 break;
             }
+            if cancellation.is_some() {
+                while codes.try_recv().is_ok() {}
+            } else if let Ok(code) = codes.try_recv() {
+                // Serialize dispatch with cancellation. The bounded code is never
+                // copied into public observations or durable journals.
+                match self.inner.lock() {
+                    Ok(inner)
+                        if !inner.cancel_requested
+                            && !inner.shutting_down
+                            && inner.status.operation.as_ref().is_some_and(|current| {
+                                current.request_id == id
+                                    && current.provider == Provider::Claude
+                                    && current.action == Action::Login
+                                    && current.phase == Phase::WaitingForLogin
+                            }) =>
+                    {
+                        let frame = serde_json::json!({"type":"claude_login_code", "request_id":id, "code":code});
+                        if writeln!(input, "{}", frame).is_err() {
+                            failure = Some("worker_failed");
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(_) => failure = Some("worker_failed"),
+                }
+            }
             match rx.recv_timeout(Duration::from_millis(25)) {
                 Ok(Ok(frame)) => {
                     if !self.frame(id, frame, &mut result) {
@@ -745,6 +992,8 @@ enum Shape {
     Start,
     Status,
     Cancel,
+    SubmitCode,
+    OpenClaude,
 }
 fn exact_object<'a>(
     value: &'a serde_json::Value,
@@ -764,6 +1013,8 @@ fn preflight(value: &serde_json::Value, shape: Shape) -> bool {
     let fields: &[&str] = match shape {
         Shape::Start => &["schema_version", "request_id", "profile_id", "action"],
         Shape::Cancel => &["schema_version", "request_id", "expected_revision"],
+        Shape::SubmitCode => &["schema_version", "request_id", "expected_revision", "code"],
+        Shape::OpenClaude => &["schema_version", "request_id", "expected_revision"],
         Shape::Status => return false,
     };
     let Some(request) = exact_object(&wrapper["request"], fields) else {
@@ -779,9 +1030,17 @@ fn preflight(value: &serde_json::Value, shape: Shape) -> bool {
                         Some("login" | "status" | "logout")
                     )
             }
-            Shape::Cancel => request["expected_revision"]
+            Shape::Cancel | Shape::OpenClaude => request["expected_revision"]
                 .as_u64()
                 .is_some_and(|revision| revision <= u64::from(MAX_REVISION)),
+            Shape::SubmitCode => {
+                request["expected_revision"]
+                    .as_u64()
+                    .is_some_and(|revision| revision <= u64::from(MAX_REVISION))
+                    && request["code"]
+                        .as_str()
+                        .is_some_and(|code| claude_code_state(code).is_some())
+            }
             Shape::Status => false,
         }
 }
@@ -841,9 +1100,38 @@ pub(crate) async fn local_profile_session_cancel<R: Runtime>(
     let value: Wrapper<Cancel> = decode(&webview, request, Shape::Cancel)?;
     sessions.cancel(value.request)
 }
-// The only browser target is this constant official device page. Neither the
-// webview nor the worker can pass a URI or arbitrary executable arguments.
+#[tauri::command]
+pub(crate) async fn local_profile_session_submit_code<R: Runtime>(
+    webview: Webview<R>,
+    request: Request<'_>,
+    sessions: State<'_, Arc<ProfileSession>>,
+) -> Result<Status, &'static str> {
+    let value: Wrapper<SubmitCode> = decode(&webview, request, Shape::SubmitCode)?;
+    sessions.submit_code(value.request)
+}
+#[tauri::command]
+pub(crate) async fn local_profile_session_open_claude<R: Runtime>(
+    webview: Webview<R>,
+    request: Request<'_>,
+    sessions: State<'_, Arc<ProfileSession>>,
+) -> Result<bool, &'static str> {
+    let value: Wrapper<OpenClaude> = decode(&webview, request, Shape::OpenClaude)?;
+    let owner = Arc::clone(sessions.inner());
+    // Resolve again in the native job so cancellation or a consumed challenge
+    // invalidates a queued click. No caller-controlled URI reaches the opener.
+    tauri::async_runtime::spawn_blocking(move || {
+        let url = owner.claude_open_target(&value.request)?;
+        Ok(open_login_page(&url))
+    })
+    .await
+    .map_err(|_| DENIED)?
+}
+// All callers supply either the fixed Codex URL or a native-validated active
+// official Claude challenge. The webview cannot supply a URI or arguments.
 fn open_device_page() -> bool {
+    open_login_page("https://auth.openai.com/codex/device")
+}
+fn open_login_page(target: &str) -> bool {
     #[cfg(windows)]
     {
         use std::os::windows::ffi::OsStrExt;
@@ -851,7 +1139,7 @@ fn open_device_page() -> bool {
             .encode_wide()
             .chain(Some(0))
             .collect::<Vec<_>>();
-        let url = std::ffi::OsStr::new("https://auth.openai.com/codex/device")
+        let url = std::ffi::OsStr::new(target)
             .encode_wide()
             .chain(Some(0))
             .collect::<Vec<_>>();
@@ -876,7 +1164,7 @@ fn open_device_page() -> bool {
             "xdg-open"
         };
         match Command::new(opener)
-            .arg("https://auth.openai.com/codex/device")
+            .arg(target)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())

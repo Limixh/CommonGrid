@@ -9,6 +9,8 @@ import { BindingFailure, ProfileBindings, validateBinding, type ProfileBinding }
 import { executeProfileSession, parseSessionBoot, profileBindingRoot, runProfileSession, type SessionBoot, type SessionDependencies, type SessionFrame, type SessionRuntime } from "../../../apps/desktop/native-worker/profile-session.ts";
 import { ManagedPreparationError, type ManagedRuntimeAssets } from "../src/managed-runtime.ts";
 import { ProviderFailure } from "../src/session-protocol.ts";
+import { claudeLoginScopes } from "../src/claude-login-contract.ts";
+import type { ProviderSessionOptions } from "../src/provider-session.ts";
 
 const boot: SessionBoot = {type: "profile_session_boot", schema_version: "1.0", request_id: randomUUID(), profile_id: randomUUID(), provider: "codex", action: "login",
   journal_root: path.resolve("fixture-journal"), assets_root: path.resolve("fixture-assets"), profile_registry_root: path.resolve("fixture-appdata", "managed-profiles")};
@@ -44,7 +46,7 @@ function fixture(existing?: ProfileBinding) {
       return {authenticated: currentBoot.action !== "logout"};
     },
   };
-  const run = (currentBoot = boot, signal = new AbortController().signal) => runProfileSession(currentBoot, signal, frame => frames.push(frame), dependencies);
+  const run = (currentBoot = boot, signal = new AbortController().signal, interaction: Pick<ProviderSessionOptions,"onClaudeAuthorization"> = {}) => runProfileSession(currentBoot, signal, frame => frames.push(frame), dependencies, interaction);
   return {calls, frames, state, stats, runtime, dependencies, run};
 }
 const ready = (provider: "codex" | "claude" = "codex"): ProfileBinding => ({schema_version: "1.0", profile_id: boot.profile_id, provider, owner: randomUUID(), state: "ready"});
@@ -70,9 +72,38 @@ test("missing binding status/logout succeeds unauthenticated without assets, Doc
     assert.equal(result(f.frames).session_state, "unauthenticated"); assert.equal(result(f.frames).outcome, "passed");
   }
 });
-test("Claude login is unsupported before any binding or daemon access", async () => {
+test("Claude login without an interactive channel is unsupported before any binding or daemon access", async () => {
   const f = fixture(); await f.run({...boot, provider: "claude"}); assert.deepEqual(f.calls, []);
   assert.deepEqual(result(f.frames), {type: "result", outcome: "failed", session_state: "unknown", error_code: "unsupported", cleanup: "verified"});
+});
+const claudeState="S".repeat(43),claudeCode="fixture_code#"+claudeState;
+const claudeUrl="https://claude.com/cai/oauth/authorize?"+new URLSearchParams({code:"true",client_id:"9d1c250a-e61b-44d9-88ed-5944d1962f5e",response_type:"code",redirect_uri:"https://platform.claude.com/oauth/code/callback",scope:claudeLoginScopes.join(" "),code_challenge:"P".repeat(43),code_challenge_method:"S256",state:claudeState});
+test("Claude native login relays one validated URL and retains ready volumes through operation cleanup",async()=>{
+  const f=fixture();let callbacks=0;
+  f.dependencies.session=async(_runtime,currentBoot,options)=>{
+    f.calls.push("session");assert.equal(currentBoot.provider,"claude");assert.equal(options.deadlineMs,600_000);
+    assert.equal(await options.onClaudeAuthorization!({authorization_url:claudeUrl},options.signal!),claudeCode);
+    return{authenticated:true};
+  };
+  await f.run({...boot,provider:"claude"},new AbortController().signal,{onClaudeAuthorization:async(challenge,signal)=>{
+    callbacks++;assert.equal(signal.aborted,false);assert.equal(Object.isFrozen(challenge),true);return claudeCode;
+  }});
+  assert.equal(callbacks,1);assert.equal(f.state.binding?.provider,"claude");assert.equal(f.state.binding?.state,"ready");
+  assert.deepEqual(f.frames.filter(frame=>frame.type==="challenge"),[{type:"challenge",challenge:{authorization_url:claudeUrl}}]);
+  assert.deepEqual(f.calls.slice(-4),["bridge-close","stop","release","finish"]);
+  assert.equal(result(f.frames).outcome,"passed");assert.ok(!JSON.stringify(f.frames).includes(claudeCode));
+});
+test("Claude worker rejects a foreign OAuth URL and cleans cancelled input with independent deadlines",async()=>{
+  for(const fault of ["url","cancel"]){
+    const f=fixture(),controller=new AbortController();let callbacks=0;
+    f.dependencies.session=async(_runtime,_boot,options)=>{
+      await options.onClaudeAuthorization!({authorization_url:fault==="url"?claudeUrl.replace("claude.com/","PRIVATE.invalid/"):claudeUrl},options.signal!);
+      return{authenticated:true};
+    };
+    await f.run({...boot,provider:"claude"},controller.signal,{onClaudeAuthorization:async()=>{callbacks++;controller.abort("cancelled");throw new ProviderFailure("canceled");}});
+    assert.equal(callbacks,fault==="url"?0:1);assert.equal(f.state.binding?.state,"ready");assert.deepEqual(f.calls.slice(-3),["stop","release","finish"]);
+    assert.equal(result(f.frames).cleanup,"verified");assert.equal(result(f.frames).outcome,fault==="cancel"?"cancelled":"failed");assert.ok(!JSON.stringify(f.frames).includes("PRIVATE"));
+  }
 });
 test("existing ready profiles restore exact owner for Codex/Claude status and logout", async () => {
   for (const provider of ["codex", "claude"] as const) for (const action of ["status", "logout"] as const) {
@@ -182,7 +213,7 @@ test("worker entry dispatches profile sessions and keeps stdout framed for no-da
   const directory = await mkdtemp(path.join(tmpdir(), "cg-session-entry-"));
   try {
     for (const provider of ["codex", "claude"] as const) {
-      const input = {...boot, provider, action: provider === "claude" ? "login" : "status", profile_registry_root: path.join(directory, "managed-profiles")};
+      const input = {...boot, provider, action: "status", profile_registry_root: path.join(directory, "managed-profiles")};
       const child = spawn(process.execPath, ["--import", "tsx", path.resolve("apps/desktop/native-worker/entry.ts")], {windowsHide: true, stdio: ["pipe", "pipe", "pipe"]});
       let stdout = "", stderr = "";
       child.stdout.on("data", bytes => { stdout += bytes; }); child.stderr.on("data", bytes => { stderr += bytes; });
@@ -191,8 +222,8 @@ test("worker entry dispatches profile sessions and keeps stdout framed for no-da
       assert.equal(exit, 0); assert.equal(stderr, "");
       const frames = stdout.trim().split("\n").map(line => JSON.parse(line)) as SessionFrame[];
       assert.deepEqual(frames.map(frame => frame.type), ["progress", "progress", "result"]);
-      assert.equal(result(frames).error_code, provider === "claude" ? "unsupported" : null);
-      assert.equal(result(frames).session_state, provider === "claude" ? "unknown" : "unauthenticated");
+      assert.equal(result(frames).error_code, null);
+      assert.equal(result(frames).session_state, "unauthenticated");
     }
   } finally { await rm(directory, {recursive: true, force: true}); }
 });

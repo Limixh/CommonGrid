@@ -7,13 +7,17 @@ import { setTimeout as delay } from "node:timers/promises";
 import { chromium, expect, type Browser, type Page } from "@playwright/test";
 import { CommandError, runOwnedCommand, type CommandCleanup } from "../packages/agent-adapters/src/owned-process.ts";
 import { validateManagedProfilesStatus } from "../packages/agent-adapters/src/managed-profile-protocol.ts";
-import { validateProfileSessionStatus, type ProfileSessionStatus } from "../packages/agent-adapters/src/profile-session-protocol.ts";
+import { validateClaudeAuthorizationUrl, validateProfileSessionStatus, type ProfileSessionStatus } from "../packages/agent-adapters/src/profile-session-protocol.ts";
 import { root } from "./go.mjs";
 
-// Real official Codex device login is cancelled without authorizing an account.
+// Real official CLI login is cancelled without authorizing an account.
 // No model inference, user account import, API fallback or browser opening.
 // Device codes never enter screenshots, files, reports or console output.
 if (process.platform !== "win32") throw new Error("native_session_smoke_requires_windows_webview2");
+const arguments_ = process.argv.slice(2);
+assert.ok(arguments_.length === 0 || arguments_.length === 2 && arguments_[0] === "--provider" && ["codex", "claude"].includes(arguments_[1]), "native_session_smoke_unknown_arguments");
+const provider = arguments_[1] ?? "codex";
+const profileName = provider === "claude" ? "Claude session smoke" : "Codex session smoke";
 const directory = path.resolve(root, ".local/native-session-smoke", randomUUID()), appdata = path.join(directory, "appdata");
 await mkdir(directory, {recursive: true});
 const config = path.join(directory, "tauri-smoke.json");
@@ -78,11 +82,11 @@ try {
   const profiles = page.locator(".managed-profiles-panel");
   await expect(profiles).toHaveAttribute("aria-busy", "false");
   stage = "empty_profile";
-  await profiles.getByLabel("Profil adı", {exact: true}).fill("Codex session smoke");
-  await profiles.getByLabel("Ajan", {exact: true}).selectOption("codex");
+  await profiles.getByLabel("Profil adı", {exact: true}).fill(profileName);
+  await profiles.getByLabel("Ajan", {exact: true}).selectOption(provider);
   await profiles.getByRole("button", {name: "Profil oluştur", exact: true}).click();
   await expect(profiles).toHaveAttribute("aria-busy", "false");
-  await profiles.locator(".managed-profile-list li").filter({hasText: "Codex session smoke"}).getByRole("button", {name: "Bu profili seç", exact: true}).click();
+  await profiles.locator(".managed-profile-list li").filter({hasText: profileName}).getByRole("button", {name: "Bu profili seç", exact: true}).click();
   const panel = page.locator(".profile-session-panel");
   await expect(panel).toHaveAttribute("aria-busy", "false");
   const catalog = validateManagedProfilesStatus(await invoke(page, "local_managed_profiles_status")), profileId = catalog.selected_profile_id;
@@ -95,21 +99,30 @@ try {
   checks.push("real_native_ui_checks_unmaterialized_selected_profile_without_claiming_authentication");
   stage = "device_login";
   console.log("Preparing a fresh profile and requesting the official device challenge…");
-  await panel.getByRole("button", {name: "Codex hesabını bağla", exact: true}).click();
+  await panel.getByRole("button", {name: provider === "claude" ? "Claude hesabını bağla" : "Codex hesabını bağla", exact: true}).click();
   // A fresh profile first streams the pinned CLI binary into its private tools
   // volume. Allow cold preparation while retaining the native action deadline.
   const waiting = await until(page, value => value.operation?.phase === "waiting_for_login" && !!value.operation.challenge, 300_000, initial.operation!.request_id);
-  assert.ok(waiting.operation?.challenge && /^[A-Z0-9-]{4,32}$/.test(waiting.operation.challenge.user_code));
-  assert.equal(waiting.operation.challenge.verification_url, "https://auth.openai.com/codex/device");
+  assert.ok(waiting.operation?.challenge);
+  if (provider === "claude") {
+    assert.ok("authorization_url" in waiting.operation.challenge);
+    validateClaudeAuthorizationUrl(waiting.operation.challenge.authorization_url);
+    await expect(panel.getByLabel("Claude geçici giriş kodu", {exact: true})).toHaveValue("");
+    await expect(panel.getByRole("button", {name: "Claude giriş sayfasını aç", exact: true})).toBeVisible();
+  } else {
+    assert.ok("user_code" in waiting.operation.challenge && /^[A-Z0-9-]{4,32}$/.test(waiting.operation.challenge.user_code));
+    assert.equal(waiting.operation.challenge.verification_url, "https://auth.openai.com/codex/device");
+  }
   assert.equal(waiting.operation.session_state, "unknown");
   deviceChallengeSeen = true;
   waiting.operation.challenge = null;
-  await expect(panel.getByTestId("profile-session-code")).toBeVisible();
-  checks.push("real_official_codex_device_challenge_reaches_native_profile_ui");
+  if (provider === "codex") await expect(panel.getByTestId("profile-session-code")).toBeVisible();
+  checks.push(provider === "claude" ? "real_official_claude_oauth_challenge_reaches_native_profile_ui" : "real_official_codex_device_challenge_reaches_native_profile_ui");
   stage = "cancel";
   console.log("Device challenge observed; cancelling without account authorization…");
   await panel.getByRole("button", {name: "Bağlantı işlemini iptal et", exact: true}).click();
   await expect(panel.getByTestId("profile-session-code")).toHaveCount(0);
+  if (provider === "claude") await expect(panel.getByLabel("Claude geçici giriş kodu", {exact: true})).toHaveCount(0);
   const cancelled = await until(page, value => value.operation?.phase === "finished", 45_000);
   assert.equal(cancelled.operation?.outcome, "cancelled"); assert.equal(cancelled.operation?.cleanup, "verified");
   assert.equal(cancelled.operation?.challenge, null); assert.equal(cancelled.operation?.session_state, "unknown");
@@ -156,8 +169,8 @@ try {
   controller.abort("smoke_finished");
   if (completion) { const finished = await completion; if (finished.error instanceof CommandError) cleanup = await finished.error.cleanup; }
   if (browser) await browser.close().catch(() => {});
-  const report = {schema_version: "1.0", checked_at: new Date().toISOString(), purpose: "real_native_codex_device_login_cancel_and_official_session_status", success: success && cleanup.status === "termination_reported", stage, checks,
-    device_challenge_seen: deviceChallengeSeen, device_code_recorded: false, real_native_ipc: realNativeIpc, mocked_native_ipc: false,
+  const report = {schema_version: "1.0", checked_at: new Date().toISOString(), purpose: provider === "claude" ? "real_native_claude_oauth_login_cancel_and_official_session_status" : "real_native_codex_device_login_cancel_and_official_session_status", provider, success: success && cleanup.status === "termination_reported", stage, checks,
+    device_challenge_seen: provider === "codex" && deviceChallengeSeen, claude_oauth_challenge_seen: provider === "claude" && deviceChallengeSeen, device_code_recorded: false, authorization_url_recorded: false, real_native_ipc: realNativeIpc, mocked_native_ipc: false,
     real_account_authorized: false, real_model_inference: false, user_account_imported: false, default_user_app_store_accessed: false,
     browser_open_requested: false, process_cleanup: cleanup,
     scope_limits: ["Isolated app directories and a fresh public profile; no user authorization or model inference", "Official device-login cancellation and signed-out status/logout only; authenticated completion requires user approval in the official provider flow", "Owned process termination report does not independently prove every WebView descendant is absent"]};

@@ -12,6 +12,8 @@ fn main() {
             "local_profile_session_status",
             "local_profile_session_cancel",
             "local_profile_session_open_device",
+            "local_profile_session_submit_code",
+            "local_profile_session_open_claude",
             "local_task_run_start",
             "local_task_run_status",
             "local_task_run_cancel",

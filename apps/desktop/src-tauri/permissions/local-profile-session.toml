@@ -1,4 +1,4 @@
 [[permission]]
 identifier = "local-profile-session"
-description = "Start, observe and cancel managed CLI sessions for the saved selected local profile, and open only the fixed official Codex device page on demand. No caller paths, credentials, shell or URL arguments."
-commands.allow = ["local_profile_session_start", "local_profile_session_status", "local_profile_session_cancel", "local_profile_session_open_device"]
+description = "Start, observe and cancel managed CLI sessions for the saved selected local profile, open native-validated official login pages and submit one bounded transient Claude login code for an active matching operation. No caller paths, shell or URL arguments."
+commands.allow = ["local_profile_session_start", "local_profile_session_status", "local_profile_session_cancel", "local_profile_session_open_device", "local_profile_session_submit_code", "local_profile_session_open_claude"]

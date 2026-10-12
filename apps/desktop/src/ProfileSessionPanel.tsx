@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  acceptProfileSessionUpdate, type ProfileSessionAction, type ProfileSessionChallenge, type ProfileSessionOperation, type ProfileSessionStatus,
+  acceptProfileSessionUpdate, validateClaudeLoginCode, type ProfileSessionAction, type ProfileSessionChallenge, type ProfileSessionOperation, type ProfileSessionStatus,
 } from "@commongrid/agent-adapters/profile-session";
 import type { ManagedProfile } from "@commongrid/agent-adapters/managed-profiles";
-import { cancelProfileSession, openProfileSessionDevice, profileSessionNative, readProfileSession, startProfileSession } from "./profile-session-client";
+import { cancelProfileSession, openProfileSessionClaude, openProfileSessionDevice, profileSessionNative, readProfileSession, startProfileSession, submitProfileSessionCode } from "./profile-session-client";
 
 const words = {
   tr: {
@@ -12,7 +12,8 @@ const words = {
     unavailable: "Hesap bağlantısı masaüstü uygulamasında kullanılabilir.", loading: "Bağlantı durumu okunuyor…", submitting: "İstek gönderiliyor…", cancelPending: "İptal isteği gönderiliyor…",
     error: "Bağlantı durumu doğrulanamadı. Son durumu yenileyip tekrar dene.", paused: "Otomatik güncelleme durdu. Son durumu yenileyebilirsin.",
     unknown: "CLI hesabı henüz doğrulanmadı.", authenticated: "CLI hesabı bağlı.", unauthenticated: "CLI hesabı bağlı değil.", otherProfile: "Başka bir profilin bağlantı işlemi sürüyor.",
-    claude: "Claude Code girişi etkileşimli terminal gerektirir. Bu ekranda Claude hesabı bağlama henüz desteklenmiyor.",
+    claude: "Claude Code'un resmi giriş sayfasında kendi hesabınla giriş yap. Sayfanın verdiği geçici kodu yalnız bu uygulamaya gir; sohbete gönderme.",
+    claudeLogin: "Claude hesabını bağla", claudeOpen: "Claude giriş sayfasını aç", claudeCode: "Claude geçici giriş kodu", claudeSubmit: "Giriş kodunu gönder", claudeSent: "Giriş kodu resmi CLI'a gönderildi. Bağlantı sonucu bekleniyor…", claudeInvalid: "Resmi giriş sayfasının verdiği kodu eksiksiz gir.",
     starting: "Bağlantı işlemi başlatılıyor…", preparing: "Profil ortamı hazırlanıyor…", checking: "CLI hesap işlemi sürüyor…", waiting_for_login: "Tarayıcıda giriş yapman bekleniyor…", cleaning: "Bağlantı ortamı kapatılıyor…",
     passed: "CLI hesap işlemi tamamlandı", cancelled: "Bağlantı işlemi iptal edildi", failed: "CLI hesap işlemi tamamlanamadı", needs_review: "Bağlantı ortamının kapanması doğrulanamadı; inceleme gerekli.",
     device: "Resmi Codex giriş sayfasını aç ve bu kodu gir:", open: "Codex giriş sayfasını aç", code: "Geçici giriş kodu",
@@ -27,7 +28,8 @@ const words = {
     unavailable: "Account connection is available in the desktop application.", loading: "Reading connection status…", submitting: "Sending request…", cancelPending: "Sending cancellation…",
     error: "The connection status could not be validated. Refresh the latest status and try again.", paused: "Automatic updates stopped. You can refresh the latest status.",
     unknown: "The CLI account has not been verified yet.", authenticated: "The CLI account is connected.", unauthenticated: "The CLI account is not connected.", otherProfile: "Another profile's account operation is running.",
-    claude: "Claude Code sign-in requires an interactive terminal. Connecting a Claude account from this screen is not supported yet.",
+    claude: "Sign in with your own account on Claude Code's official sign-in page. Enter its temporary code only in this application; do not send it in chat.",
+    claudeLogin: "Connect Claude account", claudeOpen: "Open Claude sign-in page", claudeCode: "Claude temporary sign-in code", claudeSubmit: "Submit sign-in code", claudeSent: "The code was sent to the official CLI. Waiting for the connection result…", claudeInvalid: "Enter the complete code provided by the official sign-in page.",
     starting: "Starting account operation…", preparing: "Preparing profile environment…", checking: "CLI account operation is running…", waiting_for_login: "Waiting for you to sign in with your browser…", cleaning: "Closing account environment…",
     passed: "CLI account operation completed", cancelled: "Account operation cancelled", failed: "The CLI account operation could not complete", needs_review: "The account environment could not be confirmed closed; review is required.",
     device: "Open the official Codex sign-in page and enter this code:", open: "Open Codex sign-in page", code: "Temporary sign-in code",
@@ -60,11 +62,14 @@ export function ProfileSessionPanel({language, profile}: {language: "tr" | "en";
   const t = words[language];
   const [status, setStatus] = useState<ProfileSessionStatus | null>(null);
   const [challenge, setChallenge] = useState<ProfileSessionChallenge | null>(null);
-  const [pending, setPending] = useState<"read" | "start" | "cancel" | null>("read");
+  const [pending, setPending] = useState<"read" | "start" | "cancel" | "submit" | null>("read");
+  const [loginCode, setLoginCode] = useState("");
+  const [codeInvalid, setCodeInvalid] = useState(false);
+  const [codeSent, setCodeSent] = useState(false);
   const [error, setError] = useState(false);
   const [paused, setPaused] = useState(false);
   const [openPending, setOpenPending] = useState(false);
-  // Observation metadata never retains the temporary device code.
+  // Observation metadata never retains a temporary code or authorization URL.
   const snapshot = useRef<ProfileSessionStatus | null>(null);
   const challengeFingerprint = useRef<string | null>(null);
   const hiddenRequest = useRef<string | null>(null);
@@ -74,17 +79,19 @@ export function ProfileSessionPanel({language, profile}: {language: "tr" | "en";
   const pollCount = useRef(0);
   const pollStarted = useRef(Date.now());
 
-  async function observe(kind: "read" | "start" | "cancel", action?: ProfileSessionAction) {
+  async function observe(kind: "read" | "start" | "cancel" | "submit", action?: ProfileSessionAction, code?: string) {
     if (mutation.current) return;
     const before = snapshot.current;
     const operation = before?.operation;
     if (kind === "start" && (!before || before.availability !== "available" ||
-      operation && (operation.phase !== "finished" || operation.outcome === "needs_review") ||
-      action === "login" && profile.provider !== "codex")) return;
+      operation && (operation.phase !== "finished" || operation.outcome === "needs_review"))) return;
     if (kind === "cancel" && (!operation || operation.profile_id !== profile.profile_id || operation.phase === "finished")) return;
+    if (kind === "submit" && (!operation || operation.profile_id !== profile.profile_id || operation.provider !== "claude" ||
+      operation.action !== "login" || operation.phase !== "waiting_for_login" || !challenge || !("authorization_url" in challenge) || !code)) return;
     if (kind !== "read") mutation.current = true;
-    if (kind === "cancel") {
-      hiddenRequest.current = operation?.request_id ?? null; setChallenge(null);
+    if (kind === "cancel" || kind === "submit") {
+      if (kind === "cancel") hiddenRequest.current = operation?.request_id ?? null;
+      setChallenge(null); setLoginCode(""); setCodeInvalid(false); setCodeSent(false);
       opening.current?.abort(); opening.current = null; setOpenPending(false);
     }
     waiting.current?.abort();
@@ -96,25 +103,32 @@ export function ProfileSessionPanel({language, profile}: {language: "tr" | "en";
         ? await startProfileSession({schema_version: "1.0", request_id: crypto.randomUUID(), profile_id: profile.profile_id, action: action!}, controller.signal)
         : kind === "cancel"
           ? await cancelProfileSession({schema_version: "1.0", request_id: operation!.request_id, expected_revision: operation!.revision}, controller.signal)
-          : await readProfileSession(controller.signal);
+          : kind === "submit"
+            ? await submitProfileSessionCode({schema_version: "1.0", request_id: operation!.request_id, expected_revision: operation!.revision, code: code!}, controller.signal)
+            : await readProfileSession(controller.signal);
       const incoming = checked.operation;
       const transient = incoming?.profile_id === profile.profile_id ? incoming.challenge : null;
-      // Compare same-revision changes without retaining a device code in observation metadata.
-      const fingerprint = incoming?.challenge ? Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(incoming.challenge.user_code))), byte => byte.toString(16).padStart(2, "0")).join("") : null;
+      // Compare same-revision changes without retaining challenge secrets in metadata.
+      const fingerprint = incoming?.challenge ? Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(Object.fromEntries(Object.entries(incoming.challenge).sort()))))), byte => byte.toString(16).padStart(2, "0")).join("") : null;
       if (waiting.current !== controller || controller.signal.aborted) return;
       if (incoming?.profile_id === profile.profile_id && incoming.provider !== profile.provider) throw new Error("profile_session_contract_invalid");
       if (operation && incoming?.request_id === operation.request_id && incoming.revision === operation.revision && challengeFingerprint.current !== fingerprint)
         throw new Error("profile_session_status_stale");
       const next = acceptProfileSessionUpdate(before, {...checked, operation: incoming ? {...incoming, challenge: null} : null});
+      if (fingerprint !== challengeFingerprint.current || operation?.request_id !== incoming?.request_id || operation?.revision !== incoming?.revision || !transient) {
+        setLoginCode(""); setCodeInvalid(false);
+      }
       snapshot.current = next; challengeFingerprint.current = fingerprint; setStatus(next); setError(false);
       setChallenge(incoming?.request_id === hiddenRequest.current ? null : transient);
+      if (kind === "submit") setCodeSent(incoming?.phase === "waiting_for_login");
+      else if (incoming?.phase !== "waiting_for_login" || operation?.request_id !== incoming?.request_id) setCodeSent(false);
       if (!transient || incoming?.request_id === hiddenRequest.current) {
         opening.current?.abort(); opening.current = null; setOpenPending(false);
       }
       if (kind !== "read" || operation?.request_id !== incoming?.request_id) { pollCount.current = 0; pollStarted.current = Date.now(); setPaused(false); }
     } catch {
       if (waiting.current === controller) {
-        setChallenge(null); setError(true); setPaused(true);
+        setChallenge(null); setLoginCode(""); setCodeInvalid(false); setCodeSent(false); setError(true); setPaused(true);
         opening.current?.abort(); opening.current = null; setOpenPending(false);
       }
     } finally {
@@ -123,17 +137,28 @@ export function ProfileSessionPanel({language, profile}: {language: "tr" | "en";
     }
   }
   async function openDevice() {
-    if (!challenge || !profileSessionNative() || opening.current) return;
+    const operation = snapshot.current?.operation;
+    if (!challenge || !operation || operation.profile_id !== profile.profile_id || !profileSessionNative() || opening.current || mutation.current) return;
     const controller = new AbortController(); opening.current = controller; setOpenPending(true);
     const timeout = window.setTimeout(() => controller.abort(), 5000);
-    try { await openProfileSessionDevice(controller.signal); }
-    catch { if (opening.current === controller) { setChallenge(null); setError(true); setPaused(true); } }
+    try {
+      if ("authorization_url" in challenge) await openProfileSessionClaude({schema_version: "1.0", request_id: operation.request_id, expected_revision: operation.revision}, controller.signal);
+      else await openProfileSessionDevice(controller.signal);
+    }
+    catch { if (opening.current === controller) { setChallenge(null); setLoginCode(""); setCodeInvalid(false); setCodeSent(false); setError(true); setPaused(true); } }
     finally {
       window.clearTimeout(timeout);
       if (opening.current === controller) { opening.current = null; setOpenPending(false); }
     }
   }
-  function refresh() { pollCount.current = 0; pollStarted.current = Date.now(); setPaused(false); void observe("read"); }
+  function submitCode() {
+    if (mutation.current || !challenge || !("authorization_url" in challenge)) return;
+    const code = loginCode; setLoginCode(""); setCodeInvalid(false);
+    try { validateClaudeLoginCode(code, challenge.authorization_url); }
+    catch { setCodeInvalid(true); return; }
+    void observe("submit", undefined, code);
+  }
+  function refresh() { setLoginCode(""); setCodeInvalid(false); pollCount.current = 0; pollStarted.current = Date.now(); setPaused(false); void observe("read"); }
   useEffect(() => {
     void observe("read");
     return () => {
@@ -141,7 +166,7 @@ export function ProfileSessionPanel({language, profile}: {language: "tr" | "en";
       opening.current?.abort(); opening.current = null;
       const operation = snapshot.current?.operation;
       snapshot.current = null; challengeFingerprint.current = null; hiddenRequest.current = null;
-      setChallenge(null);
+      setChallenge(null); setLoginCode(""); setCodeInvalid(false); setCodeSent(false);
       if (operation?.profile_id === profile.profile_id && operation.action === "login" && operation.phase !== "finished") {
         void cancelDepartingLogin(operation);
       }
@@ -154,37 +179,48 @@ export function ProfileSessionPanel({language, profile}: {language: "tr" | "en";
     if (!active || pending || paused || error) return;
     const limit = operation?.action === "login" ? 720 : 420;
     if (pollCount.current >= limit || Date.now() - pollStarted.current >= limit * 1000) {
-      setChallenge(null); setPaused(true); opening.current?.abort(); opening.current = null; setOpenPending(false); return;
+      setChallenge(null); setLoginCode(""); setCodeInvalid(false); setCodeSent(false); setPaused(true); opening.current?.abort(); opening.current = null; setOpenPending(false); return;
     }
     const timeout = window.setTimeout(() => { pollCount.current++; void observe("read"); }, 1000);
     return () => window.clearTimeout(timeout);
   }, [active, status, pending, paused, error]);
   const enabled = status?.availability === "available" && !active && !pending && !error && operation?.outcome !== "needs_review";
   return <section className="profile-session-panel" aria-labelledby="profile-session-title" aria-busy={pending !== null}>
-    <div className="section-heading"><h3 id="profile-session-title">{t.title}</h3>{profileSessionNative() && <button className="secondary-button" disabled={pending === "start" || pending === "cancel"} onClick={refresh}>{t.refresh}</button>}</div>
+    <div className="section-heading"><h3 id="profile-session-title">{t.title}</h3>{profileSessionNative() && <button className="secondary-button" disabled={pending === "start" || pending === "cancel" || pending === "submit"} onClick={refresh}>{t.refresh}</button>}</div>
     <p>{t.description}</p>
     <p role="status">{ours && !active && !error && pending !== "start" ? t[operation.session_state] : t.unknown}</p>
     {profile.provider === "claude" && <p>{t.claude}</p>}
     <div className="cli-check-actions">
       <button className="secondary-button" disabled={!enabled} onClick={() => void observe("start", "status")}>{t.status}</button>
-      {profile.provider === "codex" && <button className="secondary-button" disabled={!enabled} onClick={() => void observe("start", "login")}>{t.login}</button>}
+      <button className="secondary-button" disabled={!enabled} onClick={() => void observe("start", "login")}>{profile.provider === "claude" ? t.claudeLogin : t.login}</button>
       <button className="secondary-button" disabled={!enabled} onClick={() => void observe("start", "logout")}>{t.logout}</button>
-      {ours && active && <button className="secondary-button" disabled={pending === "start" || pending === "cancel" || operation.phase === "cleaning"} onClick={() => void observe("cancel")}>{t.cancel}</button>}
+      {ours && active && <button className="secondary-button" disabled={pending === "start" || pending === "cancel" || pending === "submit" || operation.phase === "cleaning"} onClick={() => void observe("cancel")}>{t.cancel}</button>}
     </div>
     {status?.availability === "unavailable" && <p role="status">{t.unavailable}</p>}
     {pending === "read" && !status && <p role="status">{t.loading}</p>}
     {pending === "start" && <p role="status">{t.submitting}</p>}
     {pending === "cancel" && <p role="status">{t.cancelPending}</p>}
+    {pending === "submit" && <p role="status">{t.submitting}</p>}
     {error && <p role="alert">{t.error}</p>}
     {!ours && active && <p role="status">{t.otherProfile}</p>}
     {ours && <div className="cli-check-result" role="status">
       <strong>{operation.phase === "finished" ? t[operation.outcome!] : t[operation.phase]}</strong>
       {operation.error_code && operation.error_code !== "cancelled" && <p>{t[operation.error_code]}</p>}
     </div>}
-    {challenge && !error && <div className="profile-session-challenge">
+    {challenge && "user_code" in challenge && !error && <div className="profile-session-challenge">
       <p>{t.device}</p><code aria-label={t.code} data-testid="profile-session-code">{challenge.user_code}</code>
       <button className="secondary-button" disabled={openPending || pending === "cancel"} onClick={() => void openDevice()}>{t.open}</button>
     </div>}
+    {challenge && "authorization_url" in challenge && !error && <div className="profile-session-challenge">
+      <button className="secondary-button" disabled={openPending || pending === "cancel" || pending === "submit"} onClick={() => void openDevice()}>{t.claudeOpen}</button>
+      <form onSubmit={event => { event.preventDefault(); submitCode(); }} autoComplete="off">
+        <label htmlFor="claude-login-code">{t.claudeCode}</label>
+        <input id="claude-login-code" type="password" value={loginCode} onChange={event => { setLoginCode(event.target.value); setCodeInvalid(false); }} maxLength={2048} autoComplete="off" spellCheck={false} autoCapitalize="none" aria-invalid={codeInvalid} aria-describedby={codeInvalid ? "claude-code-error" : undefined} disabled={pending === "cancel" || pending === "submit"} />
+        <button className="secondary-button" type="submit" disabled={!loginCode || pending === "cancel" || pending === "submit"}>{t.claudeSubmit}</button>
+        {codeInvalid && <p id="claude-code-error" role="alert">{t.claudeInvalid}</p>}
+      </form>
+    </div>}
+    {codeSent && ours && active && !error && <p role="status">{t.claudeSent}</p>}
     {paused && active && !error && <p role="status">{t.paused}</p>}
   </section>;
 }

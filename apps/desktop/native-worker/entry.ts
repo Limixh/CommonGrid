@@ -1,5 +1,5 @@
 import { parseBoot, runCliCheck, type Frame } from "./cli-check.ts";
-import { parseSessionBoot, runProfileSession, type SessionFrame } from "./profile-session.ts";
+import { ClaudeLoginMailbox, parseSessionBoot, runProfileSession, type SessionFrame } from "./profile-session.ts";
 import { parseTaskRunBoot, runTaskRun, type TaskRunFrame } from "./task-run.ts";
 
 // Nothing runs before the native supervisor has assigned process ownership and
@@ -7,6 +7,7 @@ import { parseTaskRunBoot, runTaskRun, type TaskRunFrame } from "./task-run.ts";
 const controller = new AbortController();
 let buffer = Buffer.alloc(0), started = false, finished = false;
 let deadline: NodeJS.Timeout | undefined;
+let claudeMailbox: ClaudeLoginMailbox | undefined;
 const emit = (frame: Frame | SessionFrame | TaskRunFrame) => { if (!finished) process.stdout.write(JSON.stringify(frame) + "\n"); };
 const fail = () => {
   if (started) controller.abort("worker_failed");
@@ -24,11 +25,14 @@ process.stdin.on("data", (chunk: Buffer) => {
         const boot = message?.type === "profile_session_boot" ? parseSessionBoot(message) : message?.type === "task_run_boot" ? parseTaskRunBoot(message) : parseBoot(message); started = true;
         const deadlineMs = boot.type === "task_run_boot" ? 1_200_000 : boot.type === "profile_session_boot" ? (boot.action === "login" ? 660_000 : 120_000) : 300_000;
         deadline = setTimeout(() => controller.abort("deadline_exceeded"), deadlineMs);
-        const work = boot.type === "task_run_boot" ? runTaskRun(boot, controller.signal, emit) : boot.type === "profile_session_boot" ? runProfileSession(boot, controller.signal, emit) : runCliCheck(boot, controller.signal, emit);
+        if(boot.type==="profile_session_boot"&&boot.provider==="claude"&&boot.action==="login")claudeMailbox=new ClaudeLoginMailbox(boot.request_id);
+        const work = boot.type === "task_run_boot" ? runTaskRun(boot, controller.signal, emit) : boot.type === "profile_session_boot" ?
+          runProfileSession(boot, controller.signal, emit, undefined, claudeMailbox?{onClaudeAuthorization:(challenge,signal)=>claudeMailbox!.wait(challenge,signal)}:{}) : runCliCheck(boot, controller.signal, emit);
         void work.then(() => {
-          finished = true; clearTimeout(deadline); process.stdin.destroy();
-        }, () => { finished = true; clearTimeout(deadline); process.exitCode = 1; process.stdin.destroy(); });
+          finished = true; claudeMailbox?.close(); clearTimeout(deadline); process.stdin.destroy();
+        }, () => { finished = true; claudeMailbox?.close(); clearTimeout(deadline); process.exitCode = 1; process.stdin.destroy(); });
       } else if (!finished && message && typeof message === "object" && Object.keys(message).length === 1 && message.type === "cancel") controller.abort("cancelled");
+      else if(!finished&&claudeMailbox&&message?.type==="claude_login_code")claudeMailbox.submit(message);
       else fail();
     } catch { fail(); }
   }

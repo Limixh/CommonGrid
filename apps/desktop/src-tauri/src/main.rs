@@ -41,6 +41,8 @@ fn main() {
             profile_session::local_profile_session_status,
             profile_session::local_profile_session_cancel,
             profile_session::local_profile_session_open_device,
+            profile_session::local_profile_session_submit_code,
+            profile_session::local_profile_session_open_claude,
             task_run::local_task_run_start,
             task_run::local_task_run_status,
             task_run::local_task_run_cancel

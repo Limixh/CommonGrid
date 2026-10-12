@@ -93,8 +93,8 @@ test("terminal observations are immutable and a later operation has a distinct i
 test("validated values are owned clones and challenge comparison is key-order independent", () => {
   const waiting = status({phase: "waiting_for_login", revision: 2, challenge: {...challenge}});
   const clone = validateProfileSessionStatus(waiting);
-  clone.operation!.challenge!.user_code = "EFGH-67890";
-  assert.equal(waiting.operation!.challenge!.user_code, challenge.user_code);
+  (clone.operation!.challenge! as typeof challenge).user_code = "EFGH-67890";
+  assert.equal((waiting.operation!.challenge! as typeof challenge).user_code, challenge.user_code);
   const reordered = {...waiting, operation: {...waiting.operation!, challenge: {user_code: challenge.user_code, verification_url: challenge.verification_url}}};
   assert.deepEqual(acceptProfileSessionUpdate(waiting, reordered), reordered);
 });

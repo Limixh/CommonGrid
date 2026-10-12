@@ -1294,6 +1294,8 @@ h1 span {
 .profile-session-challenge p { margin: 0; }
 .profile-session-challenge code { font-size: 20px; letter-spacing: 2px; overflow-wrap: anywhere; }
 .profile-session-challenge button { justify-self: start; }
+.profile-session-challenge form { display: grid; gap: 12px; }
+.profile-session-challenge input { width: 100%; min-height: 42px; padding: 8px 12px; }
 .task-run-panel { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--line); }
 .task-run-panel h3, .task-run-card h4 { margin: 0; }
 .task-run-card { display: grid; gap: 12px; padding: 16px; margin-top: 16px; border: 1px solid var(--line); border-radius: 12px; }

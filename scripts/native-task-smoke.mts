@@ -7,8 +7,8 @@ import { setTimeout as delay } from "node:timers/promises";
 import { chromium, expect, type Browser, type Page } from "@playwright/test";
 import { CommandError, runOwnedCommand, type CommandCleanup } from "../packages/agent-adapters/src/owned-process.ts";
 import { validateManagedProfilesStatus } from "../packages/agent-adapters/src/managed-profile-protocol.ts";
-import { acceptProfileSessionUpdate, validateProfileSessionStatus, type ProfileSessionStatus } from "../packages/agent-adapters/src/profile-session-protocol.ts";
-import { acceptTaskRunUpdate, taskRunRequestedModels, validateTaskRunStatus, type TaskRunOperation, type TaskRunStatus } from "../packages/agent-adapters/src/task-run-protocol.ts";
+import { acceptProfileSessionUpdate, validateClaudeAuthorizationUrl, validateProfileSessionStatus, type ProfileSessionStatus } from "../packages/agent-adapters/src/profile-session-protocol.ts";
+import { acceptTaskRunUpdate, taskRunObservedModels, taskRunRequestedModels, validateTaskRunStatus, type TaskRunOperation, type TaskRunProvider, type TaskRunStatus } from "../packages/agent-adapters/src/task-run-protocol.ts";
 import { applyControlledPatch, controlledBaseline, controlledVerifierCases } from "../packages/agent-adapters/src/controlled-task.ts";
 import { readOperationJournals } from "../packages/agent-adapters/src/operation-journal.ts";
 import { operationLeaseLabels } from "../packages/agent-adapters/src/operation-lease.ts";
@@ -17,18 +17,32 @@ import { root } from "./go.mjs";
 
 // Real packaged Windows/WebView2 acceptance. Native IPC is never replaced.
 // Default: a fresh signed-out profile, no account import and no inference.
-// --real-account is explicit consent to one gpt-6-luna task after the user
-// authorizes the official device flow. Its challenge goes to stdout once only;
-// no DOM dumps, raw error output, traces, videos or challenge screenshots.
+// --real-account is explicit consent to one cheap-model task after the user
+// authorizes the official flow. Only Codex's device challenge goes to stdout;
+// Claude requires a visible app and manual entry in its masked code field.
+// No DOM dumps, raw errors, traces, videos or challenge screenshots.
 const arguments_ = process.argv.slice(2);
-const usage = "Usage: npm run test:native-task-smoke -- [--real-account] [--show]\nDefault: signed-out task failure and cancellation without model inference.\n--real-account: print the official device URL/code once; wait for user authorization; run one gpt-6-luna task.\n--show: show the isolated native window (requires --real-account).\nThe isolated app store and official profile volumes are retained; host auth is never copied.";
+const usage = "Usage: npm run test:native-task-smoke -- [--provider codex|claude] [--real-account] [--show]\nDefault: Codex signed-out task failure and cancellation without model inference.\n--real-account: wait for official user authorization; run one gpt-6-luna (Codex) or haiku (Claude) task.\nCodex prints its official device URL/code once. Claude requires --real-account --show: use the app's official browser button and paste the code only into its masked field. Claude URL/code/state are never printed.\n--show: show the isolated native window (requires --real-account).\nThe isolated app store and official profile volumes are retained; host auth is never copied.";
 if (arguments_.includes("--help")) { console.log(usage); process.exit(0); }
-assert.ok(arguments_.every(value => value === "--real-account" || value === "--show"), "native_task_smoke_unknown_argument");
-assert.equal(new Set(arguments_).size, arguments_.length, "native_task_smoke_duplicate_argument");
-const realAccount = arguments_.includes("--real-account"), show = arguments_.includes("--show");
+let provider: TaskRunProvider = "codex", realAccount = false, show = false;
+const seenArguments = new Set<string>();
+for (let index = 0; index < arguments_.length; index++) {
+  const argument = arguments_[index];
+  assert.ok(["--provider", "--real-account", "--show"].includes(argument), "native_task_smoke_unknown_argument");
+  assert.ok(!seenArguments.has(argument), "native_task_smoke_duplicate_argument"); seenArguments.add(argument);
+  if (argument === "--provider") {
+    const value = arguments_[++index];
+    assert.ok(value === "codex" || value === "claude", "native_task_smoke_invalid_provider"); provider = value;
+  } else if (argument === "--real-account") realAccount = true;
+  else show = true;
+}
 assert.ok(!show || realAccount, "native_task_smoke_visible_login_requires_real_account_flag");
+assert.ok(provider !== "claude" || !realAccount || show, "native_task_smoke_claude_real_account_requires_visible_app");
 if (process.platform !== "win32") throw new Error("native_task_smoke_requires_windows_webview2");
 assert.equal(taskRunRequestedModels.codex, "gpt-6-luna", "native_task_smoke_cheap_model_policy_changed");
+assert.equal(taskRunRequestedModels.claude, "haiku", "native_task_smoke_cheap_model_policy_changed");
+const requestedModel = taskRunRequestedModels[provider];
+const profileName = provider === "claude" ? "Claude native task smoke" : "Codex native task smoke";
 
 const directory = path.resolve(root, ".local/native-task-smoke", randomUUID()), appdata = path.join(directory, "appdata");
 function withinRun(filename: string) {
@@ -126,6 +140,7 @@ async function waitTask(page: Page, predicate: (status: TaskRunStatus) => boolea
 }
 function evidence(purpose: typeof taskEvidence[number]["purpose"], operation: TaskRunOperation) {
   assert.equal(operation.phase, "finished");
+  assert.equal(operation.provider, provider); assert.equal(operation.model.requested, requestedModel);
   taskEvidence.push({purpose, outcome: operation.outcome, error_code: operation.error_code,
     cleanup: operation.cleanup, tool_calls: operation.tool_calls, model: {...operation.model}});
 }
@@ -143,13 +158,14 @@ async function sessionStatusUi(page: Page, expected: "authenticated" | "unauthen
   await page.locator(".profile-session-panel").getByRole("button", {name: "CLI hesabını kontrol et", exact: true}).click();
   const operation = (await waitSession(page, status => status.operation?.phase === "finished", 160_000, previous)).operation!;
   assert.equal(operation.action, "status"); assert.equal(operation.outcome, "passed");
+  assert.equal(operation.provider, provider);
   assert.equal(operation.session_state, expected); assert.equal(operation.cleanup, "verified"); assert.equal(operation.challenge, null);
   return operation;
 }
 async function verifyBinding(profileId: string) {
   const bindingRoot = withinRun(path.join(appdata, "managed-profile-sessions"));
   assert.deepEqual(await readdir(bindingRoot), [`${profileId}.json`]);
-  const binding = await new ProfileBindings(bindingRoot).read(profileId, "codex");
+  const binding = await new ProfileBindings(bindingRoot).read(profileId, provider);
   assert.ok(binding);
   assert.equal(binding.state, "ready"); assert.notEqual(binding.owner, profileId);
   return binding;
@@ -256,16 +272,16 @@ try {
   await expect(profiles).toHaveAttribute("aria-busy", "false"); stage = "fresh_profile";
   const empty = validateManagedProfilesStatus(await invoke(page, "local_managed_profiles_status"));
   assert.equal(empty.availability, "available"); assert.deepEqual(empty.profiles, []); assert.equal(empty.selected_profile_id, null);
-  await profiles.getByLabel("Profil adı", {exact: true}).fill("Codex native task smoke");
-  await profiles.getByLabel("Ajan", {exact: true}).selectOption("codex");
+  await profiles.getByLabel("Profil adı", {exact: true}).fill(profileName);
+  await profiles.getByLabel("Ajan", {exact: true}).selectOption(provider);
   await profiles.getByRole("button", {name: "Profil oluştur", exact: true}).click();
   await expect(profiles).toHaveAttribute("aria-busy", "false");
-  await profiles.locator(".managed-profile-list li").filter({hasText: "Codex native task smoke"}).getByRole("button", {name: "Bu profili seç", exact: true}).click();
+  await profiles.locator(".managed-profile-list li").filter({hasText: profileName}).getByRole("button", {name: "Bu profili seç", exact: true}).click();
   await expect(sessionPanel).toHaveAttribute("aria-busy", "false");
   const catalog = validateManagedProfilesStatus(await invoke(page, "local_managed_profiles_status")), profileId = catalog.selected_profile_id;
-  assert.ok(profileId); assert.equal(catalog.profiles.length, 1); assert.equal(catalog.profiles[0].provider, "codex");
+  assert.ok(profileId); assert.equal(catalog.profiles.length, 1); assert.equal(catalog.profiles[0].provider, provider);
   assert.equal((await task(page)).operation, null); assert.equal((await session(page)).operation, null);
-  checks.push("real_native_ui_creates_and_selects_fresh_isolated_codex_profile");
+  checks.push(`real_native_ui_creates_and_selects_fresh_isolated_${provider}_profile`);
 
   stage = "unbound_task"; console.log("Checking task approval and unbound-profile failure through the native UI…");
   await startTaskUi(page);
@@ -279,39 +295,59 @@ try {
   checks.push("native_ui_requires_per_run_approval_and_reports_unbound_profile_with_verified_cleanup");
 
   stage = "device_login"; authentication = realAccount ? "pending" : "not_requested";
-  console.log("Preparing the isolated profile through the official Codex device flow…");
-  await sessionPanel.getByRole("button", {name: "Codex hesabını bağla", exact: true}).click();
+  console.log(`Preparing the isolated profile through the official ${provider === "claude" ? "Claude authorization" : "Codex device"} flow…`);
+  await sessionPanel.getByRole("button", {name: provider === "claude" ? "Claude hesabını bağla" : "Codex hesabını bağla", exact: true}).click();
   // Keep the observation snapshot immutable: clearing this transient local
   // copy must not make a same-revision challenge poll look like a rewind.
   const waiting = structuredClone((await waitSession(page, status => status.operation?.phase === "waiting_for_login" && !!status.operation.challenge, 300_000)).operation!);
-  assert.equal(waiting.profile_id, profileId); assert.ok(waiting.challenge);
-  assert.equal(waiting.challenge.verification_url, "https://auth.openai.com/codex/device");
-  assert.ok(/^[A-Z0-9-]{4,32}$/.test(waiting.challenge.user_code)); challengeSeen = true;
-  await expect(sessionPanel.getByTestId("profile-session-code")).toBeVisible();
-  checks.push("official_codex_device_challenge_reaches_real_native_profile_ui");
+  assert.equal(waiting.profile_id, profileId); assert.equal(waiting.provider, provider); assert.ok(waiting.challenge);
+  if (provider === "claude") {
+    assert.ok("authorization_url" in waiting.challenge);
+    validateClaudeAuthorizationUrl(waiting.challenge.authorization_url);
+    const codeField = sessionPanel.getByLabel("Claude geçici giriş kodu", {exact: true});
+    await expect(codeField).toBeVisible(); await expect(codeField).toHaveAttribute("type", "password");
+    await expect(sessionPanel.getByRole("button", {name: "Claude giriş sayfasını aç", exact: true})).toBeVisible();
+    checks.push("official_claude_authorization_challenge_reaches_real_native_profile_masked_code_ui");
+  } else {
+    assert.ok("user_code" in waiting.challenge);
+    assert.equal(waiting.challenge.verification_url, "https://auth.openai.com/codex/device");
+    assert.ok(/^[A-Z0-9-]{4,32}$/.test(waiting.challenge.user_code));
+    await expect(sessionPanel.getByTestId("profile-session-code")).toBeVisible();
+    checks.push("official_codex_device_challenge_reaches_real_native_profile_ui");
+  }
+  challengeSeen = true;
   if (realAccount) {
-    // Explicit opt-in is the only path that reveals a challenge or authorizes
-    // inference. The fixed provider URL and validated code are emitted once.
-    console.log(`Official authorization: https://auth.openai.com/codex/device\nDevice code: ${waiting.challenge.user_code}`);
-    challengePrinted = true; waiting.challenge = null;
+    if (provider === "claude") {
+      // The user opens the browser using the actual native app button and
+      // submits the code only in its masked field. Never read that field,
+      // automate browser auth, print the URL/state, or copy private auth.
+      console.log("Waiting for user: in the visible CommonGrid window, click 'Claude giriş sayfasını aç', complete official login, paste the returned code only into 'Claude geçici giriş kodu', and click 'Giriş kodunu gönder'.");
+    } else {
+      assert.ok("user_code" in waiting.challenge);
+      console.log(`Official authorization: https://auth.openai.com/codex/device\nDevice code: ${waiting.challenge.user_code}`);
+      challengePrinted = true;
+    }
+    waiting.challenge = null;
     stage = "await_official_authorization";
     const authorized = (await waitSession(page, status => status.operation?.phase === "finished", 650_000)).operation!;
-    assert.equal(authorized.request_id, waiting.request_id); assert.equal(authorized.action, "login");
+    assert.equal(authorized.request_id, waiting.request_id); assert.equal(authorized.action, "login"); assert.equal(authorized.provider, provider);
     if (authorized.outcome !== "passed" || authorized.session_state !== "authenticated" || authorized.cleanup !== "verified")
       throw new SmokeFailure(`session_${authorized.error_code ?? "authentication_not_completed"}`);
     accountAuthorized = true; authentication = "passed";
     await expect(sessionPanel.getByTestId("profile-session-code")).toHaveCount(0);
+    await expect(sessionPanel.getByLabel("Claude geçici giriş kodu", {exact: true})).toHaveCount(0);
     await verifyBinding(profileId);
     await sessionStatusUi(page, "authenticated");
     checks.push("official_user_authorization_and_followup_status_verify_fresh_isolated_authenticated_profile");
     stage = "authenticated_task"; authenticatedTask = "pending";
-    console.log("Running one approved controlled task with gpt-6-luna; no model fallback…");
+    console.log(`Running one approved controlled task with ${requestedModel}; no model fallback…`);
     inferenceAttempted = true;
     await startTaskUi(page);
     const result = (await waitTask(page, status => status.operation?.phase === "finished", 1_300_000, unbound.request_id)).operation!;
     evidence("authenticated_task", result);
     if (result.outcome !== "passed") throw new SmokeFailure(`task_${result.error_code ?? result.outcome}`);
-    assert.equal(result.profile_id, profileId); assert.equal(result.model.requested, "gpt-6-luna"); assert.equal(result.model.observed, "gpt-6-luna");
+    assert.equal(result.profile_id, profileId); assert.equal(result.model.requested, requestedModel);
+    assert.ok(result.model.observed && taskRunObservedModels[provider].includes(result.model.observed));
     assert.equal(result.cleanup, "verified"); assert.ok(result.tool_calls > 0 && result.tool_calls <= 16);
     assert.ok(result.result?.patch && result.result.patch_sha256);
     assert.deepEqual(result.result.verifier, {passed: true, cases: controlledVerifierCases, json_cases_passed: true, sparse_cases_passed: true});
@@ -325,19 +361,20 @@ try {
     await expect(taskPanel.locator(".task-run-hashes code").filter({hasText: result.result.patch_sha256.slice(0, 12)})).toHaveAttribute("title", result.result.patch_sha256);
     await writeFile(withinRun(path.join(directory, "verified.patch")), result.result.patch);
     authenticatedTask = "passed";
-    checks.push("real_gpt_6_luna_native_ui_task_passes_34_independent_cases_and_patch_roundtrip_hashes");
+    checks.push(provider === "claude" ? "real_haiku_native_ui_task_passes_34_independent_cases_and_patch_roundtrip_hashes" : "real_gpt_6_luna_native_ui_task_passes_34_independent_cases_and_patch_roundtrip_hashes");
     stage = "account_status_after_task";
     await sessionStatusUi(page, "authenticated");
     await verifyBinding(profileId);
     checks.push("task_cleanup_retains_isolated_official_session_and_followup_authenticated_status");
   } else {
     waiting.challenge = null; stage = "cancel_login";
-    console.log("Cancelling the undisclosed device challenge without authorizing an account…");
+    console.log("Cancelling the undisclosed authorization challenge without authorizing an account…");
     await sessionPanel.getByRole("button", {name: "Bağlantı işlemini iptal et", exact: true}).click();
     const cancelled = (await waitSession(page, status => status.operation?.phase === "finished", 45_000)).operation!;
     assert.equal(cancelled.request_id, waiting.request_id); assert.equal(cancelled.outcome, "cancelled");
     assert.equal(cancelled.cleanup, "verified"); assert.equal(cancelled.challenge, null);
     await expect(sessionPanel.getByTestId("profile-session-code")).toHaveCount(0);
+    await expect(sessionPanel.getByLabel("Claude geçici giriş kodu", {exact: true})).toHaveCount(0);
     await verifyBinding(profileId);
     await sessionStatusUi(page, "unauthenticated");
     checks.push("undisclosed_login_cancel_verifies_cleanup_and_official_signed_out_profile_status");
@@ -364,6 +401,7 @@ try {
   checks.push("isolated_managed_profile_terminal_journals_and_independent_exact_owned_container_claim_absence");
   stage = "final_ui";
   await expect(sessionPanel.getByTestId("profile-session-code")).toHaveCount(0);
+  await expect(sessionPanel.getByLabel("Claude geçici giriş kodu", {exact: true})).toHaveCount(0);
   await taskPanel.screenshot({path: withinRun(path.join(directory, "native-task-after-cleanup.png"))});
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   checks.push("native_task_result_panel_screenshot_after_challenge_removal_and_no_horizontal_overflow");
@@ -389,20 +427,24 @@ try {
   process.off("SIGINT", onInterrupt); process.off("SIGTERM", onInterrupt);
   const passed = success && processCleanup.status === "termination_reported";
   const report = {
-    schema_version: "1.0", checked_at: new Date().toISOString(), purpose: "real_native_windows_controlled_task_acceptance", mode: realAccount ? "real_account" : "signed_out",
+    schema_version: "1.0", checked_at: new Date().toISOString(), purpose: "real_native_windows_controlled_task_acceptance", provider, mode: realAccount ? "real_account" : "signed_out",
     success: passed, status: passed ? "passed" : "failed", stage, failure_code: failureCode ?? (passed ? null : "process_cleanup_unconfirmed"), checks,
-    real_native_ipc: realNativeIpc, mocked_native_ipc: false, device_challenge_seen: challengeSeen,
+    real_native_ipc: realNativeIpc, mocked_native_ipc: false, device_challenge_seen: provider === "codex" && challengeSeen,
+    claude_oauth_challenge_seen: provider === "claude" && challengeSeen, authorization_url_recorded: false, claude_login_code_recorded: false,
     device_code_printed_once_for_explicit_real_account: challengePrinted, device_code_recorded_in_files: false,
     official_authentication: authentication, real_account_authorized: accountAuthorized,
-    authenticated_task: authenticatedTask, requested_model: "gpt-6-luna", real_model_inference_attempted: inferenceAttempted,
+    authenticated_task: authenticatedTask, requested_model: requestedModel, real_model_inference_attempted: inferenceAttempted,
     user_account_imported: false, paid_api_fallback: false, default_user_app_store_accessed: false,
     task_evidence: taskEvidence, verified_result: verified, independent_managed_cleanup: independentManagedCleanup,
     build_cleanup: buildCleanup, process_cleanup: processCleanup,
-    isolated_store_retained: true, official_profile_volumes_retained: true, browser_open_requested: false,
+    isolated_store_retained: true, official_profile_volumes_retained: true,
+    browser_open_requested_by_harness: false, user_browser_action_required: provider === "claude" && realAccount,
     scope_limits: [
-      "Only --real-account requests inference; the default mode never reveals its device challenge and checks a fresh official signed-out profile.",
-      "Authenticated acceptance requires user completion of the official Codex device authorization; auth is never copied from the host.",
-      "Exactly one authenticated controlled task is requested with fixed gpt-6-luna; an unavailable model or exhausted quota stops without fallback or retry.",
+      "Only --real-account requests inference; signed-out mode never reveals its authorization challenge and checks a fresh official signed-out profile.",
+      provider === "claude"
+        ? "Claude authenticated acceptance requires --real-account --show and manual user authorization via the native app browser button and masked code field; the harness neither opens nor inspects the official browser or private auth."
+        : "Authenticated acceptance requires user completion of the official Codex device authorization; auth is never copied from the host.",
+      `Exactly one authenticated controlled task is requested with fixed ${requestedModel}; an unavailable model or exhausted quota stops without fallback or retry.`,
       "Verified task cleanup is native supervisor evidence; owned application termination does not independently prove absence of every WebView descendant.",
       "Independent read-only journal and Docker absence checks cover the isolated managed profile containers and claims; separate random-owner task, exporter and verifier resources remain native supervisor evidence.",
       "The isolated app store and official session volumes are retained for review; this harness performs no broad Docker deletion.",

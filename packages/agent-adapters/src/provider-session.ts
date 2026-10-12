@@ -1,6 +1,9 @@
 // Import-safe official provider session operations. No credential files are read.
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface } from "node:readline";
+import { StringDecoder } from "node:string_decoder";
+import { stripVTControlCharacters } from "node:util";
+import { validateClaudeAuthorizationUrl, validateClaudeLoginCode } from "./claude-login-contract.ts";
 import type { ManagedCliRuntime } from "./managed-runtime.ts";
 import { BoundedJsonInput, BoundedJsonLines, LoginCompletion, ProviderFailure, RpcLifecycle, classifyProviderFailure, isRecord, validRpcId, validateClaudeStatus, validateCodexIdentity } from "./session-protocol.ts";
 
@@ -12,10 +15,13 @@ export interface ProviderSessionOptions {
   deadlineMs?: number;
   /** Transient user interaction only. Never persist the device code. */
   onDeviceChallenge?: (challenge: Readonly<DeviceChallenge>) => void | Promise<void>;
+  /** Transient OAuth UI only. The returned code is delivered exclusively on stdin. */
+  onClaudeAuthorization?: (challenge: Readonly<{authorization_url:string}>, signal: AbortSignal) => Promise<string>;
 }
 const assertSignal=(signal?:AbortSignal)=>{if(signal?.aborted)throw signal.reason instanceof ProviderFailure?signal.reason:new ProviderFailure("canceled");};
 const sessionDeadline=(options:ProviderSessionOptions,login=false)=>{
   if(options.onDeviceChallenge!==undefined&&typeof options.onDeviceChallenge!=="function")throw new Error("managed_session_callback_invalid");
+  if(options.onClaudeAuthorization!==undefined&&typeof options.onClaudeAuthorization!=="function")throw new Error("managed_session_callback_invalid");
   const value=options.deadlineMs??(login?600_000:30_000);
   if(!Number.isSafeInteger(value)||value<1||value>(login?600_000:30_000))throw new Error("managed_session_deadline_invalid");
   return value;
@@ -51,6 +57,74 @@ export async function claudeInteractiveLogin(runtime:Pick<ManagedCliRuntime,"ver
     });}finally{signal.removeEventListener("abort",onAbort);child.kill();}
   },options,true);
   return claudeStatus(runtime,{signal:options.signal,requireLogin:true});
+}
+export async function claudeManagedLogin(runtime:Pick<ManagedCliRuntime,"verifyOperation"|"exec"|"beginNamespaceExec">,options:ProviderSessionOptions={}) {
+  if(typeof options.onClaudeAuthorization!=="function")throw new ProviderFailure("unsupported");
+  return boundedSessionOperation(async signal=>{
+    const containerId=await runtime.verifyOperation({signal});assertSignal(signal);
+    await runtime.beginNamespaceExec(containerId,{signal});assertSignal(signal);
+    const child=spawn("docker",["exec","-i",containerId,"/opt/cg/claude","auth","login","--claudeai"],{windowsHide:true,stdio:["pipe","pipe","pipe"]});
+    await runClaudeLoginProtocol(child,{...options,signal});assertSignal(signal);
+    return claudeStatus(runtime,{signal,deadlineMs:30_000,requireLogin:true});
+  },options,true);
+}
+// Stream-only seam: no credential files, terminal output or code enter results.
+export async function runClaudeLoginProtocol(child:ChildProcessWithoutNullStreams,options:ProviderSessionOptions={}) {
+  return boundedSessionOperation(async signal=>{
+    if(typeof options.onClaudeAuthorization!=="function")throw new ProviderFailure("unsupported");
+    const interaction=new AbortController();
+    const decoder=new StringDecoder("utf8");let buffer="",bytes=0,stderrBytes=0,challenged=false,written=false,settled=false;
+    let resolve!:()=>void,reject!:(error:ProviderFailure)=>void;
+    const done=new Promise<void>((yes,no)=>{resolve=yes;reject=no;});
+    const fail=(error:ProviderFailure)=>{if(!settled){settled=true;interaction.abort(error);child.stdin.end();child.kill();reject(error);}};
+    const aborted=()=>fail(signal.reason instanceof ProviderFailure?signal.reason:new ProviderFailure("canceled"));
+    const processError=()=>fail(new ProviderFailure("process"));
+    const closed=(code:number|null)=>{
+      if(settled)return;
+      if(code!==0){fail(new ProviderFailure("auth_required"));return;}
+      if(!challenged||!written){fail(new ProviderFailure("protocol"));return;}
+      settled=true;interaction.abort(new ProviderFailure("canceled"));resolve();
+    };
+    const stdout=(chunk:Buffer)=>{
+      if(settled)return;
+      bytes+=chunk.length;
+      if(bytes>65_536){fail(new ProviderFailure("protocol"));return;}
+      buffer+=decoder.write(chunk);
+      if(buffer.length>16_384){fail(new ProviderFailure("protocol"));return;}
+      let newline:number;
+      while((newline=buffer.indexOf("\n"))>=0){
+        // Strip complete OSC hyperlinks first: Node's generic VT regex can
+        // misparse the long query in this pinned CLI's OSC-8 URL payload.
+        const line=stripVTControlCharacters(buffer.slice(0,newline).replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g,"")).replace(/\r$/,"");buffer=buffer.slice(newline+1);
+        const marker="If the browser didn't open, visit: ";
+        if(!line.startsWith(marker))continue;
+        if(challenged){fail(new ProviderFailure("protocol"));return;}
+        let url:string;
+        try{url=validateClaudeAuthorizationUrl(line.slice(marker.length));}catch{fail(new ProviderFailure("protocol"));return;}
+        challenged=true;
+        void Promise.resolve().then(()=>{assertSignal(signal);if(settled)throw new ProviderFailure("protocol");return options.onClaudeAuthorization!(Object.freeze({authorization_url:url}),interaction.signal);}).then(code=>{
+          if(settled)return;assertSignal(signal);
+          try{validateClaudeLoginCode(code,url);}catch{throw new ProviderFailure("protocol");}
+          written=true;child.stdin.write(code+"\n");
+        }).catch(error=>fail(error instanceof ProviderFailure?error:new ProviderFailure("protocol")));
+      }
+    };
+    const stderr=(chunk:Buffer)=>{stderrBytes+=chunk.length;if(stderrBytes>65_536)fail(new ProviderFailure("protocol"));};
+    signal.addEventListener("abort",aborted,{once:true});
+    child.on("error",processError);child.on("close",closed);child.stdin.on("error",processError);child.stdout.on("error",processError);child.stderr.on("error",processError);
+    child.stdout.on("data",stdout);child.stderr.on("data",stderr);
+    if(signal.aborted)aborted();
+    try{await done;assertSignal(signal);}finally{
+      interaction.abort(new ProviderFailure("canceled"));
+      // Pipe errors (especially a pending write's EPIPE) may arrive after this
+      // promise settles. Retain capture-free guards through process teardown.
+      const ignoreLateError=()=>{};
+      child.on("error",ignoreLateError);child.stdin.on("error",ignoreLateError);child.stdout.on("error",ignoreLateError);child.stderr.on("error",ignoreLateError);
+      signal.removeEventListener("abort",aborted);child.off("error",processError);child.off("close",closed);
+      child.stdin.off("error",processError);child.stdout.off("error",processError);child.stderr.off("error",processError);
+      child.stdout.off("data",stdout);child.stderr.off("data",stderr);buffer="";child.stdin.end();child.kill();
+    }
+  },options,true);
 }
 export type CodexSessionOperation="status"|"refresh"|"logout"|"login"|"quota";
 export async function codexRpc(runtime: Pick<ManagedCliRuntime,"verifyOperation"|"beginNamespaceExec">, operation: CodexSessionOperation,options:ProviderSessionOptions={}) {

@@ -1,5 +1,7 @@
 // Browser-safe official CLI account operation observations. No private account
 // identity or host paths cross this boundary. Device challenges are transient.
+import { validateClaudeAuthorizationUrl, validateClaudeLoginCode } from "./claude-login-contract.ts";
+export { validateClaudeAuthorizationUrl, validateClaudeLoginCode } from "./claude-login-contract.ts";
 export type ProfileSessionProvider = "claude" | "codex";
 export type ProfileSessionAction = "login" | "status" | "logout";
 export const profileSessionPhases = ["starting", "preparing", "checking", "waiting_for_login", "cleaning", "finished"] as const;
@@ -8,9 +10,10 @@ export const profileSessionErrors = ["asset_missing", "asset_invalid", "docker_u
 export type ProfileSessionError = typeof profileSessionErrors[number];
 export type ProfileSessionOutcome = "passed" | "cancelled" | "failed" | "needs_review";
 export type ProfileSessionState = "unknown" | "authenticated" | "unauthenticated";
-export interface ProfileSessionChallenge { verification_url: "https://auth.openai.com/codex/device"; user_code: string }
+export type ProfileSessionChallenge = { verification_url: "https://auth.openai.com/codex/device"; user_code: string } | { authorization_url: string };
 export interface ProfileSessionStartRequest { schema_version: "1.0"; request_id: string; profile_id: string; action: ProfileSessionAction }
 export interface ProfileSessionCancelRequest { schema_version: "1.0"; request_id: string; expected_revision: number }
+export interface ProfileSessionSubmitRequest extends ProfileSessionCancelRequest { code: string }
 export interface ProfileSessionOperation {
   request_id: string;
   profile_id: string;
@@ -46,6 +49,12 @@ export function validateProfileSessionCancel(value: unknown): ProfileSessionCanc
     !identity(value.request_id) || !revision(value.expected_revision)) invalid();
   return structuredClone(value) as unknown as ProfileSessionCancelRequest;
 }
+export function validateProfileSessionSubmit(value: unknown): ProfileSessionSubmitRequest {
+  if (!exact(value, ["schema_version", "request_id", "expected_revision", "code"]) || value.schema_version !== "1.0" ||
+    !identity(value.request_id) || !revision(value.expected_revision)) invalid();
+  validateClaudeLoginCode(value.code);
+  return structuredClone(value) as unknown as ProfileSessionSubmitRequest;
+}
 export function validateProfileSessionStatus(value: unknown): ProfileSessionStatus {
   if (!exact(value, ["schema_version", "availability", "operation"]) || value.schema_version !== "1.0" ||
     !oneOf(value.availability, ["available", "unavailable"])) invalid();
@@ -57,10 +66,15 @@ export function validateProfileSessionStatus(value: unknown): ProfileSessionStat
       !oneOf(op.action, ["login", "status", "logout"]) || !revision(op.revision) || !oneOf(op.phase, profileSessionPhases) ||
       !oneOf(op.session_state, ["unknown", "authenticated", "unauthenticated"]) ||
       (op.error_code !== null && !oneOf(op.error_code, profileSessionErrors))) invalid();
-    if (op.phase === "waiting_for_login" && (op.provider !== "codex" || op.action !== "login")) invalid();
-    if (op.challenge !== null && (op.phase !== "waiting_for_login" || op.provider !== "codex" || op.action !== "login" ||
-      !exact(op.challenge, ["verification_url", "user_code"]) || op.challenge.verification_url !== "https://auth.openai.com/codex/device" ||
-      typeof op.challenge.user_code !== "string" || !/^[A-Z0-9-]{4,32}$/.test(op.challenge.user_code))) invalid();
+    if (op.phase === "waiting_for_login" && op.action !== "login") invalid();
+    if (op.challenge !== null) {
+      if (op.phase !== "waiting_for_login" || op.action !== "login") invalid();
+      if (op.provider === "claude") {
+        if (!exact(op.challenge, ["authorization_url"])) invalid();
+        validateClaudeAuthorizationUrl(op.challenge.authorization_url);
+      } else if (!exact(op.challenge, ["verification_url", "user_code"]) || op.challenge.verification_url !== "https://auth.openai.com/codex/device" ||
+        typeof op.challenge.user_code !== "string" || !/^[A-Z0-9-]{4,32}$/.test(op.challenge.user_code)) invalid();
+    }
     if (op.phase !== "finished") {
       if (op.outcome !== null || op.error_code !== null || op.session_state !== "unknown" || op.cleanup !== "pending") invalid();
     } else {
@@ -82,7 +96,7 @@ export function unavailableProfileSession(): ProfileSessionStatus {
 }
 function sameOperation(a: ProfileSessionOperation, b: ProfileSessionOperation): boolean {
   return (Object.keys(a) as (keyof ProfileSessionOperation)[]).every(key => key === "challenge"
-    ? a.challenge?.verification_url === b.challenge?.verification_url && a.challenge?.user_code === b.challenge?.user_code
+    ? JSON.stringify(a.challenge === null ? null : Object.fromEntries(Object.entries(a.challenge).sort())) === JSON.stringify(b.challenge === null ? null : Object.fromEntries(Object.entries(b.challenge).sort()))
     : a[key] === b[key]);
 }
 export function acceptProfileSessionUpdate(previous: ProfileSessionStatus | null, incoming: unknown): ProfileSessionStatus {
