@@ -7,7 +7,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface } from "node:readline";
 import { ClaudeFunctionalTestModelGuard } from "../testing/functional-test-models.ts";
 import { BoundedJsonInput, BoundedJsonLines, ProviderFailure, RpcLifecycle, TaskCallbackGuard, assertBridgeHealthy, classifyProviderFailure, isRecord, validRpcId,
-  validateClaudeResult, validateClaudeStatus, validateCodexIdentity, validateCodexTurn } from "./session-protocol.ts";
+  rejectClaudeSyntheticAssistantError, validateClaudeResult, validateClaudeStatus, validateCodexIdentity, validateCodexTurn } from "./session-protocol.ts";
 import { controlledTaskExecDescription, controlledTaskPrompt, controlledTaskToolSchema } from "./controlled-task.ts";
 import { taskRunMaxToolCalls, taskRunObservedModels, taskRunRequestedModels, type TaskRunProvider } from "./task-run-protocol.ts";
 
@@ -109,6 +109,7 @@ export async function runControlledProviderTurn(options: ProviderTurnOptions): P
       queue = queue.then(async () => {
         rpc.assertHealthy();
         if (provider === "claude") {
+          rejectClaudeSyntheticAssistantError(event);
           claudeModelGuard.observe(event);
           if (claudeModelGuard.observedModel) noteModel(claudeModelGuard.observedModel);
           if (event.type === "assistant" && isRecord(event.message) && Array.isArray(event.message.content)) {

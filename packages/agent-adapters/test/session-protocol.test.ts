@@ -163,9 +163,24 @@ test("task callbacks require exact tool, thread, namespace and fresh bounded ids
 });
 test("Claude completion classifies failed results and rejects ambiguous success", () => {
   validateClaudeResult({ type: "result", subtype: "success", is_error: false });
-  for (const value of [{ type: "result", subtype: "success" }, { type: "result", subtype: "unknown", is_error: false }, { type: "result", subtype: "success", is_error: true }]) assert.throws(() => validateClaudeResult(value), category("protocol"));
+  for (const value of [{ type: "result", subtype: "success" }, { type: "result", subtype: "unknown", is_error: false }]) assert.throws(() => validateClaudeResult(value), category("protocol"));
   assert.throws(() => validateClaudeResult({ type: "result", subtype: "error_during_execution", is_error: true, errors: ["network connection reset"] }), category("network"));
   assert.throws(() => validateClaudeResult({ type: "result", subtype: "error_max_budget_usd", is_error: true }), category("quota"));
+});
+
+test("Claude success-subtype API failures never pass and classify only bounded diagnostics", () => {
+  for (const [fields, expected] of [
+    [{api_error_status: 401}, "auth_required"], [{api_error_status: 429}, "quota"], [{api_error_status: 403}, "http_403"],
+    [{api_error_code: "model_not_found"}, "model"], [{result: "network connection reset"}, "network"], [{}, "unclassified"],
+    [{result: "fixture-private-detail"}, "unclassified"], [{result: "x".repeat(32_768) + " rate limit"}, "unclassified"],
+  ] as const) {
+    assert.throws(() => validateClaudeResult({type: "result", subtype: "success", is_error: true, ...fields}), error => {
+      assert.ok(error instanceof ProviderFailure); assert.equal(error.category, expected);
+      assert.equal(error.message, `managed_provider_${expected}`);
+      assert.ok(!JSON.stringify(error).includes("fixture-private")); assert.ok(!error.stack?.includes("fixture-private"));
+      return true;
+    });
+  }
 });
 test("Codex completion belongs to the active thread and turn, and preserves failure category", () => {
   const value = { threadId: "fixture-thread", turn: { id: "fixture-turn", status: "completed", error: null } };

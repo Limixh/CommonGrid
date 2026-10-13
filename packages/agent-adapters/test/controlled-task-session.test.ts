@@ -117,6 +117,57 @@ test("Claude stream observes an accepted Haiku identity and counts tool uses", a
   assert.deepEqual(t.execs, [["/opt/cg/claude", "auth", "status", "--json"]]);
   assert.ok(process.commands[0].includes("--fallback-model") && process.commands[0].includes("haiku"));
 });
+test("Claude synthetic API errors keep their category and cannot count or execute later tools", async () => {
+  for (const [error, expected] of [["authentication_failed", "auth_required"], ["rate_limit", "quota"],
+    ["model_not_found", "model"], ["unknown", "unclassified"]] as const) {
+    const process = fakeProcess(() => {}, write => {
+      write({type: "system", subtype: "init", model: "claude-haiku-5-5"});
+      write({type: "assistant", error, is_api_error_message: true,
+        message: {model: "<synthetic>", content: [{type: "text", text: "fixture-private-detail"}]}});
+      write({type: "assistant", message: {model: "claude-haiku-5-5", content: [{type: "tool_use", id: "late-use", name: "mcp__commongrid__task_exec", input: {argv: ["node"]}}]}});
+      write({type: "result", subtype: "success", is_error: false});
+    });
+    const t = turn("claude", process.factory); t.stats.task_calls = 0;
+    await assert.rejects(runControlledProviderTurn(t.options), failure => {
+      assert.ok(failure instanceof ProviderFailure); assert.equal(failure.category, expected);
+      assert.equal(failure.message, `managed_provider_${expected}`);
+      assert.ok(!JSON.stringify(failure).includes("fixture-private")); assert.ok(!failure.stack?.includes("fixture-private"));
+      return true;
+    });
+    assert.deepEqual(t.events, ["model:claude-haiku-5-5"]); assert.deepEqual(t.executed, []);
+    assert.equal(t.trace.quiescent, true); assert.equal(process.commands.length, 1, "no retry or fallback process");
+  }
+});
+
+test("Claude API error recognition cannot weaken real-model validation or admit synthetic tools", async () => {
+  for (const [assistant, expected] of [
+    [{is_api_error_message: true, error: "rate_limit", message: {model: "claude-sonnet-4-6", content: [{type: "text", text: "fixture"}]}}, "model"],
+    [{error: "rate_limit", message: {model: "<synthetic>", content: [{type: "text", text: "fixture"}]}}, "model"],
+    [{is_api_error_message: "true", error: "rate_limit", message: {model: "<synthetic>", content: [{type: "text", text: "fixture"}]}}, "model"],
+    [{is_api_error_message: true, error: "rate_limit", message: {model: "<synthetic>", content: [{type: "text", text: "fixture"},
+      {type: "tool_use", id: "blocked-use", name: "mcp__commongrid__task_exec", input: {argv: ["node"]}}]}}, "protocol"],
+    [{is_api_error_message: true, error: "rate_limit", message: {model: "<synthetic>", content: []}}, "protocol"],
+  ] as const) {
+    const process = fakeProcess(() => {}, write => {
+      write({type: "system", subtype: "init", model: "claude-haiku-5-5"}); write({type: "assistant", ...assistant});
+      write({type: "result", subtype: "success", is_error: false});
+    });
+    const t = turn("claude", process.factory); t.stats.task_calls = 0;
+    await assert.rejects(runControlledProviderTurn(t.options), error => error instanceof ProviderFailure && error.category === expected);
+    assert.deepEqual(t.events, ["model:claude-haiku-5-5"]); assert.deepEqual(t.executed, []); assert.equal(t.trace.quiescent, true);
+  }
+});
+
+test("Claude error-bearing success results fail before tool-count success checks", async () => {
+  for (const [fields, expected] of [[{api_error_status: 401}, "auth_required"], [{api_error_status: 429}, "quota"],
+    [{api_error_code: "model_not_found"}, "model"], [{result: "fixture-private-detail"}, "unclassified"]] as const) {
+    const process = fakeProcess(() => {}, claudeStream("claude-haiku-5-5", 0, {type: "result", subtype: "success", is_error: true, ...fields}));
+    const t = turn("claude", process.factory); t.stats.task_calls = 0;
+    await assert.rejects(runControlledProviderTurn(t.options), error => error instanceof ProviderFailure && error.category === expected);
+    assert.deepEqual(t.events, ["model:claude-haiku-5-5"]); assert.deepEqual(t.executed, []); assert.equal(t.trace.quiescent, true);
+  }
+});
+
 test("Claude with another model, no login, a quota result or too many tool uses fails with the right category", async () => {
   for (const model of ["claude-sonnet-4-5", "claude-opus-4-1", "haiku"]) {
     const t = turn("claude", fakeProcess(() => {}, claudeStream(model, 1)).factory);

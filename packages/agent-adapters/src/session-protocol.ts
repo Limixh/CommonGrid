@@ -58,12 +58,35 @@ export function validateClaudeStatus(stdout: string, exitCode: number, requireLo
 export function validRpcId(value: unknown): value is number | string {
   return typeof value === "number" ? Number.isSafeInteger(value) && value >= 0 : typeof value === "string" && value.length > 0 && value.length <= 128;
 }
+function classifyClaudeError(event: Record<string, any>, messages: string[]): ProviderCategory {
+  // Official stream error enums are diagnostic codes, not model identities.
+  const code = event.error ?? event.api_error_code ?? event.api_error;
+  switch (code) {
+    case "authentication_failed": case "oauth_org_not_allowed": return "auth_required";
+    case "rate_limit": return "quota";
+    case "model_not_found": return "model";
+  }
+  if (event.api_error_status === 401) return "auth_required";
+  if (event.api_error_status === 403) return "http_403";
+  if (event.api_error_status === 429) return "quota";
+  return classifyProviderFailure(messages.join("\n"));
+}
+/** Only the official text-only synthetic API error bypasses model evidence. */
+export function rejectClaudeSyntheticAssistantError(event: unknown): void {
+  if (!isRecord(event) || event.type !== "assistant" || event.is_api_error_message !== true ||
+      !isRecord(event.message) || event.message.model !== "<synthetic>") return;
+  const content = event.message.content;
+  if (!Array.isArray(content) || content.length < 1 || content.length > 16 ||
+      !content.every(block => isRecord(block) && block.type === "text" && typeof block.text === "string")) throw new ProviderFailure("protocol");
+  throw new ProviderFailure(classifyClaudeError(event, content.map(block => block.text.slice(0, 2_048))));
+}
 export function validateClaudeResult(event: unknown) {
   if (!isRecord(event) || event.type !== "result" || typeof event.is_error !== "boolean" || typeof event.subtype !== "string") throw new ProviderFailure("protocol");
   if (event.subtype === "success" && event.is_error === false) return;
-  if (!["error_during_execution", "error_max_turns", "error_max_budget_usd", "error_max_structured_output_retries"].includes(event.subtype) || !event.is_error) throw new ProviderFailure("protocol");
+  // The pinned CLI also uses success-subtype results with is_error=true for API failures.
+  if (!["success", "error_during_execution", "error_max_turns", "error_max_budget_usd", "error_max_structured_output_retries"].includes(event.subtype) || !event.is_error) throw new ProviderFailure("protocol");
   const messages = [typeof event.result === "string" ? event.result.slice(0, 32_768) : "", ...(Array.isArray(event.errors) ? event.errors.slice(0, 16).filter((value: unknown) => typeof value === "string").map((value: string) => value.slice(0, 2_048)) : [])];
-  throw new ProviderFailure(event.subtype === "error_max_budget_usd" ? "quota" : classifyProviderFailure(messages.join("\n")));
+  throw new ProviderFailure(event.subtype === "error_max_budget_usd" ? "quota" : classifyClaudeError(event, messages));
 }
 export function validateCodexTurn(params: unknown, threadId: string, turnId: string) {
   if (!isRecord(params) || params.threadId !== threadId || !isRecord(params.turn) || params.turn.id !== turnId) throw new ProviderFailure("protocol");
