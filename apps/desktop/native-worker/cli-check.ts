@@ -5,6 +5,7 @@ import path from "node:path";
 import { ManagedCliRuntime, ManagedPreparationError, type ManagedRuntimeAssets } from "../../../packages/agent-adapters/src/managed-runtime.ts";
 import { dockerCommand } from "../../../packages/agent-adapters/src/task-runtime.ts";
 import pins from "../../../packages/agent-adapters/runtime-assets/native-cli-assets.lock.json";
+import { canonicalPinnedImageReference } from "../../../packages/agent-adapters/src/pinned-image.ts";
 
 declare const __CG_BRIDGE_HASHES__: Record<string, string>;
 export type Provider = "claude" | "codex";
@@ -62,7 +63,7 @@ export async function verifyAssets(boot: Boot, bridgeHashes: Record<string, stri
     }
     const pin = pins.binaries[boot.provider];
     if (await digest(path.join(boot.assets_root, pin.file), 536_870_912) !== pin.sha256) throw new CheckFailure("asset_invalid");
-    return {baseImage: pins.base_image, bridgeRoot: boot.assets_root, journalRoot: boot.journal_root, ...catalog,
+    return {baseImage: canonicalPinnedImageReference(pins.base_image), bridgeRoot: boot.assets_root, journalRoot: boot.journal_root, ...catalog,
       binaries: {claude: {binaryPath: path.join(boot.assets_root, "claude"), sha256: pins.binaries.claude.sha256}, codex: {binaryPath: path.join(boot.assets_root, "codex"), sha256: pins.binaries.codex.sha256}}};
   } catch (error) {
     if (error instanceof CheckFailure) throw error;
@@ -97,10 +98,11 @@ export async function verifyDockerPrerequisite(assets: ManagedRuntimeAssets, sig
   const options = {signal, timeoutMs: 10_000, maxBytes: 8192};
   const versionArgs = ["version", "--format", "{{.Server.Os}}/{{.Server.Arch}}"];
   try {
+    const baseImage = canonicalPinnedImageReference(assets.baseImage);
     if (platform === "win32") await selectWindowsDockerEndpoint(signal, () => command(versionArgs, options), environment);
     const version = await command(versionArgs, options);
     if (version.code !== 0 || version.stdout.trim() !== "linux/amd64") throw new CheckFailure("docker_unavailable");
-    const image = await command(["image", "inspect", "--format", "{{.Id}}", assets.baseImage], options);
+    const image = await command(["image", "inspect", "--format", "{{.Id}}", baseImage], options);
     if (image.code !== 0) throw new CheckFailure(/\bno such image:/i.test(image.stderr) ? "image_missing" : "docker_unavailable");
   } catch (error) {
     if (error instanceof CheckFailure) throw error;

@@ -7,6 +7,7 @@ import { test } from "node:test";
 import { parseBoot, runCliCheck, selectWindowsDockerEndpoint, verifyAssets, verifyDockerPrerequisite, type Boot, type CheckDependencies, type Frame } from "../../../apps/desktop/native-worker/cli-check.ts";
 import { ManagedPreparationError, type ManagedRuntimeAssets } from "../src/managed-runtime.ts";
 import pins from "../runtime-assets/native-cli-assets.lock.json";
+import { canonicalPinnedImageReference } from "../src/pinned-image.ts";
 
 const boot: Boot = {type: "boot", schema_version: "1.0", request_id: randomUUID(), provider: "codex", journal_root: path.resolve("synthetic-journal"), assets_root: path.resolve("synthetic-assets")};
 const assets: ManagedRuntimeAssets = {baseImage: "node@sha256:" + "0".repeat(64), journalRoot: boot.journal_root, bridgeRoot: boot.assets_root,
@@ -66,6 +67,30 @@ test("missing pinned image is a setup failure before mutation and exposes no Doc
   assert.deepEqual(f.calls, ["assets"]);
   assert.deepEqual(f.frames.at(-1), {type: "result", outcome: "failed", cli_version: null, error_code: "image_missing", cleanup: "verified"});
   assert.ok(!JSON.stringify(f.frames).includes("PRIVATE"));
+});
+
+test("a cached digest remains usable when its optional tag lookup is missing", async () => {
+  for (const repository of ["node", "registry.example.test:5000/team/node", "registry.example.test:5001/team/node"]) {
+    const tagged = {...assets, baseImage: `${repository}:22-bookworm-slim@sha256:${"a".repeat(64)}`};
+    const canonical = `${repository}@sha256:${"a".repeat(64)}`, commands: string[][] = [];
+    await verifyDockerPrerequisite(tagged, new AbortController().signal, async args => {
+      commands.push(args);
+      if (args[0] === "version") return {code: 0, stdout: "linux/amd64", stderr: ""};
+      assert.deepEqual(args, ["image", "inspect", "--format", "{{.Id}}", canonical]);
+      return args.at(-1) === canonical ? {code: 0, stdout: "sha256:" + "b".repeat(64), stderr: ""} :
+        {code: 1, stdout: "", stderr: "No such image: fixture tag metadata missing"};
+    }, "linux");
+    assert.equal(commands.length, 2, "no alternate tag, pull or mutable image is attempted");
+    assert.ok(!commands.flat().includes(tagged.baseImage));
+    assert.equal(tagged.baseImage, `${repository}:22-bookworm-slim@sha256:${"a".repeat(64)}`);
+  }
+});
+
+test("an unpinned prerequisite fails before issuing any Docker command", async () => {
+  let calls = 0;
+  await assert.rejects(verifyDockerPrerequisite({...assets, baseImage: "node:latest"}, new AbortController().signal,
+    async () => { calls++; throw new Error("unexpected_command"); }, "linux"));
+  assert.equal(calls, 0);
 });
 test("daemon failures and incompatible engines cannot be mistaken for missing images", async () => {
   for (const stage of ["version", "platform", "image"]) {
@@ -144,5 +169,16 @@ test("asset directory links are rejected before following a different directory'
     await symlink(target, linked, process.platform === "win32" ? "junction" : "dir");
     await assert.rejects(verifyAssets({...boot, assets_root: linked}, {}), error => (error as Error).message === "asset_invalid");
     await assert.rejects(verifyAssets({...boot, assets_root: target}, {}), error => (error as Error).message === "asset_missing");
+  } finally { await rm(directory, {recursive: true, force: true}); }
+});
+
+test("asset config must still match the raw lock pin before digest normalization", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "cg-assets-raw-pin-"));
+  try {
+    const canonical = canonicalPinnedImageReference(pins.base_image);
+    assert.notEqual(canonical, pins.base_image, "the fixture needs the lock's optional tag");
+    await writeFile(path.join(directory, "config.json"), JSON.stringify({schema_version: "1.0", base_image: canonical,
+      binaries: Object.fromEntries(Object.entries(pins.binaries).map(([id, pin]) => [id, {file: pin.file, sha256: pin.sha256}])), bridges: {}}));
+    await assert.rejects(verifyAssets({...boot, assets_root: directory}, {}), /^Error: asset_invalid$/);
   } finally { await rm(directory, {recursive: true, force: true}); }
 });

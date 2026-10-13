@@ -32,12 +32,45 @@ test("product runtime requires explicit absolute trusted assets and snapshots th
       assert.throws(()=>validateManagedRuntimeAssets(bad as ManagedRuntimeAssets),/managed_runtime_assets_invalid/);
     }
     const snapshot=validateManagedRuntimeAssets(assets),hash=snapshot.binaries.claude.sha256;
+    assert.equal(snapshot.baseImage, `node@sha256:${"a".repeat(64)}`);
+    assert.equal(assets.baseImage, image, "normalization leaves the trusted source pin unchanged");
     assets.binaries.claude.sha256="b".repeat(64);
     assert.equal(snapshot.binaries.claude.sha256,hash);
     assert.ok(Object.isFrozen(snapshot)&&Object.isFrozen(snapshot.binaries)&&Object.isFrozen(snapshot.binaries.claude));
     const runtime=ManagedCliRuntime.restore(identity,{assets});
     assert.equal("installCodexCodingProfile" in runtime,false);
     assert.equal(runtime.leaseIdentity(),undefined);assert.equal(runtime.journalSnapshot(),undefined);
+  });
+});
+
+test("restored profile identities and volumes survive canonical image use in claim and runtime creation", async context => {
+  await fixture(async assets => {
+    const canonical = `registry.example.test:5000/team/node@sha256:${"a".repeat(64)}`;
+    assets.baseImage = `registry.example.test:5000/team/node:22-bookworm-slim@sha256:${"a".repeat(64)}`;
+    const identity = {owner: randomUUID(), provider: "claude" as const};
+    const runtime = ManagedCliRuntime.restore(identity, {assets}), commands: string[][] = [];
+    const leaseId = "b".repeat(64), operation = runtime.operationIdentity().operation;
+    let claimed = false;
+    const seam = runtime as unknown as {command(args: string[]): Promise<string>};
+    context.mock.method(seam, "command", async (args: string[]) => {
+      commands.push(args);
+      if (args[0] === "create") {
+        assert.equal(args.filter(arg => arg.includes("@sha256:")).join(), canonical);
+        if (args.includes(`/bin/false`)) { claimed = true; return leaseId; }
+        throw new Error("fixture_runtime_create_rejected");
+      }
+      if (args[0] === "inspect") return JSON.stringify({id: leaseId, name: `/cg-managed-lease-${identity.owner}`, ...identity,
+        operation, kind: "managed-profile-claim", schema: "1", running: false, status: "created", network: "none", readonly: true, mounts: 0, ports: 0});
+      if (args[0] === "volume") return identity.owner;
+      if (args[0] === "container") return args.includes(`id=${leaseId}`) && claimed ? leaseId : "";
+      throw new Error("fixture_unexpected_command");
+    });
+    await assert.rejects(runtime.start(), /managed_start_cleanup_unconfirmed/);
+    assert.deepEqual(runtime.identity(), identity);
+    assert.equal(runtime.toolsVolume, `cg-managed-tools-${identity.owner}`);
+    assert.equal(runtime.authVolume, `cg-managed-auth-${identity.owner}`);
+    assert.equal(commands.filter(args => args[0] === "create").length, 2, "claim and runtime both use the canonical digest");
+    assert.ok(!commands.flat().includes(assets.baseImage));
   });
 });
 

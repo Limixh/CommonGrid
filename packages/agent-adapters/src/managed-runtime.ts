@@ -14,6 +14,7 @@ import type { OperationJournal, OperationJournalSnapshot, JournalIntent, Journal
 import { executeTaskTool } from "./task-tool.ts";
 import { type SubscriptionProvider } from "./egress-policy.ts";
 import { attachManagedControl } from "./managed-control.ts";
+import { canonicalPinnedImageReference } from "./pinned-image.ts";
 import { assertManagedProfileTrust, readManagedHostTrust, installManagedHostTrustScript, verifyManagedHostTrustScript, type ManagedHostTrustOptions, type ManagedProfileTrust } from "./managed-trust.ts";
 export type { ManagedHostTrustOptions, ManagedProfileTrust } from "./managed-trust.ts";
 
@@ -31,9 +32,11 @@ function safeAbsolutePath(value: unknown): value is string {
 }
 export function validateManagedRuntimeAssets(value: ManagedRuntimeAssets): Readonly<ManagedRuntimeAssets> {
   if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).sort().join(",") !== (value.codexCatalog === undefined ? "baseImage,binaries,bridgeRoot,journalRoot" : "baseImage,binaries,bridgeRoot,codexCatalog,journalRoot") ||
-      typeof value.baseImage !== "string" || !/^[a-z0-9][a-z0-9./:_-]*@sha256:[a-f0-9]{64}$/.test(value.baseImage) ||
       !safeAbsolutePath(value.bridgeRoot) || !safeAbsolutePath(value.journalRoot) || !value.binaries || typeof value.binaries !== "object" ||
       Object.keys(value.binaries).sort().join(",") !== "claude,codex") throw new Error("managed_runtime_assets_invalid");
+  let baseImage: string;
+  try { baseImage = canonicalPinnedImageReference(value.baseImage); }
+  catch { throw new Error("managed_runtime_assets_invalid"); }
   for (const provider of ["claude", "codex"] as const) {
     const binary = value.binaries[provider];
     if (!binary || typeof binary !== "object" || Array.isArray(binary) || Object.keys(binary).sort().join(",") !== "binaryPath,sha256" ||
@@ -42,7 +45,7 @@ export function validateManagedRuntimeAssets(value: ManagedRuntimeAssets): Reado
   const catalog = value.codexCatalog;
   if (catalog !== undefined && (!catalog || typeof catalog !== "object" || Array.isArray(catalog) || Object.keys(catalog).sort().join(",") !== "filePath,sha256" ||
       !safeAbsolutePath(catalog.filePath) || typeof catalog.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(catalog.sha256))) throw new Error("managed_runtime_assets_invalid");
-  return Object.freeze({baseImage:value.baseImage, bridgeRoot:value.bridgeRoot, journalRoot:value.journalRoot,
+  return Object.freeze({baseImage, bridgeRoot:value.bridgeRoot, journalRoot:value.journalRoot,
     binaries:Object.freeze({claude:Object.freeze({...value.binaries.claude}), codex:Object.freeze({...value.binaries.codex})}),
     ...(catalog ? {codexCatalog:Object.freeze({...catalog})} : {})});
 }
