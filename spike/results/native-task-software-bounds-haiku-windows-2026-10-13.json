@@ -1,0 +1,71 @@
+{
+  "schema_version": "1.0",
+  "checked_at": "2026-10-13T19:25:25.313Z",
+  "product_source_commit": "3fc23d1",
+  "source_scope": "Committed product source; the --task software-bounds harness option was local during acceptance and is committed with this record.",
+  "purpose": "real_native_windows_catalog_software_task_acceptance",
+  "task_id": "software-bounds",
+  "contract_hash": "4823a3908e60b9bdeebf737c4f1d8c71a53c86981f5a4c6845877ba815f1216d",
+  "workspace_commit": "7a06a3ea1880fec11033104223474b8f297cab6c",
+  "host": "windows-x64",
+  "build": "debug_native_with_production_frontend_and_isolated_app_store",
+  "success": true,
+  "provider": "claude",
+  "mode": "reuse_authenticated_session",
+  "authentication_method": "existing_isolated_session",
+  "original_authentication_record": "native-session-claude-authenticated-windows-2026-10-13.json",
+  "official_authentication": "passed",
+  "real_account_authorized": true,
+  "real_native_ipc": true,
+  "mocked_native_ipc": false,
+  "catalog_source": "local_fixture_mode_coordinator_read_only_test_binding",
+  "requested_model": "haiku",
+  "observed_model": "claude-haiku-5-5",
+  "authenticated_tasks_requested": 1,
+  "tool_calls": 3,
+  "verifier": {"passed": true, "cases": 40, "visible_tests_passed": true, "hidden_cases_passed": true},
+  "candidate_sha256": "53763fa487804b01e1593cd9a56904dc1c49150c76578f372d0b10ed8cf2c962",
+  "patch_sha256": "8750a4af84a2c5a1890733797cec48e7fd616eb3bb69f913862d9b14f52105ac",
+  "applied_candidate_sha256": "53763fa487804b01e1593cd9a56904dc1c49150c76578f372d0b10ed8cf2c962",
+  "patch_summary": "One-line boundary fix in src/search.ts: high = values.length instead of values.length - 1.",
+  "native_task_cleanup": "verified",
+  "post_task_official_authenticated_status": "passed",
+  "real_account_ui_acceptance_checks_passed": 7,
+  "independent_managed_cleanup": {
+    "status": "verified",
+    "journal_operations": 9,
+    "namespace_ids_checked": 10,
+    "lease_ids_checked": 9,
+    "managed_containers_absent": true,
+    "profile_claims_absent": true
+  },
+  "independent_managed_cleanup_journal_scope": "cumulative_source_isolated_store_public_journals",
+  "process_cleanup": {
+    "method": "windows_taskkill",
+    "status": "termination_reported",
+    "helperExitCode": 0
+  },
+  "fixture_coordinator_cleanup": {
+    "method": "windows_taskkill",
+    "status": "termination_reported",
+    "helperExitCode": 0
+  },
+  "user_account_imported": false,
+  "paid_api_fallback": false,
+  "login_code_recorded": false,
+  "authorization_url_recorded": false,
+  "model_free_preflight": {
+    "checked_at": "2026-10-13",
+    "mode": "signed_out",
+    "status": "passed",
+    "checks": 9,
+    "summary": "Fresh Codex profile: catalog selection from the fixture coordinator, unbound-profile failure, undisclosed login cancel and signed-out software-bounds task cancel with verified cleanup; no inference."
+  },
+  "scope_limits": [
+    "One software-bounds task from the pinned local bundle on Windows/WebView2; other catalog tasks, strategy application, installers, other OS native UI and general product GO are not accepted by this run.",
+    "The catalog came from a local fixture-mode coordinator through a read-only test binding; nothing was cloned and the repository URL in the contract is a placeholder.",
+    "Reuse verified the existing isolated profile with official CLI status; no new login or host credential import. New reports/config/artifacts use a separate run directory.",
+    "Independent Docker/journal absence checks cover cumulative operations in the source managed-profile store, including earlier runs; separate task/exporter/verifier resources use native supervisor cleanup evidence.",
+    "A single successful run is not generalized: model success rate and repeatability on this task were not measured."
+  ]
+}

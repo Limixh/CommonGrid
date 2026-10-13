@@ -1,6 +1,6 @@
 # ADR 0021: Katalog yazılım görevinin onaylı çalıştırılması
 
-Durum: Uygulanıyor — sözleşme, sabit paket ve mock/fixture testleriyle; gerçek hesap/Windows kabulü yapılmadı.
+Durum: Uygulanıyor — sözleşme, sabit paket ve mock/fixture testleriyle; Windows'ta tek gerçek Haiku kabulü geçti (aşağıda).
 
 ## Karar
 
@@ -22,4 +22,6 @@ Seçilen yaklaşım (strateji) bu artışta uygulanmadı: prompt'a eklenmez ve �
 
 ## Kabul sınırı
 
-Bu ADR'deki testler sabit paket, kimlik, sözleşme ve dışa aktarıcı kontrolleri ile Node destekli doğrulayıcı vekili ve sentetik worker bağımlılıklarıdır; gerçek model çağrısı yapmaz. Gerçek hesapla uygulama içi çalıştırma, Windows/WebView2 koşusu, gerçek Docker doğrulayıcı kabulü ve ucuz modelin `software-bounds` görevini çözmesi ayrı kanıt gerektirir. Genel GO durumu değişmez.
+Bu ADR'deki testler sabit paket, kimlik, sözleşme ve dışa aktarıcı kontrolleri ile Node destekli doğrulayıcı vekili ve sentetik worker bağımlılıklarıdır; gerçek model çağrısı yapmaz.
+
+2026-10-13 `npm run test:native-task-smoke -- --provider claude --task software-bounds --real-account --reuse-session <UUID>` ile [gerçek Windows kabulü](../results/native-task-software-bounds-haiku-windows-2026-10-13.json) geçti: katalog yerel fixture koordinatöründen okundu, görev çalışma alanından seçilip profil ekranına taşındı, mevcut izole Claude oturumu resmi status ile doğrulandı ve tek `haiku` görevi üç araç çağrısıyla `src/search.ts` sınır hatasını düzeltti. Gerçek Docker doğrulayıcı görünür testleri ve 40/40 gizli durumu geçirdi; diff/hash eşleşti, cleanup ve görev sonrası oturum doğrulandı. Aynı seçim yolu önce hesapsız modda (9 kontrol, model çağrısı yok) sınandı. Kabul tek görev, tek koşu ve Windows ile sınırlıdır; başarı oranı ölçülmedi. Genel GO durumu değişmez.

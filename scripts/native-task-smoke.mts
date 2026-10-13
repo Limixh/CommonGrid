@@ -8,8 +8,9 @@ import { chromium, expect, type Browser, type Page } from "@playwright/test";
 import { CommandError, runOwnedCommand, type CommandCleanup } from "../packages/agent-adapters/src/owned-process.ts";
 import { validateManagedProfilesStatus } from "../packages/agent-adapters/src/managed-profile-protocol.ts";
 import { acceptProfileSessionUpdate, validateClaudeAuthorizationUrl, validateProfileSessionStatus, type ProfileSessionStatus } from "../packages/agent-adapters/src/profile-session-protocol.ts";
-import { acceptTaskRunUpdate, taskRunObservedModels, taskRunRequestedModels, validateTaskRunStatus, type TaskRunOperation, type TaskRunProvider, type TaskRunStatus } from "../packages/agent-adapters/src/task-run-protocol.ts";
+import { acceptTaskRunUpdate, taskRunObservedModels, taskRunRequestedModels, validateTaskRunStatus, type TaskRunOperation, type TaskRunProvider, type TaskRunStatus, type TaskRunTaskId } from "../packages/agent-adapters/src/task-run-protocol.ts";
 import { applyControlledPatch, controlledBaseline, controlledVerifierCases } from "../packages/agent-adapters/src/controlled-task.ts";
+import { softwareBaseline, softwareBoundsTask, softwareVerifierCases } from "../packages/agent-adapters/src/software-task.ts";
 import { readOperationJournals } from "../packages/agent-adapters/src/operation-journal.ts";
 import { operationLeaseLabels } from "../packages/agent-adapters/src/operation-lease.ts";
 import { ProfileBindings } from "../apps/desktop/native-worker/profile-bindings.ts";
@@ -25,18 +26,23 @@ import { createNativeUiTrace, safeNativeUiErrorCategory } from "./native-ui-trac
 // No DOM dumps, raw errors, videos or challenge screenshots. Claude real-account
 // mode collects only bounded allowlisted UI/IPC events and safe session metadata.
 const arguments_ = process.argv.slice(2);
-const usage = "Usage: npm run test:native-task-smoke -- [--provider codex|claude] [--real-account] [--show] [--reuse-session <v4 UUID>]\nDefault: Codex signed-out task failure and cancellation without model inference.\n--real-account: wait for official user authorization; run one gpt-6-luna (Codex) or haiku (Claude) task.\nCodex prints its official device URL/code once. Fresh Claude login requires --real-account --show: use the app's official browser button and paste the code only into its masked field. Claude URL/code/state are never printed.\n--reuse-session: use only an already authenticated .local/native-task-smoke/<UUID>/appdata store; requires --real-account. Official CLI status must verify authentication before one cheap task. No login, fallback or automatic retry; --show is optional for reuse. New reports/config/artifacts go into a separate run directory.\n--show: show the isolated native window (requires --real-account).\nThe isolated app store and official profile volumes are retained; host auth is never copied.";
+const usage = "Usage: npm run test:native-task-smoke -- [--provider codex|claude] [--task controlled|software-bounds] [--real-account] [--show] [--reuse-session <v4 UUID>]\nDefault: Codex signed-out task failure and cancellation without model inference.\n--task software-bounds: select the catalog task from the workspace (served by a local fixture-mode coordinator on 127.0.0.1:8787) instead of the controlled sum.mjs task.\n--real-account: wait for official user authorization; run one gpt-6-luna (Codex) or haiku (Claude) task.\nCodex prints its official device URL/code once. Fresh Claude login requires --real-account --show: use the app's official browser button and paste the code only into its masked field. Claude URL/code/state are never printed.\n--reuse-session: use only an already authenticated .local/native-task-smoke/<UUID>/appdata store; requires --real-account. Official CLI status must verify authentication before one cheap task. No login, fallback or automatic retry; --show is optional for reuse. New reports/config/artifacts go into a separate run directory.\n--show: show the isolated native window (requires --real-account).\nThe isolated app store and official profile volumes are retained; host auth is never copied.";
 if (arguments_.includes("--help")) { console.log(usage); process.exit(0); }
 let provider: TaskRunProvider = "codex", realAccount = false, show = false;
 let sourceSessionRunId: string | null = null;
+let taskId: TaskRunTaskId = "controlled-sum-integers-v1";
 const seenArguments = new Set<string>();
 for (let index = 0; index < arguments_.length; index++) {
   const argument = arguments_[index];
-  assert.ok(["--provider", "--real-account", "--show", "--reuse-session"].includes(argument), "native_task_smoke_unknown_argument");
+  assert.ok(["--provider", "--task", "--real-account", "--show", "--reuse-session"].includes(argument), "native_task_smoke_unknown_argument");
   assert.ok(!seenArguments.has(argument), "native_task_smoke_duplicate_argument"); seenArguments.add(argument);
   if (argument === "--provider") {
     const value = arguments_[++index];
     assert.ok(value === "codex" || value === "claude", "native_task_smoke_invalid_provider"); provider = value;
+  } else if (argument === "--task") {
+    const value = arguments_[++index];
+    assert.ok(value === "controlled" || value === "software-bounds", "native_task_smoke_invalid_task");
+    taskId = value === "controlled" ? "controlled-sum-integers-v1" : value;
   } else if (argument === "--reuse-session") {
     const value = arguments_[++index];
     assert.ok(typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value), "native_task_smoke_invalid_source_session_run_id");
@@ -51,6 +57,11 @@ if (process.platform !== "win32") throw new Error("native_task_smoke_requires_wi
 assert.equal(taskRunRequestedModels.codex, "gpt-6-luna", "native_task_smoke_cheap_model_policy_changed");
 assert.equal(taskRunRequestedModels.claude, "haiku", "native_task_smoke_cheap_model_policy_changed");
 const requestedModel = taskRunRequestedModels[provider];
+const software = taskId === "software-bounds";
+const expectedCases = software ? softwareVerifierCases : controlledVerifierCases;
+const taskBaseline = software ? softwareBaseline : controlledBaseline;
+const softwareTitle = (softwareBoundsTask as {title: string}).title;
+const coordinatorOrigin = "http://127.0.0.1:8787";
 const profileName = provider === "claude" ? "Claude native task smoke" : "Codex native task smoke";
 
 const smokeRoot = path.resolve(root, ".local/native-task-smoke");
@@ -87,7 +98,7 @@ await writeFile(config, JSON.stringify({app: {
 
 const checks: string[] = [];
 const taskEvidence: Array<{
-  purpose: "unbound" | "signed_out_cancel" | "authenticated_task";
+  purpose: "unbound" | "signed_out_cancel" | "authenticated_task"; task_id: TaskRunTaskId;
   outcome: TaskRunOperation["outcome"]; error_code: TaskRunOperation["error_code"];
   cleanup: TaskRunOperation["cleanup"]; tool_calls: number; model: TaskRunOperation["model"];
 }> = [];
@@ -115,6 +126,11 @@ const independentManagedCleanup: {
   managed_containers_absent: false, profile_claims_absent: false};
 const controller = new AbortController();
 let completion: Promise<{result?: unknown; error?: unknown}> | undefined;
+// The fixture-mode coordinator serves the public catalog for --task software-bounds.
+const coordinatorController = new AbortController();
+let coordinatorCompletion: Promise<{error?: unknown}> | undefined;
+let coordinatorCleanup: CommandCleanup = {method: "none", status: "not_started"};
+const coordinatorRequests: string[] = [];
 let interrupted = false;
 const onInterrupt = () => { interrupted = true; };
 process.on("SIGINT", onInterrupt); process.on("SIGTERM", onInterrupt);
@@ -175,8 +191,8 @@ async function waitTask(page: Page, predicate: (status: TaskRunStatus) => boolea
 }
 function evidence(purpose: typeof taskEvidence[number]["purpose"], operation: TaskRunOperation) {
   assert.equal(operation.phase, "finished");
-  assert.equal(operation.provider, provider); assert.equal(operation.model.requested, requestedModel);
-  taskEvidence.push({purpose, outcome: operation.outcome, error_code: operation.error_code,
+  assert.equal(operation.provider, provider); assert.equal(operation.model.requested, requestedModel); assert.equal(operation.task_id, taskId);
+  taskEvidence.push({purpose, task_id: operation.task_id, outcome: operation.outcome, error_code: operation.error_code,
     cleanup: operation.cleanup, tool_calls: operation.tool_calls, model: {...operation.model}});
 }
 async function startTaskUi(page: Page) {
@@ -270,6 +286,24 @@ try {
     if (error instanceof CommandError) buildCleanup = await error.cleanup;
     throw new SmokeFailure("native_build_failed");
   }
+  if (software) {
+    assertNotInterrupted(); stage = "fixture_coordinator";
+    // Never attach to an unknown process already listening on the coordinator port.
+    let occupied = false;
+    try { occupied = (await fetch(`${coordinatorOrigin}/health`, {signal: AbortSignal.timeout(1000)})).status > 0; } catch {}
+    if (occupied) throw new SmokeFailure("coordinator_port_in_use");
+    assert.ok(!process.env.CG_COORDINATOR_MODE || process.env.CG_COORDINATOR_MODE === "fixture", "native_task_smoke_requires_fixture_coordinator");
+    coordinatorCompletion = runOwnedCommand(process.execPath, [path.join(root, "scripts/go.mjs"), "run", "./cmd/coordinator"],
+      {signal: coordinatorController.signal, timeoutMs: realAccount ? 2_700_000 : 1_200_000, maxBytes: 1_048_576})
+      .then(() => ({}), error => ({error}));
+    let healthy = false;
+    for (const deadline = Date.now() + 180_000; Date.now() < deadline && !healthy;) {
+      assertNotInterrupted();
+      try { healthy = (await fetch(`${coordinatorOrigin}/health`, {signal: AbortSignal.timeout(1000)})).ok; } catch {}
+      if (!healthy) await delay(500);
+    }
+    if (!healthy) throw new SmokeFailure("fixture_coordinator_unavailable");
+  }
   assertNotInterrupted(); stage = "launch";
   const port = await bounded(new Promise<number>((resolve, reject) => {
     const server = createServer(); server.once("error", reject);
@@ -299,15 +333,52 @@ try {
   assert.ok(ready, "native_task_smoke_cdp_bootstrap_failed");
   browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`, {timeout: 10_000});
   const context = browser.contexts()[0]; assert.ok(context);
+  if (software) {
+    // WebView2 custom-protocol traffic bypasses CDP HTTP routing. A test-only
+    // binding forwards catalog reads to the real fixture coordinator and returns
+    // its untouched body/status. Native IPC is never replaced.
+    await context.exposeBinding("__taskSmokeCatalogRead", async (_source, input: string) => {
+      const url = new URL(input);
+      assert.ok(url.hostname === "tauri.localhost" && url.pathname.startsWith("/api/v1/"));
+      const response = await fetch(coordinatorOrigin + url.pathname + url.search, {signal: AbortSignal.timeout(10_000), redirect: "error"});
+      coordinatorRequests.push(url.pathname);
+      return {status: response.status, body: await response.text(), contentType: response.headers.get("content-type") ?? "application/json"};
+    });
+    await context.addInitScript(() => {
+      const original = globalThis.fetch.bind(globalThis);
+      globalThis.fetch = async (input, init) => {
+        const request = new Request(input, init);
+        const url = new URL(request.url);
+        if (url.origin !== location.origin || !url.pathname.startsWith("/api/v1/")) return original(input, init);
+        if (request.method !== "GET") throw new Error("acceptance_must_remain_read_only");
+        if (request.signal.aborted) throw new DOMException("Aborted", "AbortError");
+        const response = await (globalThis as any).__taskSmokeCatalogRead(request.url);
+        if (request.signal.aborted) throw new DOMException("Aborted", "AbortError");
+        return new Response(response.body, {status: response.status, headers: {"content-type": response.contentType}});
+      };
+    });
+  }
   const page = context.pages()[0] ?? await context.waitForEvent("page", {timeout: 10_000}); activePage = page;
   page.setDefaultTimeout(15_000);
   await page.waitForURL(url => url.hostname === "tauri.localhost" || url.protocol === "tauri:", {timeout: 15_000});
   await page.reload({waitUntil: "domcontentloaded", timeout: 15_000});
   assert.equal(await page.evaluate(() => (globalThis as any).isTauri), true);
   if (observeClaudeUi) { stage = "install_passive_ui_observer"; await nativeUiTrace.install(page); stage = "open_agents"; }
-  await page.locator(".local-controlled-task").getByRole("button", {name: "Kontrollü görevi seç", exact: true}).click();
-  await expect(page.locator(".execution-selection-panel")).toHaveAttribute("data-selection-kind", "controlled");
-  checks.push("workspace_explicit_local_task_selection_reaches_native_profile_screen");
+  if (software) {
+    stage = "select_catalog_task";
+    await page.locator(".task-card").filter({hasText: softwareTitle}).click();
+    await page.getByRole("button", {name: "Profil seçimini hazırla", exact: true}).click();
+    const selection = page.locator(".execution-selection-panel");
+    await expect(selection).toHaveAttribute("data-selection-kind", "catalog");
+    await expect(selection).toContainText((softwareBoundsTask as {contract_hash: string}).contract_hash);
+    await expect(selection.getByText("Bu katalog görevi yerelde çalıştırılabilir.", {exact: true})).toBeVisible();
+    assert.ok(coordinatorRequests.includes("/api/v1/tasks"), "native_task_smoke_catalog_not_from_fixture_coordinator");
+    checks.push("workspace_catalog_from_fixture_coordinator_prepares_pinned_software_task_on_native_profile_screen");
+  } else {
+    await page.locator(".local-controlled-task").getByRole("button", {name: "Kontrollü görevi seç", exact: true}).click();
+    await expect(page.locator(".execution-selection-panel")).toHaveAttribute("data-selection-kind", "controlled");
+    checks.push("workspace_explicit_local_task_selection_reaches_native_profile_screen");
+  }
   const profiles = page.locator(".managed-profiles-panel"), sessionPanel = page.locator(".profile-session-panel");
   await expect(profiles).toHaveAttribute("aria-busy", "false");
   const taskPanel = page.locator(".task-run-panel");
@@ -443,28 +514,33 @@ try {
   }
   if (realAccount) {
     stage = "authenticated_task"; authenticatedTask = "pending";
-    console.log(`Running one approved controlled task with ${requestedModel}; no model fallback…`);
+    console.log(`Running one approved ${taskId} task with ${requestedModel}; no model fallback…`);
     inferenceAttempted = true;
     await startTaskUi(page);
     const result = (await waitTask(page, status => status.operation?.phase === "finished", 1_300_000, previousTaskRequest)).operation!;
     evidence("authenticated_task", result);
     if (result.outcome !== "passed") throw new SmokeFailure(`task_${result.error_code ?? result.outcome}`);
-    assert.equal(result.profile_id, profileId); assert.equal(result.model.requested, requestedModel);
+    assert.equal(result.profile_id, profileId); assert.equal(result.task_id, taskId); assert.equal(result.model.requested, requestedModel);
     assert.ok(result.model.observed && taskRunObservedModels[provider].includes(result.model.observed));
     assert.equal(result.cleanup, "verified"); assert.ok(result.tool_calls > 0 && result.tool_calls <= 16);
     assert.ok(result.result?.patch && result.result.patch_sha256);
-    assert.deepEqual(result.result.verifier, {passed: true, cases: controlledVerifierCases, json_cases_passed: true, sparse_cases_passed: true});
-    assert.equal(controlledVerifierCases, 34);
+    assert.deepEqual(result.result.verifier, software
+      ? {passed: true, cases: softwareVerifierCases, visible_tests_passed: true, hidden_cases_passed: true}
+      : {passed: true, cases: controlledVerifierCases, json_cases_passed: true, sparse_cases_passed: true});
+    assert.equal(expectedCases, software ? 40 : 34);
     const digest = (value: string) => createHash("sha256").update(value).digest("hex");
-    const appliedHash = digest(applyControlledPatch(controlledBaseline, result.result.patch));
+    const appliedHash = digest(applyControlledPatch(taskBaseline, result.result.patch, taskId));
     assert.equal(digest(result.result.patch), result.result.patch_sha256); assert.equal(appliedHash, result.result.candidate_sha256);
-    verified = {cases: 34, candidate_sha256: result.result.candidate_sha256, patch_sha256: result.result.patch_sha256, applied_candidate_sha256: appliedHash};
-    await expect(taskPanel.getByText("34/34 örnek geçti", {exact: false})).toBeVisible();
+    verified = {cases: expectedCases, candidate_sha256: result.result.candidate_sha256, patch_sha256: result.result.patch_sha256, applied_candidate_sha256: appliedHash};
+    await expect(taskPanel.getByText(`${expectedCases}/${expectedCases} örnek geçti`, {exact: false})).toBeVisible();
     await expect(taskPanel.locator(".task-run-hashes code").filter({hasText: result.result.candidate_sha256.slice(0, 12)})).toHaveAttribute("title", result.result.candidate_sha256);
     await expect(taskPanel.locator(".task-run-hashes code").filter({hasText: result.result.patch_sha256.slice(0, 12)})).toHaveAttribute("title", result.result.patch_sha256);
     await writeFile(withinRun(path.join(directory, "verified.patch")), result.result.patch);
     authenticatedTask = "passed";
-    checks.push(provider === "claude" ? "real_haiku_native_ui_task_passes_34_independent_cases_and_patch_roundtrip_hashes" : "real_gpt_6_luna_native_ui_task_passes_34_independent_cases_and_patch_roundtrip_hashes");
+    const model = provider === "claude" ? "haiku" : "gpt_6_luna";
+    checks.push(software
+      ? `real_${model}_native_ui_software_bounds_task_passes_visible_tests_40_hidden_cases_and_patch_roundtrip_hashes`
+      : `real_${model}_native_ui_task_passes_34_independent_cases_and_patch_roundtrip_hashes`);
     stage = "account_status_after_task";
     await sessionStatusUi(page, "authenticated");
     await verifyBinding(profileId);
@@ -500,10 +576,16 @@ try {
     else processCleanup = {method: "none", status: "unconfirmed"};
   }
   if (browser) await bounded(browser.close(), 5000, "browser_disconnect_deadline").catch(() => {});
+  coordinatorController.abort("smoke_finished");
+  if (coordinatorCompletion) {
+    const finished = await coordinatorCompletion;
+    coordinatorCleanup = finished.error instanceof CommandError ? await finished.error.cleanup : {method: "none", status: "unconfirmed"};
+  }
   process.off("SIGINT", onInterrupt); process.off("SIGTERM", onInterrupt);
-  const passed = success && processCleanup.status === "termination_reported";
+  const passed = success && processCleanup.status === "termination_reported" && (!software || coordinatorCleanup.status === "termination_reported");
   const report = {
-    schema_version: "1.0", checked_at: new Date().toISOString(), purpose: "real_native_windows_controlled_task_acceptance", provider, mode: sourceSessionRunId ? "reuse_authenticated_session" : realAccount ? "real_account" : "signed_out",
+    schema_version: "1.0", checked_at: new Date().toISOString(),
+    purpose: software ? "real_native_windows_catalog_software_task_acceptance" : "real_native_windows_controlled_task_acceptance", task_id: taskId, provider, mode: sourceSessionRunId ? "reuse_authenticated_session" : realAccount ? "real_account" : "signed_out",
     source_session_run_id: sourceSessionRunId, authentication_method: sourceSessionRunId ? "existing_isolated_session" : realAccount ? "official_user_authorization" : "not_requested",
     success: passed, status: passed ? "passed" : "failed", stage, failure_code: failureCode ?? (passed ? null : "process_cleanup_unconfirmed"), checks,
     real_native_ipc: realNativeIpc, mocked_native_ipc: false, device_challenge_seen: provider === "codex" && challengeSeen,
@@ -517,6 +599,7 @@ try {
     last_session_metadata: nativeUiTrace.report().last_session_metadata,
     ...(observeClaudeUi ? {native_ui_diagnostics: {...nativeUiTrace.report(), failure_category: uiFailureCategory}} : {}),
     build_cleanup: buildCleanup, process_cleanup: processCleanup,
+    ...(software ? {fixture_coordinator: {origin: coordinatorOrigin, mode: "fixture", catalog_reads: coordinatorRequests.length, cleanup: coordinatorCleanup}} : {}),
     isolated_store_retained: true, official_profile_volumes_retained: true,
     browser_open_requested_by_harness: false, user_browser_action_required: provider === "claude" && realAccount && !sourceSessionRunId,
     scope_limits: [
@@ -526,7 +609,8 @@ try {
         : provider === "claude"
         ? "Claude authenticated acceptance requires --real-account --show and manual user authorization via the native app browser button and masked code field; the harness neither opens nor inspects the official browser or private auth."
         : "Authenticated acceptance requires user completion of the official Codex device authorization; auth is never copied from the host.",
-      `Exactly one authenticated controlled task is requested with fixed ${requestedModel}; an unavailable model or exhausted quota stops without fallback or retry.`,
+      `Exactly one authenticated ${taskId} task is requested with fixed ${requestedModel}; an unavailable model or exhausted quota stops without fallback or retry.`,
+      ...(software ? ["The catalog is read from a local fixture-mode coordinator through a read-only test binding; the task files come from the pinned local bundle and nothing is cloned. The selected strategy is not applied."] : []),
       "Verified task cleanup is native supervisor evidence; owned application termination does not independently prove absence of every WebView descendant.",
       "Independent read-only journal and Docker absence checks cover the isolated managed profile containers and claims; separate random-owner task, exporter and verifier resources remain native supervisor evidence.",
       ...(sourceSessionRunId ? ["Independent cleanup reads cumulative public journals from the source isolated store, including earlier operations; it does not claim those operations occurred in this report run."] : []),
