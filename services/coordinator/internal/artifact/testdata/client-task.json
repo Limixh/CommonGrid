@@ -6,8 +6,8 @@
   "type": "software",
   "kind": "solve",
   "title": "İkili aramada sınır koşulları",
-  "description": "Sıralı bir dizide ilk eşleşen öğeyi bulan lower_bound fonksiyonunun sınır koşullarını düzelt.",
-  "prompt": "src/search.ts içindeki lower_bound fonksiyonunu düzelt. Boş dizi, tekrar eden değerler ve bulunamayan hedefler için mevcut testleri geçir. Test dosyalarını değiştirme.",
+  "description": "Artan sıralı bir sayı dizisinde values[i] >= target koşulunu sağlayan ilk indeksi (yoksa dizi uzunluğunu) döndüren lowerBound fonksiyonunun sınır koşullarını düzelt.",
+  "prompt": "src/search.ts içindeki lowerBound(values, target) fonksiyonunu düzelt. values artan sıralı bir sayı dizisidir ve tekrar eden değerler içerebilir. Fonksiyon values[i] >= target koşulunu sağlayan ilk i indeksini döndürür; böyle bir indeks yoksa values.length döndürür. Boş dizide sonuç 0'dır; hedef tüm değerlerden büyükse sonuç values.length'tir. Diziyi değiştirme. Kaynakta child_process, node:fs ve process.exit ifadeleri bulunmamalıdır. Yalnızca src/search.ts dosyasını düzenle, test dosyalarını değiştirme.",
   "strategies": [
     {
       "id": "invariant",
@@ -20,7 +20,7 @@
   ],
   "workspace": {
     "repo": "https://example.com/commongrid-fixtures.git",
-    "commit": "0000000000000000000000000000000000000000",
+    "commit": "7a06a3ea1880fec11033104223474b8f297cab6c",
     "entry_files": [
       "src/search.ts",
       "tests/search.test.ts"
@@ -30,17 +30,21 @@
     ]
   },
   "environment": {
-    "image": "commongrid/software-fixture@sha256:0000000000000000000000000000000000000000000000000000000000000000",
-    "cpu": 2,
-    "memory_mb": 2048,
-    "time_limit_sec": 1800
+    "image": "node@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392",
+    "cpu": 1,
+    "memory_mb": 256,
+    "time_limit_sec": 1200
   },
   "verification": {
     "profile": "software-tests",
-    "local_precheck": "npm test",
-    "server_command": "npm test",
+    "local_precheck": "node --experimental-strip-types --test tests/search.test.ts",
+    "server_command": "node --experimental-strip-types --test tests/search.test.ts",
     "output_schema": "software-diff/1.0",
-    "forbidden_patterns": []
+    "forbidden_patterns": [
+      "child_process",
+      "node:fs",
+      "process.exit"
+    ]
   },
   "depends_on": [],
   "difficulty": "medium",
@@ -61,14 +65,14 @@
       {
         "id": "edges",
         "name": "Sınır koşulları",
-        "check": "npm test -- edges",
+        "check": "node --experimental-strip-types --test --test-name-pattern=\"empty array|below every value|above every value\" tests/search.test.ts",
         "weight": 0.4,
         "critical": true
       },
       {
         "id": "duplicates",
         "name": "Tekrarlayan değerler",
-        "check": "npm test -- duplicates",
+        "check": "node --experimental-strip-types --test --test-name-pattern=duplicates tests/search.test.ts",
         "weight": 0.6,
         "critical": true
       }
@@ -86,5 +90,5 @@
     "allow_workspace_snapshot": true,
     "resume_from_latest": true
   },
-  "contract_hash": "a30d885a6025871701a9a03c324bb5782d9353911d07d8d47655ea7c01fc919a"
+  "contract_hash": "4823a3908e60b9bdeebf737c4f1d8c71a53c86981f5a4c6845877ba815f1216d"
 }

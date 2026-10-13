@@ -4,6 +4,7 @@ import { PassThrough } from "node:stream";
 import { createInterface } from "node:readline";
 import { test } from "node:test";
 import { TaskToolLimitError, prepareTaskToolReply, providerCommand, runControlledProviderTurn, type ProviderProcessFactory, type ProviderTurnOptions } from "../src/controlled-task-session.ts";
+import { controlledTaskExecDescription, controlledTaskPrompt } from "../src/controlled-task.ts";
 import { ProviderFailure } from "../src/session-protocol.ts";
 import { taskRunMaxToolCalls, type TaskRunProvider } from "../src/task-run-protocol.ts";
 
@@ -182,4 +183,19 @@ test("Claude with another model, no login, a quota result or too many tool uses 
   await assert.rejects(runControlledProviderTurn(many.options), TaskToolLimitError); assert.equal(many.events.filter(event => event.startsWith("tools:")).length, taskRunMaxToolCalls);
   const idle = turn("claude", fakeProcess(() => {}, claudeStream("claude-haiku-4-5", 0)).factory); idle.stats.task_calls = 0;
   await assert.rejects(runControlledProviderTurn(idle.options), error => error instanceof ProviderFailure && error.category === "protocol");
+});
+
+test("a task prompt replaces the default in the Claude argv and in both Codex requests; the default stays the controlled prompt", async () => {
+  const prompt = "CUSTOM TASK PROMPT\n\nTask tool contract: " + controlledTaskExecDescription;
+  assert.equal(providerCommand("claude").at(-1), controlledTaskPrompt); assert.equal(providerCommand("claude", prompt).at(-1), prompt);
+  assert.ok(!providerCommand("codex", prompt).includes(prompt));
+  const process = codex(), t = turn("codex", process.factory, {prompt});
+  await runControlledProviderTurn(t.options);
+  assert.equal(process.written.find(message => message.method === "thread/start")!.params.baseInstructions, prompt);
+  assert.equal(process.written.find(message => message.method === "turn/start")!.params.input[0].text, prompt);
+  const standard = codex(), s = turn("codex", standard.factory);
+  await runControlledProviderTurn(s.options);
+  assert.equal(standard.written.find(message => message.method === "thread/start")!.params.baseInstructions, controlledTaskPrompt);
+  const empty = turn("codex", codex().factory, {prompt: ""});
+  await assert.rejects(runControlledProviderTurn(empty.options), error => error instanceof ProviderFailure && error.category === "protocol");
 });

@@ -12,6 +12,9 @@ use tauri::{
     webview::InvokeRequest,
     WebviewWindowBuilder,
 };
+const TASK_ID: &str = CONTROLLED_TASK;
+const PATCH_HEADER: &str = "diff --git a/sum.mjs b/sum.mjs\n";
+const SOFT_PATCH: &str = "diff --git a/src/search.ts b/src/search.ts\n--- a/src/search.ts\n+++ b/src/search.ts\n@@ -1 +1 @@\n-old\n+new\n";
 const ID: &str = "11111111-1111-4111-8111-111111111111";
 const OTHER: &str = "33333333-3333-4333-8333-333333333333";
 const PROFILE: &str = "22222222-2222-4222-8222-222222222222";
@@ -211,20 +214,27 @@ const H='0123456789abcdef'.repeat(4),H2='fedcba9876543210'.repeat(4);
 const PATCH='diff --git a/sum.mjs b/sum.mjs\n--- a/sum.mjs\n+++ b/sum.mjs\n@@ -1 +1 @@\n-old\n+new\n';
 const OK={verifier:{passed:true,cases:34,json_cases_passed:true,sparse_cases_passed:true},candidate_sha256:H,patch_sha256:H2,patch:PATCH};
 const NO={verifier:{passed:false,cases:34,json_cases_passed:true,sparse_cases_passed:false},candidate_sha256:H,patch_sha256:null,patch:null};
+const SPATCH='diff --git a/src/search.ts b/src/search.ts\n--- a/src/search.ts\n+++ b/src/search.ts\n@@ -1 +1 @@\n-old\n+new\n';
+const SOK={verifier:{passed:true,cases:21,visible_tests_passed:true,hidden_cases_passed:true},candidate_sha256:H,patch_sha256:H2,patch:SPATCH};
 const P=phase=>emit({type:'progress',phase}),A=tool_calls=>emit({type:'activity',tool_calls}),M=observed=>emit({type:'model',observed});
 const R=(outcome,error_code,cleanup,result)=>emit({type:'result',outcome,error_code,cleanup,result});
 const RUN=()=>{P('preparing');P('running');M(MODEL);A(1);A(3);P('verifying');P('cleaning');};
 const CANCELLED=()=>new Promise(r=>{onCancel=r;});
 let onCancel=()=>process.exit(3),booted=false;
 async function main(){__BODY__}
-lines.on('line',line=>{if(booted){if(line==='{"type":"cancel"}')onCancel();else process.exit(3);return;}booted=true;const b=JSON.parse(line);const keys=['type','schema_version','request_id','profile_id','provider','task_id','journal_root','assets_root','profile_registry_root'];if(Object.keys(b).sort().join()!==keys.sort().join()||b.type!=='task_run_boot'||b.schema_version!=='1.0'||b.provider!==PROVIDER||b.task_id!=='controlled-sum-integers-v1'||path.basename(b.profile_registry_root)!=='managed-profiles'||path.basename(b.journal_root)!=='managed-operation-journal'||path.basename(b.assets_root)!=='assets'||path.basename(path.dirname(b.assets_root))!=='launcher')process.exit(2);main().then(()=>{lines.close();process.stdin.destroy();},()=>process.exit(4));});"##;
+lines.on('line',line=>{if(booted){if(line==='{"type":"cancel"}')onCancel();else process.exit(3);return;}booted=true;const b=JSON.parse(line);const keys=['type','schema_version','request_id','profile_id','provider','task_id','journal_root','assets_root','profile_registry_root'];if(Object.keys(b).sort().join()!==keys.sort().join()||b.type!=='task_run_boot'||b.schema_version!=='1.0'||b.provider!==PROVIDER||b.task_id!=='__TASK__'||path.basename(b.profile_registry_root)!=='managed-profiles'||path.basename(b.journal_root)!=='managed-operation-journal'||path.basename(b.assets_root)!=='assets'||path.basename(path.dirname(b.assets_root))!=='launcher')process.exit(2);main().then(()=>{lines.close();process.stdin.destroy();},()=>process.exit(4));});"##;
 fn worker(provider: &str, body: &str) -> String {
+    worker_for(provider, TASK_ID, body)
+}
+// The boot check inside the worker pins the task id the supervisor sends.
+fn worker_for(provider: &str, task: &str, body: &str) -> String {
     let model = if provider == "codex" {
         "gpt-6-luna"
     } else {
         "claude-haiku-4-5"
     };
     TEMPLATE
+        .replace("__TASK__", task)
         .replace("__PROVIDER__", provider)
         .replace("__MODEL__", model)
         .replace("__BODY__", body)
@@ -338,6 +348,51 @@ fn patch_of(extra: &str) -> Value {
     result["patch"] = json!(format!("{PATCH}{extra}"));
     result
 }
+fn soft_ok_result() -> Value {
+    json!({"verifier":{"passed":true,"cases":21,"visible_tests_passed":true,"hidden_cases_passed":true},"candidate_sha256":H,"patch_sha256":H2,"patch":SOFT_PATCH})
+}
+fn soft_no_result() -> Value {
+    json!({"verifier":{"passed":false,"cases":21,"visible_tests_passed":true,"hidden_cases_passed":false},"candidate_sha256":H,"patch_sha256":null,"patch":null})
+}
+// Mutable view of the controlled verifier a test result is known to carry.
+fn ctl(result: &mut TaskResult) -> &mut ControlledVerifier {
+    match &mut result.verifier {
+        Verifier::Controlled(verifier) => verifier,
+        Verifier::Software(_) => panic!("software verifier"),
+    }
+}
+fn go_task(
+    owner: &Arc<TaskRun>,
+    fixture: &Fixture,
+    root: &Path,
+    id: &str,
+    task: &str,
+) -> Result<Status, &'static str> {
+    owner.start(
+        Start {
+            task_id: task.into(),
+            ..start(id)
+        },
+        root.to_path_buf(),
+        fixture.directory.clone(),
+    )
+}
+// One result frame against a Cleaning-phase software task snapshot.
+fn soft_cleaning(frame: Value, accepted: bool) {
+    let (owner, _rx) = primed(Provider::Codex, Phase::Cleaning, 3, Some("gpt-6-luna"));
+    owner
+        .inner
+        .lock()
+        .unwrap()
+        .status
+        .operation
+        .as_mut()
+        .unwrap()
+        .task_id = SOFTWARE_TASK;
+    let mut result = None;
+    assert_eq!(feed(&owner, &frame, &mut result), accepted, "{frame}");
+    assert_eq!(result.is_some(), accepted, "{frame}");
+}
 
 #[test]
 fn exact_preflight_rejects_nested_large_and_caller_owned_inputs() {
@@ -394,22 +449,26 @@ fn exact_preflight_rejects_nested_large_and_caller_owned_inputs() {
 
 #[test]
 fn patch_contract_matches_the_browser_validator() {
-    assert!(valid_patch(PATCH));
-    assert!(valid_patch(&format!(
-        "{PATCH}é漢\u{2029}\u{2060}\u{202f}\u{2065}\u{206a}\t"
-    )));
+    assert!(valid_patch(PATCH, TASK_ID));
+    assert!(valid_patch(
+        &format!("{PATCH}é漢\u{2029}\u{2060}\u{202f}\u{2065}\u{206a}\t"),
+        TASK_ID
+    ));
     let exact = format!(
         "{PATCH_HEADER}{}",
         "a".repeat(MAX_PATCH_BYTES - PATCH_HEADER.len())
     );
     assert_eq!(exact.len(), MAX_PATCH_BYTES);
-    assert!(valid_patch(&exact));
-    assert!(!valid_patch(&format!("{exact}a")));
+    assert!(valid_patch(&exact, TASK_ID));
+    assert!(!valid_patch(&format!("{exact}a"), TASK_ID));
     // Bytes, not characters: a three-byte character crosses the limit.
-    assert!(!valid_patch(&format!(
-        "{PATCH_HEADER}{}漢",
-        "a".repeat(MAX_PATCH_BYTES - PATCH_HEADER.len() - 2)
-    )));
+    assert!(!valid_patch(
+        &format!(
+            "{PATCH_HEADER}{}漢",
+            "a".repeat(MAX_PATCH_BYTES - PATCH_HEADER.len() - 2)
+        ),
+        TASK_ID
+    ));
     for bad in [
         String::new(),
         "diff --git a/sum.mjs b/sum.mjs".to_string(),
@@ -431,7 +490,7 @@ fn patch_contract_matches_the_browser_validator() {
         format!("{PATCH}\u{2068}"),
         format!("{PATCH}\u{2069}"),
     ] {
-        assert!(!valid_patch(&bad), "{bad:?}");
+        assert!(!valid_patch(&bad, TASK_ID), "{bad:?}");
     }
 }
 
@@ -439,10 +498,12 @@ fn patch_contract_matches_the_browser_validator() {
 fn result_and_operation_contracts_fail_closed() {
     let good: TaskResult = serde_json::from_value(ok_result()).unwrap();
     let rejected: TaskResult = serde_json::from_value(no_result()).unwrap();
-    assert!(good.valid(Outcome::Passed) && !good.valid(Outcome::Rejected));
-    assert!(rejected.valid(Outcome::Rejected) && !rejected.valid(Outcome::Passed));
+    assert!(good.valid(Outcome::Passed, TASK_ID) && !good.valid(Outcome::Rejected, TASK_ID));
+    assert!(
+        rejected.valid(Outcome::Rejected, TASK_ID) && !rejected.valid(Outcome::Passed, TASK_ID)
+    );
     for outcome in [Outcome::Cancelled, Outcome::Failed, Outcome::NeedsReview] {
-        assert!(!good.valid(outcome) && !rejected.valid(outcome));
+        assert!(!good.valid(outcome, TASK_ID) && !rejected.valid(outcome, TASK_ID));
     }
     let mutate = |change: &dyn Fn(&mut TaskResult)| {
         let mut copy = good.clone();
@@ -456,27 +517,27 @@ fn result_and_operation_contracts_fail_closed() {
         mutate(&|r| r.patch_sha256 = None),
         mutate(&|r| r.patch = None),
         mutate(&|r| r.patch = Some("x".into())),
-        mutate(&|r| r.verifier.cases = 0),
-        mutate(&|r| r.verifier.cases = 1001),
-        mutate(&|r| r.verifier.sparse_cases_passed = false),
-        mutate(&|r| r.verifier.passed = false),
+        mutate(&|r| ctl(r).cases = 0),
+        mutate(&|r| ctl(r).cases = 1001),
+        mutate(&|r| ctl(r).sparse_cases_passed = false),
+        mutate(&|r| ctl(r).passed = false),
     ] {
-        assert!(!broken.valid(Outcome::Passed));
+        assert!(!broken.valid(Outcome::Passed, TASK_ID));
     }
-    assert!(mutate(&|r| r.verifier.cases = 1).valid(Outcome::Passed));
-    assert!(mutate(&|r| r.verifier.cases = 1000).valid(Outcome::Passed));
+    assert!(mutate(&|r| ctl(r).cases = 1).valid(Outcome::Passed, TASK_ID));
+    assert!(mutate(&|r| ctl(r).cases = 1000).valid(Outcome::Passed, TASK_ID));
     let mut inconsistent = rejected.clone();
-    inconsistent.verifier.passed = true;
-    assert!(!inconsistent.valid(Outcome::Rejected));
+    ctl(&mut inconsistent).passed = true;
+    assert!(!inconsistent.valid(Outcome::Rejected, TASK_ID));
     let mut both = rejected.clone();
-    both.verifier.sparse_cases_passed = true;
-    assert!(!both.valid(Outcome::Rejected));
+    ctl(&mut both).sparse_cases_passed = true;
+    assert!(!both.valid(Outcome::Rejected, TASK_ID));
     let mut leaked = rejected.clone();
     leaked.patch = Some(PATCH.into());
-    assert!(!leaked.valid(Outcome::Rejected));
+    assert!(!leaked.valid(Outcome::Rejected, TASK_ID));
     let mut neither = rejected.clone();
-    neither.verifier.json_cases_passed = false;
-    assert!(neither.valid(Outcome::Rejected));
+    ctl(&mut neither).json_cases_passed = false;
+    assert!(neither.valid(Outcome::Rejected, TASK_ID));
 
     // Operation-level rules.
     let mut passed = operation(Provider::Codex, Phase::Finished);
@@ -2064,6 +2125,316 @@ fn only_one_run_is_active_and_a_second_request_is_denied() {
     owner.shutdown();
     wait(&owner, Phase::Finished);
     assert!(go(&owner, &fixture, &root, OTHER).is_err());
+}
+
+#[test]
+fn task_ids_and_patch_headers_follow_the_browser_contract() {
+    assert_eq!(TASK_IDS, ["controlled-sum-integers-v1", "software-bounds"]);
+    assert_eq!(task_id("software-bounds"), Some(SOFTWARE_TASK));
+    assert_eq!(task_id("controlled-sum-integers-v1"), Some(CONTROLLED_TASK));
+    for unknown in [
+        "",
+        "Software-Bounds",
+        "software-bounds ",
+        "software-bounds-v2",
+    ] {
+        assert_eq!(task_id(unknown), None, "{unknown:?}");
+    }
+    assert_eq!(patch_header(CONTROLLED_TASK).as_deref(), Some(PATCH_HEADER));
+    assert_eq!(
+        patch_header(SOFTWARE_TASK).as_deref(),
+        Some("diff --git a/src/search.ts b/src/search.ts\n")
+    );
+    assert_eq!(patch_header("other"), None);
+    let request = |task: &str| json!({"request":{"schema_version":"1.0","request_id":ID,"profile_id":PROFILE,"task_id":task,"approved":true}});
+    assert!(preflight(&request(SOFTWARE_TASK), Shape::Start));
+    for unknown in ["software-bounds-v2", "SOFTWARE-BOUNDS", ""] {
+        assert!(!preflight(&request(unknown), Shape::Start), "{unknown:?}");
+    }
+    // Patches are bound to their own task's file.
+    assert!(valid_patch(SOFT_PATCH, SOFTWARE_TASK) && !valid_patch(SOFT_PATCH, CONTROLLED_TASK));
+    assert!(valid_patch(PATCH, CONTROLLED_TASK) && !valid_patch(PATCH, SOFTWARE_TASK));
+    assert!(!valid_patch(SOFT_PATCH, "other") && !valid_patch(PATCH, ""));
+    assert!(!valid_patch(
+        "diff --git a/search.ts b/search.ts\n+x\n",
+        SOFTWARE_TASK
+    ));
+}
+
+#[test]
+fn verifier_shapes_are_exclusive_and_bound_to_their_task() {
+    let controlled: TaskResult = serde_json::from_value(ok_result()).unwrap();
+    let controlled_no: TaskResult = serde_json::from_value(no_result()).unwrap();
+    let software: TaskResult = serde_json::from_value(soft_ok_result()).unwrap();
+    let software_no: TaskResult = serde_json::from_value(soft_no_result()).unwrap();
+    assert!(matches!(controlled.verifier, Verifier::Controlled(_)));
+    assert!(matches!(software.verifier, Verifier::Software(_)));
+    assert!(software.valid(Outcome::Passed, SOFTWARE_TASK));
+    assert!(software_no.valid(Outcome::Rejected, SOFTWARE_TASK));
+    assert!(!software.valid(Outcome::Rejected, SOFTWARE_TASK));
+    assert!(!software_no.valid(Outcome::Passed, SOFTWARE_TASK));
+    // A verifier of the other task's shape never validates, in both directions.
+    for outcome in [Outcome::Passed, Outcome::Rejected] {
+        assert!(!software.valid(outcome, CONTROLLED_TASK));
+        assert!(!software_no.valid(outcome, CONTROLLED_TASK));
+        assert!(!controlled.valid(outcome, SOFTWARE_TASK));
+        assert!(!controlled_no.valid(outcome, SOFTWARE_TASK));
+        assert!(!software.valid(outcome, "other") && !controlled.valid(outcome, "other"));
+    }
+    // The controlled patch cannot ride a software verifier, or the reverse.
+    let mut wrong_patch = software.clone();
+    wrong_patch.patch = Some(PATCH.into());
+    assert!(!wrong_patch.valid(Outcome::Passed, SOFTWARE_TASK));
+    let mut wrong_patch = controlled.clone();
+    wrong_patch.patch = Some(SOFT_PATCH.into());
+    assert!(!wrong_patch.valid(Outcome::Passed, CONTROLLED_TASK));
+    // Software rules: passed is exactly the AND of its two checks; cases 1..=1000.
+    let soft = |change: &dyn Fn(&mut SoftwareVerifier)| {
+        let mut copy = software.clone();
+        match &mut copy.verifier {
+            Verifier::Software(verifier) => change(verifier),
+            Verifier::Controlled(_) => unreachable!(),
+        }
+        copy
+    };
+    for broken in [
+        soft(&|v| v.cases = 0),
+        soft(&|v| v.cases = 1001),
+        soft(&|v| v.visible_tests_passed = false),
+        soft(&|v| v.hidden_cases_passed = false),
+        soft(&|v| v.passed = false),
+    ] {
+        assert!(!broken.valid(Outcome::Passed, SOFTWARE_TASK));
+    }
+    assert!(soft(&|v| v.cases = 1).valid(Outcome::Passed, SOFTWARE_TASK));
+    assert!(soft(&|v| v.cases = 1000).valid(Outcome::Passed, SOFTWARE_TASK));
+    let mut inconsistent = software_no.clone();
+    let mut both_failed = software_no.clone();
+    if let (Verifier::Software(a), Verifier::Software(b)) =
+        (&mut inconsistent.verifier, &mut both_failed.verifier)
+    {
+        a.passed = true;
+        b.visible_tests_passed = false;
+    }
+    assert!(!inconsistent.valid(Outcome::Rejected, SOFTWARE_TASK));
+    assert!(both_failed.valid(Outcome::Rejected, SOFTWARE_TASK));
+    // Untagged variants still deny unknown fields: no cross-shape or mixed
+    // verifier deserializes, so the wire frame is refused outright.
+    let with = |field: &str, replacement: Value| {
+        let mut base = soft_ok_result();
+        base["verifier"][field] = replacement;
+        base
+    };
+    let mixed = [
+        with("json_cases_passed", json!(true)),
+        with("extra", json!(1)),
+        {
+            let mut base = ok_result();
+            base["verifier"] = json!({"passed":true,"cases":34,"visible_tests_passed":true,"hidden_cases_passed":true,"json_cases_passed":true});
+            base
+        },
+        {
+            let mut base = ok_result();
+            base["verifier"] = json!({"passed":true,"cases":34,"json_cases_passed":true,"hidden_cases_passed":true});
+            base
+        },
+        {
+            let mut base = soft_ok_result();
+            base["verifier"] = json!({"passed":true,"cases":21,"visible_tests_passed":true});
+            base
+        },
+        {
+            let mut base = soft_ok_result();
+            base["verifier"] = json!({"passed":true,"cases":21,"visible_tests_passed":true,"hidden_cases_passed":"yes"});
+            base
+        },
+        with("cases", json!(-1)),
+        with("cases", json!(1.5)),
+        with("passed", json!(0)),
+    ];
+    for result in mixed {
+        assert!(
+            serde_json::from_value::<TaskResult>(result.clone()).is_err(),
+            "{result}"
+        );
+    }
+    // The public projection keeps exactly the browser field names.
+    assert_eq!(value(&software), soft_ok_result());
+    assert_eq!(value(&software_no), soft_no_result());
+    assert_eq!(value(&controlled), ok_result());
+    // A software result is accepted for a software operation only.
+    soft_cleaning(
+        result_frame("passed", json!(null), "verified", soft_ok_result()),
+        true,
+    );
+    soft_cleaning(
+        result_frame(
+            "rejected",
+            json!("candidate_rejected"),
+            "verified",
+            soft_no_result(),
+        ),
+        true,
+    );
+    for frame in [
+        result_frame("passed", json!(null), "verified", ok_result()),
+        result_frame(
+            "rejected",
+            json!("candidate_rejected"),
+            "verified",
+            no_result(),
+        ),
+        // The controlled patch header on a software verifier.
+        result_frame("passed", json!(null), "verified", {
+            let mut r = soft_ok_result();
+            r["patch"] = json!(PATCH);
+            r
+        }),
+        result_frame("passed", json!(null), "verified", {
+            let mut r = soft_ok_result();
+            r["verifier"]["hidden_cases_passed"] = json!(false);
+            r
+        }),
+    ] {
+        soft_cleaning(frame, false);
+    }
+    // Conversely a software result never fits the controlled task.
+    for frame in [
+        result_frame("passed", json!(null), "verified", soft_ok_result()),
+        result_frame(
+            "rejected",
+            json!("candidate_rejected"),
+            "verified",
+            soft_no_result(),
+        ),
+    ] {
+        codex_cleaning(frame, false);
+    }
+}
+
+#[test]
+fn software_task_boots_with_its_id_and_publishes_the_software_verifier() {
+    let fixture = Fixture::new();
+    fixture.registry("codex");
+    let body = "RUN();R('passed',null,'verified',SOK);";
+    let root = fixture.resources(&worker_for("codex", SOFTWARE_TASK, body));
+    let owner = Owner::new();
+    let admitted = go_task(&owner, &fixture, &root, ID, SOFTWARE_TASK).unwrap();
+    assert_eq!(
+        value(&admitted)["operation"]["task_id"],
+        json!("software-bounds")
+    );
+    // The worker's boot check exits on any other task id, so reaching a
+    // passed result proves the boot message carried the operation's task.
+    let end = wait(&owner, Phase::Finished);
+    assert_eq!(
+        value(&owner.status()),
+        json!({"schema_version":"1.0","availability":"available","operation":{"request_id":ID,"profile_id":PROFILE,"provider":"codex","task_id":"software-bounds","revision":8,"phase":"finished","outcome":"passed","error_code":null,"cleanup":"verified","tool_calls":3,"model":{"requested":"gpt-6-luna","observed":"gpt-6-luna"},"result":{"verifier":{"passed":true,"cases":21,"visible_tests_passed":true,"hidden_cases_passed":true},"candidate_sha256":H,"patch_sha256":H2,"patch":SOFT_PATCH}}})
+    );
+    assert!(valid_operation(&end) && end.task_id == SOFTWARE_TASK);
+    // The controlled worker contract is unchanged on the same fixture.
+    drop(owner);
+    fixture.swap(&root, &worker("codex", PASS));
+    let owner = Owner::new();
+    go(&owner, &fixture, &root, ID).unwrap();
+    let controlled = wait(&owner, Phase::Finished);
+    assert_eq!(
+        (controlled.outcome, controlled.task_id),
+        (Some(Outcome::Passed), CONTROLLED_TASK)
+    );
+    drop(owner);
+    // A worker built for the controlled task refuses a software boot.
+    let mismatch = finished_task(&fixture, &root, SOFTWARE_TASK, &worker("codex", PASS));
+    assert_eq!(
+        (mismatch.outcome, mismatch.error_code.as_deref()),
+        (Some(Outcome::NeedsReview), Some("worker_failed"))
+    );
+    // A software rejection projects no patch.
+    let rejected = finished_task(
+        &fixture,
+        &root,
+        SOFTWARE_TASK,
+        &worker_for("codex", SOFTWARE_TASK, "P('preparing');P('running');M(MODEL);A(2);P('verifying');P('cleaning');R('rejected','candidate_rejected','verified',{verifier:{passed:false,cases:21,visible_tests_passed:true,hidden_cases_passed:false},candidate_sha256:H,patch_sha256:null,patch:null});"),
+    );
+    assert_eq!(rejected.outcome, Some(Outcome::Rejected));
+    assert!(valid_operation(&rejected) && rejected.result.unwrap().patch.is_none());
+    // A controlled-shaped verifier from a software run is a protocol violation.
+    let crossed = finished_task(
+        &fixture,
+        &root,
+        SOFTWARE_TASK,
+        &worker_for(
+            "codex",
+            SOFTWARE_TASK,
+            "RUN();R('passed',null,'verified',OK);await sleep(60000);",
+        ),
+    );
+    assert_eq!(
+        (
+            crossed.outcome,
+            crossed.cleanup,
+            crossed.error_code.as_deref()
+        ),
+        (
+            Some(Outcome::NeedsReview),
+            Cleanup::Unknown,
+            Some("worker_failed")
+        )
+    );
+    assert!(crossed.result.is_none());
+}
+// Runs a worker source for one task to completion on a fresh owner.
+fn finished_task(fixture: &Fixture, root: &Path, task: &str, source: &str) -> Operation {
+    fixture.swap(root, source);
+    let owner = Owner::new();
+    go_task(&owner, fixture, root, ID, task).unwrap();
+    wait(&owner, Phase::Finished)
+}
+
+#[test]
+fn unknown_tasks_and_task_changes_on_a_request_are_denied() {
+    let fixture = Fixture::new();
+    fixture.registry("codex");
+    let absent = fixture.directory.join("absent");
+    let owner = Owner::new();
+    for unknown in ["software-bounds-v2", "", "Software-Bounds", "other-task"] {
+        assert!(
+            go_task(&owner, &fixture, &absent, ID, unknown).is_err(),
+            "{unknown:?}"
+        );
+    }
+    assert!(owner.status().operation.is_none() && !owner.active());
+    assert!(!fixture.home().exists());
+    // The same request id with a different task is not the same request.
+    let root = fixture.resources(&worker(
+        "codex",
+        "P('preparing');P('running');await CANCELLED();P('cleaning');R('cancelled','cancelled','verified',null);",
+    ));
+    let first = go_task(&owner, &fixture, &root, ID, SOFTWARE_TASK).unwrap();
+    let before = value(&owner.status());
+    assert_eq!(
+        value(&first)["operation"]["task_id"],
+        json!("software-bounds")
+    );
+    assert!(go_task(&owner, &fixture, &root, ID, CONTROLLED_TASK).is_err());
+    assert!(go_task(&owner, &fixture, &root, ID, "other-task").is_err());
+    assert_eq!(current(&owner).task_id, SOFTWARE_TASK);
+    assert_eq!(value(&owner.status())["operation"]["request_id"], json!(ID));
+    // Repeating the identical request stays idempotent.
+    assert!(go_task(&owner, &fixture, &root, ID, SOFTWARE_TASK).is_ok());
+    assert_eq!(
+        value(&owner.status())["operation"]["task_id"],
+        before["operation"]["task_id"]
+    );
+    owner.shutdown();
+    wait(&owner, Phase::Finished);
+    // The reverse direction is denied as well, on a finished operation.
+    let other = Owner::new();
+    fixture.swap(&root, &worker("codex", PASS));
+    go_task(&other, &fixture, &root, OTHER, CONTROLLED_TASK).unwrap();
+    wait(&other, Phase::Finished);
+    assert!(go_task(&other, &fixture, &root, OTHER, SOFTWARE_TASK).is_err());
+    assert_eq!(current(&other).task_id, CONTROLLED_TASK);
 }
 
 fn universal_worker() -> String {

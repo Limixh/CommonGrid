@@ -2,7 +2,8 @@ import { test, expect, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import type { ManagedProfilesStatus } from "../../packages/agent-adapters/src/managed-profile-protocol";
-import { taskRunErrors, type TaskRunOperation, type TaskRunStatus } from "../../packages/agent-adapters/src/task-run-protocol";
+import { taskRunCatalogPins, taskRunErrors, type TaskRunOperation, type TaskRunStatus } from "../../packages/agent-adapters/src/task-run-protocol";
+import { contractHash } from "../../packages/task-schema/src/index";
 
 const profileId = "a0000000-0000-4000-8000-000000000001";
 const secondId = "a0000000-0000-4000-8000-000000000002";
@@ -10,6 +11,8 @@ const runId = "c0000000-0000-4000-8000-000000000001";
 const taskId = "controlled-sum-integers-v1";
 const catalogFixture = JSON.parse(readFileSync(path.join(process.cwd(), "services/coordinator/internal/catalog/catalog.json"), "utf8"));
 const softwareTask = catalogFixture.tasks.find((task: {id: string}) => task.id === "software-bounds");
+const leanTask = catalogFixture.tasks.find((task: {id: string}) => task.id === "lean-add-comm");
+const softwareId = "software-bounds";
 const candidateHash = "0123456789abcdef".repeat(4);
 const patchHash = "fedcba9876543210".repeat(4);
 const empty: TaskRunStatus = {schema_version: "1.0", availability: "available", operation: null};
@@ -35,6 +38,19 @@ const passed = envelope(operation({
 const rejected = envelope(operation({
   revision: 9, phase: "finished", outcome: "rejected", error_code: "candidate_rejected", cleanup: "verified", tool_calls: 7,
   result: {verifier: {passed: false, cases: 34, json_cases_passed: true, sparse_cases_passed: false}, candidate_sha256: candidateHash, patch_sha256: null, patch: null},
+}));
+const softwarePatch = [
+  "diff --git a/src/search.ts b/src/search.ts", "--- a/src/search.ts", "+++ b/src/search.ts", "@@ -2,3 +2,3 @@", " export function lowerBound(values: number[], target: number): number {",
+  "-  let hi = values.length - 1;", "+  let hi = values.length;", "+  // <b onmouseover=\"window.__pwned = true\">", " }", "",
+].join("\n");
+const softwareOperation = (changes: Partial<TaskRunOperation> = {}) => operation({task_id: softwareId, ...changes});
+const softwarePassed = envelope(softwareOperation({
+  revision: 9, phase: "finished", outcome: "passed", cleanup: "verified", tool_calls: 6,
+  result: {verifier: {passed: true, cases: 40, visible_tests_passed: true, hidden_cases_passed: true}, candidate_sha256: candidateHash, patch_sha256: patchHash, patch: softwarePatch},
+}));
+const softwareRejected = (visible: boolean, hidden: boolean) => envelope(softwareOperation({
+  revision: 9, phase: "finished", outcome: "rejected", error_code: "candidate_rejected", cleanup: "verified", tool_calls: 6,
+  result: {verifier: {passed: false, cases: 40, visible_tests_passed: visible, hidden_cases_passed: hidden}, candidate_sha256: candidateHash, patch_sha256: null, patch: null},
 }));
 const failed = (error_code: string) => envelope(operation({revision: 9, phase: "finished", outcome: "failed", error_code: error_code as never, cleanup: "verified", tool_calls: 0, model: {requested: "gpt-6-luna", observed: null}}));
 const needsReview = envelope(operation({revision: 9, phase: "finished", outcome: "needs_review", error_code: "cleanup_failed", cleanup: "unknown"}));
@@ -362,14 +378,16 @@ async function workspace(page: Page) {
   await page.getByRole("navigation").getByRole("button", {name: /^Çalışma alanı/}).click();
   await expect(page.locator(".task-card").first()).toBeVisible();
 }
-async function prepareSoftware(page: Page, strategy = "boundary-first") {
-  await page.locator(".task-card").filter({hasText: softwareTask.title}).click();
+async function prepareCatalog(page: Page, task: {title: string}, strategy: string) {
+  await page.locator(".task-card").filter({hasText: task.title}).click();
   await page.locator("#strategy").selectOption(strategy);
   await page.getByRole("button", {name: "Profil seçimini hazırla", exact: true}).click();
   const selection = page.getByTestId("execution-selection");
   await expect(selection).toHaveAttribute("data-selection-kind", "catalog");
   return selection;
 }
+const prepareSoftware = (page: Page, strategy = "boundary-first") => prepareCatalog(page, softwareTask, strategy);
+const prepareLean = (page: Page, strategy = "induction") => prepareCatalog(page, leanTask, strategy);
 
 test("workspace's explicit controlled entry opens the selected profile and retains the strict native start request", async ({page}) => {
   await freezeClock(page); await mockNative(page); await page.goto("/");
@@ -390,8 +408,8 @@ test("catalog preparation captures contract and strategy, blocks execution and e
   await mockNative(page); await page.goto("/");
   let writes = 0;
   page.on("request", request => { if (request.method() === "POST" && new URL(request.url()).pathname.startsWith("/api/v1/")) writes++; });
-  const selection = await prepareSoftware(page);
-  for (const value of [softwareTask.title, softwareTask.id, softwareTask.type, softwareTask.kind, String(softwareTask.task_version), softwareTask.contract_hash, softwareTask.workspace.commit, "boundary-first"])
+  const selection = await prepareLean(page);
+  for (const value of [leanTask.title, leanTask.id, leanTask.type, leanTask.kind, String(leanTask.task_version), leanTask.contract_hash, leanTask.workspace.commit, "induction"])
     await expect(selection).toContainText(value);
   await expect(selection).toContainText("Bu katalog görevi henüz çalıştırılamıyor.");
   const panel = page.locator(".task-run-panel");
@@ -430,7 +448,7 @@ test("a prepared catalog snapshot survives navigation, filtering and refresh unt
 test("changing the prepared task or selected profile consumes approval and requires an explicit controlled switch", async ({page}) => {
   await mockNative(page); const panel = await open(page);
   await approve(panel); await expect(start(panel)).toBeEnabled();
-  await workspace(page); const selection = await prepareSoftware(page);
+  await workspace(page); const selection = await prepareLean(page);
   await expect(start(panel)).toHaveCount(0);
   await selection.getByRole("button", {name: "Kontrollü görevi seç", exact: true}).click();
   await expect(selection).toHaveAttribute("data-selection-kind", "controlled");
@@ -448,21 +466,182 @@ test("changing the prepared task or selected profile consumes approval and requi
 
 test("catalog selection keeps an active controlled run and its eventual result identified as the actual local task", async ({page}) => {
   await freezeClock(page); await mockNative(page, running); await page.goto("/");
-  const selection = await prepareSoftware(page);
+  const selection = await prepareLean(page);
   const panel = page.locator(".task-run-panel");
   await expect(panel).toContainText("Ajan çalışıyor");
   const progress = panel.locator(".task-run-progress");
   await expect(progress).toContainText(taskId);
-  await expect(progress).not.toContainText(softwareTask.id);
+  await expect(progress).toContainText("sum.mjs");
+  await expect(progress).not.toContainText(leanTask.id);
   await expect(start(panel)).toHaveCount(0);
   await expect(cancel(panel)).toBeEnabled();
   await setValue(page, passed); await refresh(page);
   const result = panel.locator(".task-run-result");
   await expect(result).toContainText("Görev doğrulandı");
   await expect(result).toContainText(taskId);
-  await expect(result).not.toContainText(softwareTask.id);
+  await expect(result).not.toContainText(leanTask.id);
   await expect(panel.getByTestId("task-run-diff")).toBeVisible();
-  await expect(selection).toContainText(softwareTask.id);
+  await expect(selection).toContainText(leanTask.id);
   await expect(panel.locator(".task-run-approval")).toHaveCount(0);
   expect((await calls(page)).some(call => call.command === "local_task_run_start" || call.command === "local_task_run_cancel")).toBe(false);
+});
+
+// Runnable catalog task: software-bounds from a pinned local source bundle.
+// Tests marked "(pin)" need the catalog fixture to equal taskRunCatalogPins["software-bounds"].
+const softwarePin = taskRunCatalogPins[softwareId]!;
+async function mockChangedSoftwareContract(page: Page) {
+  const changed: {hash: string | null} = {hash: null};
+  await page.route("**/api/v1/tasks**", async route => {
+    const response = await route.fetch(), body = await response.json();
+    body.items = await Promise.all(body.items.map(async (item: Record<string, any>) => {
+      if (item.id !== softwareId) return item;
+      const edited = {...item, description: item.description + " (sözleşmesi değişti)"};
+      edited.contract_hash = changed.hash = await contractHash(edited as never);
+      return edited;
+    }));
+    await route.fulfill({response, json: body});
+  });
+  return changed;
+}
+
+test("(pin) the catalog fixture's software-bounds contract equals the contract the runner pins", () => {
+  expect(softwareTask.task_version).toBe(softwarePin.task_version);
+  expect(softwareTask.contract_hash).toBe(softwarePin.contract_hash);
+});
+
+test("(pin) software-bounds prepared from the catalog explains the local bundle, needs approval and starts with the strict request", async ({page}) => {
+  await freezeClock(page); await mockNative(page); await page.goto("/");
+  const selection = await prepareSoftware(page);
+  for (const value of [softwareTask.title, softwareTask.id, softwareTask.contract_hash, "boundary-first", "Bu katalog görevi yerelde çalıştırılabilir.",
+    "depo klonlanmadan sabitlenmiş yerel bir kaynak paketinden", "Seçtiğin yaklaşım bu çalıştırmaya henüz uygulanmaz"])
+    await expect(selection).toContainText(value);
+  await expect(selection).not.toContainText("henüz çalıştırılamıyor");
+  const panel = page.locator(".task-run-panel");
+  await expect(panel).toHaveAttribute("aria-busy", "false");
+  await expect(panel.locator(".task-run-card h4")).toHaveText("Yerel kaynak paketi görevi: src/search.ts");
+  await expect(panel.locator(".task-run-card")).toContainText("lowerBound");
+  for (const text of ["Görev çalışma alanında ağ erişimi yok", "En fazla 16 araç çağrısı", "20 dakika süre sınırı", "Yalnız src/search.ts değiştirilebilir", "gizli örnekleri geçmeli", "Yalnız doğrulanmış diff gösterilir"])
+    await expect(panel.locator(".task-run-card")).toContainText(text);
+  await expect(panel.locator(".task-run-card")).not.toContainText("34 örnekli");
+  await expect(panel.locator(".task-run-card code")).toHaveText("gpt-6-luna");
+  await expect(panel.getByRole("checkbox")).not.toBeChecked(); await expect(start(panel)).toBeDisabled();
+  await approve(panel); await expect(start(panel)).toBeEnabled();
+  await page.getByRole("button", {name: "Change language", exact: true}).click();
+  await expect(selection).toContainText("This catalog task can run locally.");
+  await expect(selection).toContainText("pinned local source bundle without cloning a repository");
+  await expect(selection).toContainText("strategy you selected is not applied to this run yet");
+  await expect(panel.locator(".task-run-card h4")).toHaveText("Local source bundle task: src/search.ts");
+  await expect(panel.getByRole("checkbox")).toBeChecked();
+  await panel.getByRole("button", {name: "Start", exact: true}).click();
+  await expect(panel).toContainText("Starting task…");
+  const starts = (await calls(page)).filter(call => call.command === "local_task_run_start");
+  expect(starts).toHaveLength(1);
+  expect(starts[0].args).toEqual({request: {schema_version: "1.0", request_id: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/), profile_id: profileId, task_id: softwareId, approved: true}});
+  expect(Object.keys(starts[0].args.request).sort()).toEqual(["approved", "profile_id", "request_id", "schema_version", "task_id"]);
+  const progress = panel.locator(".task-run-progress");
+  await expect(progress).toContainText(softwareId); await expect(progress).toContainText("src/search.ts"); await expect(progress).not.toContainText("sum.mjs");
+  await expect(panel.getByRole("checkbox")).not.toBeChecked(); await expect(panel.getByRole("button", {name: "Start", exact: true})).toBeDisabled();
+});
+
+test("(pin) switching from the prepared software task back to the controlled task consumes approval and changes the start request", async ({page}) => {
+  await freezeClock(page); await mockNative(page); await page.goto("/");
+  const selection = await prepareSoftware(page);
+  const panel = page.locator(".task-run-panel");
+  await expect(panel).toHaveAttribute("aria-busy", "false");
+  await approve(panel); await expect(start(panel)).toBeEnabled();
+  await selection.getByRole("button", {name: "Kontrollü görevi seç", exact: true}).click();
+  await expect(selection).toHaveAttribute("data-selection-kind", "controlled");
+  await expect(panel.getByRole("checkbox")).not.toBeChecked(); await expect(start(panel)).toBeDisabled();
+  await approve(panel); await start(panel).click();
+  expect((await calls(page)).filter(call => call.command === "local_task_run_start").map(call => call.args.request.task_id)).toEqual([taskId]);
+});
+
+test("a catalog software task whose contract hash differs from the runner's pin stays unsupported and cannot start", async ({page}) => {
+  await mockNative(page); const changed = await mockChangedSoftwareContract(page); await page.goto("/");
+  const selection = await prepareSoftware(page);
+  expect(changed.hash).not.toBeNull(); expect(changed.hash).not.toBe(softwarePin.contract_hash);
+  await expect(selection).toContainText(changed.hash!);
+  await expect(selection).toContainText("Bu katalog görevi henüz çalıştırılamıyor.");
+  await expect(selection).not.toContainText("yerelde çalıştırılabilir");
+  const panel = page.locator(".task-run-panel");
+  await expect(panel).toHaveAttribute("aria-busy", "false");
+  await expect(panel.locator(".task-run-approval")).toHaveCount(0); await expect(start(panel)).toHaveCount(0);
+  await page.getByRole("button", {name: "Change language", exact: true}).click();
+  await expect(selection).toContainText("This catalog task cannot run yet.");
+  await expect(panel.getByRole("button", {name: "Start", exact: true})).toHaveCount(0);
+  expect((await calls(page)).some(call => call.command === "local_task_run_start")).toBe(false);
+});
+
+test("a software run that passed shows the verifier checks, hashes and the src/search.ts diff as plain text lines", async ({page}) => {
+  await freezeClock(page); await mockNative(page, softwarePassed); const panel = await open(page);
+  const result = panel.locator(".task-run-result");
+  await expect(result).toContainText("Görev doğrulandı");
+  await expect(result).toContainText(`${softwareId} · src/search.ts`); await expect(result).not.toContainText("sum.mjs");
+  await expect(result).toContainText("40/40 örnek geçti"); await expect(result).toContainText("görünür testler: geçti"); await expect(result).toContainText("gizli örnekler: geçti");
+  await expect(panel.locator(`code[title="${candidateHash}"]`)).toHaveText(candidateHash.slice(0, 12) + "…");
+  await expect(panel.locator(`code[title="${patchHash}"]`)).toHaveText(patchHash.slice(0, 12) + "…");
+  const diff = panel.getByTestId("task-run-diff");
+  await expect(diff.locator(".task-run-diff-meta")).toHaveText(["diff --git a/src/search.ts b/src/search.ts", "--- a/src/search.ts", "+++ b/src/search.ts"]);
+  await expect(diff.locator(".task-run-diff-hunk")).toHaveText(["@@ -2,3 +2,3 @@"]);
+  await expect(diff.locator(".task-run-diff-del")).toHaveText(["-  let hi = values.length - 1;"]);
+  await expect(diff.locator(".task-run-diff-add")).toHaveText(["+  let hi = values.length;", "+  // <b onmouseover=\"window.__pwned = true\">"]);
+  await expect(diff.locator("b")).toHaveCount(0);
+  expect(await page.evaluate(() => (window as MockWindow).__pwned)).toBeUndefined();
+  await panel.getByRole("button", {name: "Diff'i kopyala", exact: true}).click();
+  expect(await page.evaluate(() => (window as MockWindow).__taskMock.copied)).toBe(softwarePatch);
+  await page.getByRole("button", {name: "Change language", exact: true}).click();
+  await expect(result).toContainText("40/40 cases passed"); await expect(result).toContainText("visible tests: passed"); await expect(result).toContainText("hidden cases: passed");
+});
+
+for (const [name, visible, hidden, tr, en] of [
+  ["hidden cases", true, false, ["görünür testler: geçti", "gizli örnekler: kaldı"], ["visible tests: passed", "hidden cases: failed"]],
+  ["visible tests", false, true, ["görünür testler: kaldı", "gizli örnekler: geçti"], ["visible tests: failed", "hidden cases: passed"]],
+] as const) {
+  test(`a software run rejected by the ${name} names the failed check and shows no diff`, async ({page}) => {
+    await freezeClock(page); await mockNative(page, softwareRejected(visible, hidden)); const panel = await open(page);
+    const result = panel.locator(".task-run-result");
+    await expect(result).toContainText("reddedildi"); await expect(result).toContainText(`${softwareId} · src/search.ts`);
+    await expect(result).toContainText("40 örnekli doğrulayıcı adayı reddetti");
+    for (const text of tr) await expect(result).toContainText(text);
+    await expect(result).not.toContainText("JSON örnekleri"); await expect(result).not.toContainText("seyrek");
+    await expect(panel.getByTestId("task-run-diff")).toHaveCount(0);
+    await expect(panel.getByRole("button", {name: "Diff'i kopyala", exact: true})).toHaveCount(0);
+    await expect(panel.locator("code[title]")).toHaveCount(0);
+    await page.getByRole("button", {name: "Change language", exact: true}).click();
+    await expect(result).toContainText("The 40-case verifier rejected the candidate");
+    for (const text of en) await expect(result).toContainText(text);
+  });
+}
+
+test("a software result for a mismatched shape is an invalid observation, not a rendered verifier", async ({page}) => {
+  await freezeClock(page); await mockNative(page, empty); const panel = await open(page);
+  const crossed = envelope(softwareOperation({
+    revision: 9, phase: "finished", outcome: "passed", cleanup: "verified", tool_calls: 6,
+    result: {verifier: {passed: true, cases: 34, json_cases_passed: true, sparse_cases_passed: true}, candidate_sha256: candidateHash, patch_sha256: patchHash, patch},
+  }));
+  await setValue(page, crossed); await refresh(page);
+  await expect(panel.getByRole("alert")).toContainText("doğrulanamadı");
+  await expect(panel.getByTestId("task-run-diff")).toHaveCount(0); await expect(panel).not.toContainText("Görev doğrulandı");
+});
+
+test("history mode labels the task that is really running or last ran, not the selected catalog task", async ({page}) => {
+  await freezeClock(page); await mockNative(page, envelope(softwareOperation({revision: 4, tool_calls: 3}))); await page.goto("/");
+  await prepareLean(page);
+  const panel = page.locator(".task-run-panel");
+  await expect(panel).toHaveAttribute("aria-busy", "false");
+  await expect(panel.locator(".task-run-approval")).toHaveCount(0); await expect(start(panel)).toHaveCount(0);
+  await expect(panel.getByRole("heading", {level: 3})).toHaveText("Yerel görev durumu");
+  const progress = panel.locator(".task-run-progress");
+  await expect(progress).toContainText("Çalışan görev"); await expect(progress).toContainText(`${softwareId} · src/search.ts`);
+  await expect(progress).not.toContainText("sum.mjs"); await expect(progress).not.toContainText(leanTask.id);
+  await expect(cancel(panel)).toBeEnabled();
+  await setValue(page, softwarePassed); await refresh(page);
+  const result = panel.locator(".task-run-result");
+  await expect(result).toContainText("Son görev"); await expect(result).toContainText(`${softwareId} · src/search.ts`);
+  await expect(result).not.toContainText(leanTask.id);
+  await expect(panel.getByTestId("task-run-diff").locator(".task-run-diff-meta").first()).toHaveText("diff --git a/src/search.ts b/src/search.ts");
+  await setValue(page, envelope({...(passed.operation as TaskRunOperation), request_id: "c0000000-0000-4000-8000-000000000002"})); await refresh(page);
+  await expect(result).toContainText(`${taskId} · sum.mjs`); await expect(result).not.toContainText("src/search.ts");
+  await expect(result).toContainText("34/34 örnek geçti"); await expect(result).toContainText("JSON örnekleri: geçti");
+  await expect(panel.getByTestId("task-run-diff").locator(".task-run-diff-meta").first()).toHaveText("diff --git a/sum.mjs b/sum.mjs");
 });

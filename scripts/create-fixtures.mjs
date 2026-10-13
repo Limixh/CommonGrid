@@ -1,7 +1,11 @@
-// Explicitly non-executable fixtures for catalog / contract parity tests.
+// Catalog / contract fixtures. The lean tasks and the plan task stay
+// non-executable placeholders. software-bounds is the one executable contract:
+// its workspace.commit identifies the pinned local bundle in
+// packages/agent-adapters/task-assets/software-bounds (see ADR 0021).
 import { mkdir, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { canonicalize } from "json-canonicalize";
+import { loadSoftwareBundle } from "./software-bundle.mjs";
 const root = new URL("../", import.meta.url);
 const base = {
   schema_version: "1.0",
@@ -156,7 +160,38 @@ Object.assign(plan, {
   },
   progress: { milestones: [] },
 });
-const tasks = [lean, base, plan].map((task) => ({
+// software-bounds runs from a pinned local bundle, not from a clone: repo is
+// only the placeholder URL the schema requires and nothing is fetched from it.
+// The shared base object is not mutated, so the Lean contracts keep their hashes.
+const software = structuredClone(base);
+const bundle = await loadSoftwareBundle();
+const testCommand = "node --experimental-strip-types --test tests/search.test.ts";
+Object.assign(software, {
+  description:
+    "Artan sıralı bir sayı dizisinde values[i] >= target koşulunu sağlayan ilk indeksi (yoksa dizi uzunluğunu) döndüren lowerBound fonksiyonunun sınır koşullarını düzelt.",
+  prompt:
+    "src/search.ts içindeki lowerBound(values, target) fonksiyonunu düzelt. values artan sıralı bir sayı dizisidir ve tekrar eden değerler içerebilir. Fonksiyon values[i] >= target koşulunu sağlayan ilk i indeksini döndürür; böyle bir indeks yoksa values.length döndürür. Boş dizide sonuç 0'dır; hedef tüm değerlerden büyükse sonuç values.length'tir. Diziyi değiştirme. Kaynakta child_process, node:fs ve process.exit ifadeleri bulunmamalıdır. Yalnızca src/search.ts dosyasını düzenle, test dosyalarını değiştirme.",
+  workspace: { ...base.workspace, commit: bundle.ids.commit },
+  environment: {
+    image: "node@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392",
+    cpu: 1,
+    memory_mb: 256,
+    time_limit_sec: 1200,
+  },
+  verification: {
+    ...base.verification,
+    local_precheck: testCommand,
+    server_command: testCommand,
+    forbidden_patterns: ["child_process", "node:fs", "process.exit"],
+  },
+  progress: {
+    milestones: [
+      { ...base.progress.milestones[0], check: `node --experimental-strip-types --test --test-name-pattern="empty array|below every value|above every value" tests/search.test.ts` },
+      { ...base.progress.milestones[1], check: "node --experimental-strip-types --test --test-name-pattern=duplicates tests/search.test.ts" },
+    ],
+  },
+});
+const tasks = [lean, software, plan].map((task) => ({
   ...task,
   contract_hash: createHash("sha256").update(canonicalize(task)).digest("hex"),
 }));
@@ -190,4 +225,4 @@ for (const relative of [
   await mkdir(new URL("./", url), { recursive: true });
   await writeFile(url, json);
 }
-console.log("3 non-executable, hashed contract fixtures written.");
+console.log(`3 hashed contract fixtures written; software-bounds commit ${bundle.ids.commit}.`);

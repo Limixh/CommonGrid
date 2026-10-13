@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  acceptTaskRunUpdate, taskRunObservedModels, taskRunRequestedModels, unavailableTaskRun, validateTaskRunCancel,
+  acceptTaskRunUpdate, taskRunCatalogPins, taskRunControlledTaskId, taskRunObservedModels, taskRunPatchHeader, taskRunPatchPaths,
+  taskRunRequestedModels, taskRunTaskIds, unavailableTaskRun, validTaskRunPatch, validateTaskRunCancel, validateTaskRunResult,
   validateTaskRunStart, validateTaskRunStatus, type TaskRunOperation, type TaskRunStatus,
 } from "../src/task-run-protocol.ts";
 import { claudeFunctionalTestModel, claudeFunctionalTestObservedModels, codexFunctionalTestModel } from "../testing/functional-test-models.ts";
@@ -92,4 +93,74 @@ test("updates for one request only move forward", () => {
   const done = passed();
   assert.throws(() => acceptTaskRunUpdate(done, passed({revision: 10})), /stale/);
   assert.equal(acceptTaskRunUpdate(done, status({request_id: "30000000-0000-4000-8000-000000000003"})).operation?.phase, "starting");
+});
+
+const softwarePatch = "diff --git a/src/search.ts b/src/search.ts\n--- a/src/search.ts\n+++ b/src/search.ts\n@@ -1 +1 @@\n-  let hi = values.length - 1;\n+  let hi = values.length;\n";
+const softwareVerified = {verifier: {passed: true, cases: 40, visible_tests_passed: true, hidden_cases_passed: true}, candidate_sha256: hash, patch_sha256: patchHash, patch: softwarePatch};
+const softwareRejected = {verifier: {passed: false, cases: 40, visible_tests_passed: true, hidden_cases_passed: false}, candidate_sha256: hash, patch_sha256: null, patch: null};
+const software = (changes: Partial<TaskRunOperation> = {}) => passed({task_id: "software-bounds", result: softwareVerified, ...changes});
+
+test("each task has its own patch path, header and verifier checks", () => {
+  assert.deepEqual({...taskRunPatchPaths}, {"controlled-sum-integers-v1": "sum.mjs", "software-bounds": "src/search.ts"});
+  assert.equal(taskRunPatchHeader("software-bounds"), "diff --git a/src/search.ts b/src/search.ts\n");
+  assert.deepEqual(taskRunTaskIds.map(id => taskRunControlledTaskId === id), [true, false]);
+  assert.ok(validTaskRunPatch(softwarePatch, "software-bounds") && !validTaskRunPatch(softwarePatch, "controlled-sum-integers-v1"));
+  assert.ok(validTaskRunPatch(patch) && !validTaskRunPatch(patch, "software-bounds"));
+  assert.ok(taskRunCatalogPins["software-bounds"] && /^[0-9a-f]{64}$/.test(taskRunCatalogPins["software-bounds"].contract_hash));
+  assert.equal(taskRunCatalogPins["controlled-sum-integers-v1"], undefined);
+  assert.deepEqual(validateTaskRunStart({schema_version: "1.0", request_id: request, profile_id: profile, task_id: "software-bounds", approved: true}).task_id, "software-bounds");
+});
+
+test("software results are accepted for passed and rejected outcomes", () => {
+  assert.equal(validateTaskRunStatus(software()).operation?.result?.patch, softwarePatch);
+  assert.deepEqual(validateTaskRunResult(softwareVerified, "passed", "software-bounds"), softwareVerified);
+  const rejected = software({outcome: "rejected", error_code: "candidate_rejected", result: softwareRejected});
+  assert.deepEqual(validateTaskRunStatus(rejected).operation?.result, softwareRejected);
+  assert.ok(validateTaskRunStatus(software({outcome: "rejected", error_code: "candidate_rejected", result: {...softwareRejected, verifier: {passed: false, cases: 40, visible_tests_passed: false, hidden_cases_passed: true}}})));
+  for (const value of [
+    software({result: {...softwareVerified, verifier: {...softwareVerified.verifier, passed: false}}}),
+    software({result: {...softwareVerified, verifier: {...softwareVerified.verifier, hidden_cases_passed: false}}}),
+    software({result: {...softwareVerified, verifier: {...softwareVerified.verifier, cases: 0}}}),
+    software({result: {...softwareVerified, patch: null}}),
+    software({outcome: "rejected", error_code: "candidate_rejected", result: softwareVerified}),
+    software({outcome: "rejected", error_code: "candidate_rejected", result: {...softwareRejected, patch: softwarePatch}}),
+  ]) assert.throws(() => validateTaskRunStatus(value), /contract_invalid/);
+});
+
+test("verifier fields and patch headers never cross between tasks", () => {
+  // Controlled verifier fields on a software run, and the other way around.
+  assert.throws(() => validateTaskRunStatus(software({result: verified})), /contract_invalid/);
+  assert.throws(() => validateTaskRunStatus(passed({result: softwareVerified})), /contract_invalid/);
+  assert.throws(() => validateTaskRunResult(verified, "passed", "software-bounds"), /contract_invalid/);
+  assert.throws(() => validateTaskRunResult(softwareVerified, "passed", "controlled-sum-integers-v1"), /contract_invalid/);
+  assert.throws(() => validateTaskRunResult(softwareRejected, "rejected", "controlled-sum-integers-v1"), /contract_invalid/);
+  assert.throws(() => validateTaskRunResult({...softwareRejected, verifier: {passed: false, cases: 34, json_cases_passed: true, sparse_cases_passed: false}}, "rejected", "software-bounds"), /contract_invalid/);
+  // A verifier mixing both vocabularies has too many fields for either task.
+  const mixed = {...softwareVerified.verifier, json_cases_passed: true, sparse_cases_passed: true};
+  for (const taskId of ["controlled-sum-integers-v1", "software-bounds"] as const)
+    assert.throws(() => validateTaskRunResult({...softwareVerified, verifier: mixed}, "passed", taskId), /contract_invalid/);
+  // Patch headers belong to the task's own writable file.
+  assert.throws(() => validateTaskRunStatus(software({result: {...softwareVerified, patch}})), /contract_invalid/);
+  assert.throws(() => validateTaskRunStatus(passed({result: {...verified, patch: softwarePatch}})), /contract_invalid/);
+  assert.throws(() => validateTaskRunStatus(software({result: {...softwareVerified, patch: softwarePatch.replace("src/search.ts", "src/other.ts")}})), /contract_invalid/);
+  assert.throws(() => validateTaskRunStatus(software({result: {...softwareVerified, patch: "--- a/src/search.ts\n" + softwarePatch}})), /contract_invalid/);
+  assert.throws(() => validateTaskRunResult(verified, "failed" as never, "software-bounds"), /contract_invalid/);
+  assert.throws(() => validateTaskRunResult(softwareVerified, "passed", "unknown-task" as never), /contract_invalid/);
+});
+
+test("same-revision equality ignores object key order and still detects real changes", () => {
+  const running = status({phase: "running", revision: 3, tool_calls: 2, model: {requested: "gpt-6-luna", observed: "gpt-6-luna"}});
+  const reordered = JSON.parse(JSON.stringify(running, (_key, value) => value && typeof value === "object" && !Array.isArray(value)
+    ? Object.fromEntries(Object.entries(value).reverse()) : value)) as TaskRunStatus;
+  assert.notDeepEqual(Object.keys(reordered.operation!), Object.keys(running.operation!));
+  assert.deepEqual(acceptTaskRunUpdate(running, reordered), reordered);
+  const done = software();
+  const doneReordered = {...done, operation: {...Object.fromEntries(Object.entries(done.operation!).reverse()),
+    result: {...Object.fromEntries(Object.entries(softwareVerified).reverse()), verifier: Object.fromEntries(Object.entries(softwareVerified.verifier).reverse())}}};
+  assert.ok(acceptTaskRunUpdate(done, doneReordered));
+  assert.throws(() => acceptTaskRunUpdate(done, software({result: {...softwareVerified, candidate_sha256: "c".repeat(64)}})), /stale/);
+  assert.throws(() => acceptTaskRunUpdate(done, passed()), /stale/);
+  assert.throws(() => acceptTaskRunUpdate(running, status({phase: "running", revision: 3, tool_calls: 3, model: running.operation!.model})), /stale/);
+  // A request never changes its task.
+  assert.throws(() => acceptTaskRunUpdate(running, status({task_id: "software-bounds", phase: "running", revision: 4, tool_calls: 2, model: running.operation!.model})), /stale/);
 });

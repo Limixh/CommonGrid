@@ -36,7 +36,7 @@ Aynı Claude profili yaklaşık 11 saat sonra [yeniden giriş olmadan status/res
 
 | İş | Kapanması için gereken kanıt | Durum |
 |---|---|---|
-| Native CLI sürüm kontrolü ve Codex/Claude akışı | Gerçek uygulamada resmi CLI sürümleri, giriş, görev, istek/iptal sınırları, günlük ve bağımsız profil cleanup | Windows'ta CLI sürümleri, resmi Codex/Claude girişi ve tek Luna/Haiku kontrollü görevleri kabul edildi; diğer görevler ve platformlar bekliyor |
+| Native CLI sürüm kontrolü ve Codex/Claude akışı | Gerçek uygulamada resmi CLI sürümleri, giriş, görev, istek/iptal sınırları, günlük ve bağımsız profil cleanup | Windows'ta CLI sürümleri, resmi Codex/Claude girişi ve tek Luna/Haiku kontrollü görevleri kabul edildi; katalogdaki `software-bounds` sabit yerel paketle aynı akışa bağlandı ([ADR 0021](../spike/adr/0021-catalog-software-task-run.md), yalnız mock/fixture), gerçek hesap kabulü, diğer görevler ve platformlar bekliyor |
 | Güncel gerçek görev | Geçerli izole resmi profillerle gerçek dosya değişimi, 34 örneklik bağımsız kontrol, cleanup ve API'ye geçiş olmaması | Haiku ve Luna için dar görev kabulü tamamlandı |
 | Kalıcı işlem sahipliği | Restart ve host worker ölümü boyunca aynı profile yarışın engellenmesi, eski işlemin yeni kaynakları silememesi | Claim, faz günlüğü, geliştirici/manual uzlaştırma ve native bağlantı geçti; güvenilir görev kabulü, belirsiz mutasyonların güvenli uzlaştırılması ve otomatik recovery bekliyor |
 | Claude oturum sürekliliği | Doğal zaman geçişi sonrası resmi CLI görevi; yenileme veya yeniden giriş gereksiniminin auth dosyası okumadan gözlenmesi | Gecikmeli status/restart geçti; doğal yenileme bekliyor |

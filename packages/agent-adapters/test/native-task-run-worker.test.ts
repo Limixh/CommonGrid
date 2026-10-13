@@ -12,24 +12,28 @@ import { BindingFailure, type ProfileBinding } from "../../../apps/desktop/nativ
 import { verifyAssets, type Boot } from "../../../apps/desktop/native-worker/cli-check.ts";
 import { parseTaskRunBoot, runTaskRun, taskRunBindingRoot, type TaskRunBoot, type TaskRunDependencies, type TaskRunFrame, type TaskRunRuntime, type TaskRunSandbox } from "../../../apps/desktop/native-worker/task-run.ts";
 import { ControlledTaskCleanupError, applyControlledPatch, controlledBaseline, createControlledPatch, controlledVerifierCases } from "../src/controlled-task.ts";
+import { contractHash } from "@commongrid/task-schema";
+import { softwareBaseline, softwareBoundsTask, softwareBoundsTaskId, softwareTaskPrompt, verifySoftwareBundle } from "../src/software-task.ts";
 import { TaskToolLimitError, runControlledProviderTurn, type ProviderProcessFactory, type ProviderTurnOptions } from "../src/controlled-task-session.ts";
 import type { ManagedRuntimeAssets } from "../src/managed-runtime.ts";
 import { ProviderFailure } from "../src/session-protocol.ts";
 import { executeTaskTool } from "../src/task-tool.ts";
-import { acceptTaskRunUpdate, taskRunMaxFrameBytes, taskRunMaxToolCalls, taskRunObservedModels, taskRunRequestedModels, validateTaskRunStatus, type TaskRunProvider, type TaskRunStatus } from "../src/task-run-protocol.ts";
+import { acceptTaskRunUpdate, taskRunMaxFrameBytes, taskRunMaxToolCalls, taskRunObservedModels, taskRunRequestedModels, validateTaskRunStatus, type TaskRunProvider, type TaskRunStatus, type TaskRunTaskId } from "../src/task-run-protocol.ts";
 import pins from "../runtime-assets/native-cli-assets.lock.json";
 
 const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
 const correct = "export function sumIntegers(values) {\n  if (!Array.isArray(values)) throw new TypeError('Expected an array');\n  let total = 0;\n  for (const value of values) {\n    if (!Number.isSafeInteger(value)) throw new TypeError('Expected safe integers');\n    total += value;\n    if (!Number.isSafeInteger(total)) throw new RangeError('Unsafe sum');\n  }\n  return total;\n}\n";
-const bootFor = (provider: TaskRunProvider): TaskRunBoot => ({type: "task_run_boot", schema_version: "1.0", request_id: randomUUID(), profile_id: randomUUID(), provider, task_id: "controlled-sum-integers-v1",
+const fixedSoftware = softwareBaseline.replace("values.length - 1", "values.length");
+const softwareImage = "node@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392";
+const bootFor = (provider: TaskRunProvider, task: TaskRunTaskId = "controlled-sum-integers-v1"): TaskRunBoot => ({type: "task_run_boot", schema_version: "1.0", request_id: randomUUID(), profile_id: randomUUID(), provider, task_id: task,
   journal_root: path.resolve("fixture-journal"), assets_root: path.resolve("fixture-assets"), profile_registry_root: path.resolve("fixture-appdata", "managed-profiles")});
-const assetsFor = (boot: TaskRunBoot, catalog = true): ManagedRuntimeAssets => ({baseImage: "node@sha256:" + "0".repeat(64), journalRoot: boot.journal_root, bridgeRoot: boot.assets_root,
+const assetsFor = (boot: TaskRunBoot, catalog = true): ManagedRuntimeAssets => ({baseImage: boot.task_id === softwareBoundsTaskId ? softwareImage : "node@sha256:" + "0".repeat(64), journalRoot: boot.journal_root, bridgeRoot: boot.assets_root,
   binaries: {claude: {binaryPath: path.resolve("fixture-claude"), sha256: "0".repeat(64)}, codex: {binaryPath: path.resolve("fixture-codex"), sha256: "1".repeat(64)}},
   ...(catalog ? {codexCatalog: {filePath: path.resolve("fixture-assets", "codex-coding-catalog.json"), sha256: pins.codex_catalog.sha256}} : {})});
 
-interface Options { provider?: TaskRunProvider; binding?: ProfileBinding | null; catalog?: boolean }
+interface Options { provider?: TaskRunProvider; binding?: ProfileBinding | null; catalog?: boolean; task?: TaskRunTaskId }
 function fixture(options: Options = {}) {
-  const provider = options.provider ?? "codex", boot = bootFor(provider), calls: string[] = [], frames: TaskRunFrame[] = [], stats = {control_failure: false, task_calls: 2};
+  const provider = options.provider ?? "codex", boot = bootFor(provider, options.task), calls: string[] = [], frames: TaskRunFrame[] = [], stats = {control_failure: false, task_calls: 2};
   const owner = randomUUID();
   const binding: ProfileBinding | undefined = options.binding === null ? undefined : options.binding ?? {schema_version: "1.0", profile_id: boot.profile_id, provider, owner, state: "ready"};
   const assets = assetsFor(boot, options.catalog ?? true);
@@ -57,9 +61,18 @@ function fixture(options: Options = {}) {
     async sandbox(image) { calls.push("sandbox"); assert.equal(image, assets.baseImage); return sandbox; },
     async bridge() { calls.push("bridge"); return {stats, close() { calls.push("bridge-close"); }}; },
     async provider(turn: ProviderTurnOptions) {
-      calls.push("provider"); assert.equal(turn.provider, provider); assert.equal(retained, 1); assert.equal(turn.runtime, runtime); assert.equal(turn.bridgeStats, stats);
+      calls.push("provider"); assert.equal(turn.provider, provider);
+      assert.equal(turn.prompt, boot.task_id === softwareBoundsTaskId ? softwareTaskPrompt(softwareBoundsTask as {prompt: string}) : undefined); assert.equal(retained, 1); assert.equal(turn.runtime, runtime); assert.equal(turn.bridgeStats, stats);
       turn.observer.model(taskRunObservedModels[provider][0]); turn.observer.toolCall(1); turn.observer.toolCall(2); turn.trace.quiescent = true;
     },
+    async softwareBundle(actual) {
+      calls.push("bundle"); assert.equal(actual, assets);
+      // The runner pins the real contract hash in task-run-protocol; this stand-in binds the shipped catalog entry itself.
+      const task = softwareBoundsTask as {task_version: number; contract_hash: string};
+      return verifySoftwareBundle(task, {task_version: task.task_version, contract_hash: task.contract_hash, image: actual.baseImage});
+    },
+    async softwareSnapshot(actual, image) { calls.push("software-snapshot"); assert.equal(actual, sandbox); assert.equal(image, assets.baseImage); return fixedSoftware; },
+    async softwareVerify(source, image) { calls.push("software-verify"); assert.equal(image, assets.baseImage); return {passed: true, cases: 40, visible_tests_passed: true, hidden_cases_passed: true, candidate_sha256: sha256(source)}; },
     async snapshot(actual, image) { calls.push("snapshot"); assert.equal(actual, sandbox); assert.equal(image, assets.baseImage); return correct; },
     async verify(source, image) { calls.push("verify"); assert.equal(image, assets.baseImage); return {passed: true, cases: controlledVerifierCases, json_cases_passed: true, sparse_cases_passed: true, candidate_sha256: sha256(source)}; },
   };
@@ -494,4 +507,73 @@ test("worker entry dispatches task runs and keeps stdout framed for an unbound p
     const rejected = await run({...input, prompt: "free text"});
     assert.equal(rejected.exit, 1); assert.equal(rejected.stdout, "");
   } finally { await rm(directory, {recursive: true, force: true}); }
+});
+
+// ---- Catalog software task (software-bounds) --------------------------------
+
+test("boot accepts exactly the two approved task ids", () => {
+  for (const task of ["controlled-sum-integers-v1", "software-bounds"] as const) assert.equal(parseTaskRunBoot(bootFor("claude", task)).task_id, task);
+  for (const value of ["lean-add-comm", "Software-Bounds", "software-bounds ", ""]) assert.throws(() => parseTaskRunBoot({...bootFor("codex", "software-bounds"), task_id: value}));
+});
+test("software happy path: bundle is proven before Docker, the task prompt reaches the provider and the patch targets src/search.ts", async () => {
+  for (const provider of ["codex", "claude"] as const) {
+    const f = fixture({provider, task: "software-bounds", catalog: provider === "codex"}); await f.run();
+    const middle = provider === "codex" ? ["install-catalog", "start", "exec"] : ["start"];
+    assert.deepEqual(f.calls, ["read", "assets", "bundle", "prerequisite", "restore", "begin", ...middle, "retain", "sandbox", "seed", "seed", "seed", "bridge", "provider", "bridge-close", "software-snapshot", "software-verify", "bridge-close", "sandbox-close", "stop", "release", "finish"]);
+    assert.ok(!f.calls.includes("snapshot") && !f.calls.includes("verify"));
+    const final = result(f.frames), expected = createControlledPatch(fixedSoftware, softwareBaseline, "software-bounds");
+    assert.equal(final.outcome, "passed"); assert.equal(final.error_code, null); assert.equal(final.cleanup, "verified");
+    assert.deepEqual(final.result, {verifier: {passed: true, cases: 40, visible_tests_passed: true, hidden_cases_passed: true}, candidate_sha256: sha256(fixedSoftware), patch_sha256: expected.patch_sha256, patch: expected.patch});
+    assert.ok(final.result!.patch!.startsWith("diff --git a/src/search.ts b/src/search.ts\n"));
+    assert.equal(applyControlledPatch(softwareBaseline, final.result!.patch!, "software-bounds"), fixedSoftware);
+    const status = supervise(f.boot, f.frames);
+    assert.equal(status.operation?.outcome, "passed"); assert.equal(status.operation?.task_id, "software-bounds");
+  }
+});
+test("software rejection reports the verifier split and carries no patch", async () => {
+  const f = fixture({task: "software-bounds"});
+  f.deps.softwareVerify = async source => ({passed: false, cases: 40, visible_tests_passed: true, hidden_cases_passed: false, candidate_sha256: sha256(source)});
+  await f.run();
+  assert.deepEqual(result(f.frames), {type: "result", outcome: "rejected", error_code: "candidate_rejected", cleanup: "verified",
+    result: {verifier: {passed: false, cases: 40, visible_tests_passed: true, hidden_cases_passed: false}, candidate_sha256: sha256(fixedSoftware), patch_sha256: null, patch: null}});
+  assert.equal(supervise(f.boot, f.frames).operation?.outcome, "rejected");
+  // A verdict for a different candidate than the one exported is a verifier failure, never a pass.
+  const wrong = fixture({task: "software-bounds"}); wrong.deps.softwareVerify = async () => ({passed: true, cases: 40, visible_tests_passed: true, hidden_cases_passed: true, candidate_sha256: "0".repeat(64)});
+  await wrong.run(); assert.equal(result(wrong.frames).error_code, "verifier_failed"); assert.equal(result(wrong.frames).result, null);
+});
+test("an invalid or foreign software bundle stops with asset_invalid before any Docker call", async () => {
+  const task = softwareBoundsTask as Record<string, any>;
+  const rehash = async (change: (value: any) => void) => { const value = structuredClone(task); change(value); value.contract_hash = await contractHash(value as never); return value; };
+  const variants: Array<[string, (f: ReturnType<typeof fixture>) => Promise<void> | void]> = [
+    ["bundle check throws", f => { f.deps.softwareBundle = async () => { calls(f).push("bundle"); throw new Error("PRIVATE_BUNDLE_DETAIL"); }; }],
+    ["tampered contract", f => { f.deps.softwareBundle = async assets => { calls(f).push("bundle"); return verifySoftwareBundle({...task, title: "changed"}, {task_version: 1, contract_hash: task.contract_hash, image: assets.baseImage}); }; }],
+    ["different commit", async f => { const value = await rehash(v => { v.workspace.commit = "2".repeat(40); }); f.deps.softwareBundle = async assets => { calls(f).push("bundle"); return verifySoftwareBundle(value, {task_version: 1, contract_hash: value.contract_hash, image: assets.baseImage}); }; }],
+    ["different image", f => { f.deps.softwareBundle = async () => { calls(f).push("bundle"); return verifySoftwareBundle(task, {task_version: 1, contract_hash: task.contract_hash, image: "node@sha256:" + "0".repeat(64)}); }; }],
+    ["stale pin", f => { f.deps.softwareBundle = async assets => { calls(f).push("bundle"); return verifySoftwareBundle(task, {task_version: 1, contract_hash: "0".repeat(64), image: assets.baseImage}); }; }],
+  ];
+  const calls = (f: ReturnType<typeof fixture>) => f.calls;
+  for (const [name, setup] of variants) {
+    const f = fixture({task: "software-bounds"}); await setup(f); await f.run();
+    assert.deepEqual(f.calls, ["read", "assets", "bundle"], name);
+    assert.deepEqual(types(f.frames), ["preparing", "cleaning", "result"], name);
+    assert.deepEqual(result(f.frames), {type: "result", outcome: "failed", error_code: "asset_invalid", cleanup: "verified", result: null}, name);
+    assert.ok(!JSON.stringify(f.frames).includes("PRIVATE"), name); supervise(f.boot, f.frames);
+  }
+  // The controlled task never consults the software bundle.
+  const controlled = fixture(); controlled.deps.softwareBundle = async () => { throw new Error("must not run"); }; await controlled.run();
+  assert.equal(result(controlled.frames).outcome, "passed"); assert.ok(!controlled.calls.includes("bundle"));
+});
+test("software candidate policy failures become candidate_invalid and verifier cleanup uncertainty needs review", async () => {
+  for (const message of ["candidate_unchanged", "candidate_forbidden_pattern", "candidate_protected_changed"]) {
+    const f = fixture({task: "software-bounds"}); f.deps.softwareSnapshot = async () => { throw new Error(message); }; await f.run();
+    assert.deepEqual(result(f.frames), {type: "result", outcome: "failed", error_code: "candidate_invalid", cleanup: "verified", result: null}, message);
+    assert.ok(!f.calls.includes("software-verify")); supervise(f.boot, f.frames);
+  }
+  const broken = fixture({task: "software-bounds"}); broken.deps.softwareSnapshot = async () => { throw new Error("docker exploded"); }; await broken.run();
+  assert.equal(result(broken.frames).error_code, "worker_failed");
+  const leaked = fixture({task: "software-bounds"}); leaked.deps.softwareVerify = async () => { throw new ControlledTaskCleanupError("verifier", [new Error("PRIVATE")]); }; await leaked.run();
+  assert.deepEqual(result(leaked.frames), {type: "result", outcome: "needs_review", error_code: "cleanup_failed", cleanup: "unknown", result: null});
+  assert.ok(!leaked.calls.includes("finish")); supervise(leaked.boot, leaked.frames);
+  const failing = fixture({task: "software-bounds"}); failing.deps.softwareVerify = async () => { throw new Error("docker exploded"); }; await failing.run();
+  assert.equal(result(failing.frames).error_code, "verifier_failed");
 });

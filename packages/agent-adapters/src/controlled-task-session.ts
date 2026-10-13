@@ -33,6 +33,8 @@ export interface ProviderTurnOptions {
   trace: ProviderTurnTrace;
   deadlineMs?: number;
   spawnProcess?: ProviderProcessFactory;
+  /** Task instructions; defaults to the controlled sum.mjs prompt. */
+  prompt?: string;
 }
 
 // Only these reconstructed scalar fields enter tool replies. Command arguments,
@@ -56,9 +58,9 @@ export async function settleCallbacks(queue: Promise<void>, deadlineMs = 30_000)
   finally { if (timer) clearTimeout(timer); }
 }
 const claudeArgs = ["/opt/cg/claude", "--print", "--verbose", "--output-format", "stream-json", "--tools", "", "--restricted", "--strict-mcp-config", "--mcp-config", "/home/node/mcp.json", "--setting-sources", "", "--disable-slash-commands", "--no-session-persistence", "--no-chrome", "--permission-mode", "dontAsk", "--allowedTools", "mcp__commongrid__task_exec"];
-export function providerCommand(provider: TaskRunProvider): string[] {
+export function providerCommand(provider: TaskRunProvider, prompt: string = controlledTaskPrompt): string[] {
   const model = taskRunRequestedModels[provider];
-  if (provider === "claude") return [...claudeArgs, "--model", model, "--fallback-model", model, controlledTaskPrompt];
+  if (provider === "claude") return [...claudeArgs, "--model", model, "--fallback-model", model, prompt];
   return ["/opt/cg/codex", "app-server", "--listen", "stdio://", "-c", 'cli_auth_credentials_store="file"', "-c", `model="${model}"`, "-c", 'model_catalog_json="/opt/cg/catalog.json"', "-c", "agents.enabled=false", "-c", 'model_reasoning_effort="low"',
     "-c", 'model_provider="openai"', "-c", 'web_search="disabled"', "-c", "features.multi_agent=false", "-c", "features.multi_agent_v2=false", "-c", "features.apps=false", "-c", "features.code_mode_only=false", "-c", "features.code_mode=false",
     "-c", "features.goals=false", "-c", "features.current_time_reminder=false", "-c", "features.sleep_tool=false", "-c", "features.tool_search=false", "-c", "features.token_budget=false", "-c", "tools.experimental_request_user_input.enabled=false"];
@@ -66,7 +68,8 @@ export function providerCommand(provider: TaskRunProvider): string[] {
 const defaultSpawn: ProviderProcessFactory = (containerId, args) => spawn("docker", ["exec", "-i", containerId, ...args], {windowsHide: true, stdio: ["pipe", "pipe", "pipe"]});
 
 export async function runControlledProviderTurn(options: ProviderTurnOptions): Promise<void> {
-  const {provider, runtime, observer, signal} = options, requestedModel = taskRunRequestedModels[provider];
+  const {provider, runtime, observer, signal} = options, requestedModel = taskRunRequestedModels[provider], prompt = options.prompt ?? controlledTaskPrompt;
+  if (typeof prompt !== "string" || !prompt || prompt.length > 8192) throw new ProviderFailure("protocol");
   let child: ChildProcessWithoutNullStreams | undefined, input: BoundedJsonInput | undefined, lines: ReturnType<typeof createInterface> | undefined;
   let queue = Promise.resolve(), toolCalls = 0, limitExceeded = false, modelEmitted = false;
   const rpc = new RpcLifecycle(line => child!.stdin.write(line), options.deadlineMs ?? 300_000, () => { try { child?.stdin.end(); child?.kill(); } catch {} });
@@ -92,7 +95,7 @@ export async function runControlledProviderTurn(options: ProviderTurnOptions): P
     const containerId = await runtime.verifyOperation({signal});
     await runtime.beginNamespaceExec(containerId, {signal});
     rpc.assertActive();
-    child = (options.spawnProcess ?? defaultSpawn)(containerId, providerCommand(provider));
+    child = (options.spawnProcess ?? defaultSpawn)(containerId, providerCommand(provider, prompt));
     child.stderr.on("data", () => {}); child.stdin.on("error", () => rpc.fail(new ProviderFailure("process"))); child.stdout.on("error", () => rpc.fail(new ProviderFailure("process")));
     child.on("error", () => rpc.fail(new ProviderFailure("process"))); child.on("close", () => { void queue.finally(() => rpc.processExit()); });
     const decoder = new BoundedJsonLines(4_194_304, 1_048_576), callbacks = new TaskCallbackGuard();
@@ -150,7 +153,7 @@ export async function runControlledProviderTurn(options: ProviderTurnOptions): P
       // The cheap model must be offered as is; there is no fallback to another one.
       if (!models.data.some((item: any) => item.model === requestedModel && !item.hidden)) throw new ProviderFailure("model");
       const schema = controlledTaskToolSchema;
-      const started = await rpc.request("thread/start", {model: requestedModel, modelProvider: "openai", cwd: "/home/node", approvalPolicy: "never", sandbox: "read-only", ephemeral: true, environments: [], baseInstructions: controlledTaskPrompt,
+      const started = await rpc.request("thread/start", {model: requestedModel, modelProvider: "openai", cwd: "/home/node", approvalPolicy: "never", sandbox: "read-only", ephemeral: true, environments: [], baseInstructions: prompt,
         dynamicTools: [{type: "function", name: "task_exec", description: controlledTaskExecDescription, inputSchema: schema}]});
       if (!isRecord(started) || !isRecord(started.thread)) throw new ProviderFailure("protocol");
       if (started.model !== requestedModel) throw new ProviderFailure("model");
@@ -158,7 +161,7 @@ export async function runControlledProviderTurn(options: ProviderTurnOptions): P
       threadId = started.thread.id;
       if (typeof threadId !== "string" || !threadId || threadId.length > 128) throw new ProviderFailure("protocol");
       turnRequested = true;
-      const turn = await rpc.request("turn/start", {threadId, input: [{type: "text", text: controlledTaskPrompt, text_elements: []}]});
+      const turn = await rpc.request("turn/start", {threadId, input: [{type: "text", text: prompt, text_elements: []}]});
       if (!isRecord(turn) || !isRecord(turn.turn) || typeof turn.turn.id !== "string" || !turn.turn.id || turn.turn.id.length > 128) throw new ProviderFailure("protocol");
       turnId = turn.turn.id;
       if (earlyTurn !== undefined) completeCodexTurn(earlyTurn);

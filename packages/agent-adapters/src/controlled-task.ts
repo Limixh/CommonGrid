@@ -6,7 +6,8 @@ import { createHash, randomUUID } from "node:crypto";
 import { checked } from "./managed-runtime.ts";
 import { TaskToolsRuntime, dockerCommand } from "./task-runtime.ts";
 import { controlledCandidateSnapshotScript, validateControlledCandidateBytes, validateControlledCandidateSource } from "./controlled-task-artifact.ts";
-import { validTaskRunPatch } from "./task-run-protocol.ts";
+import { taskRunPatchHeader, taskRunPatchPaths, validTaskRunPatch, type TaskRunTaskId } from "./task-run-protocol.ts";
+import type { Readable } from "node:stream";
 
 export const controlledTaskId = "controlled-sum-integers-v1";
 export const controlledBaseline = "export function sumIntegers(values) { return values.reduce((total, value) => total + value); }\n";
@@ -26,6 +27,7 @@ export const controlledVerifierCases = 34;
 
 const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
 const owner = "io.commongrid.spike.owner";
+export const controlledOwnerLabel = owner;
 type Exec = Pick<TaskToolsRuntime, "exec">;
 
 export async function seedControlledTask(runtime: Exec): Promise<void> {
@@ -41,7 +43,7 @@ type DockerResult = {code: number | null; stdout: string};
 // Docker access is injectable so unit tests never need a daemon.
 export interface ControlledTaskDocker {
   checked(args: string[], timeoutMs?: number): Promise<string>;
-  command(args: string[], options: {timeoutMs: number; maxBytes: number}): Promise<DockerResult>;
+  command(args: string[], options: {timeoutMs: number; maxBytes: number; stdin?: Readable}): Promise<DockerResult>;
 }
 export interface ControlledStaging { volume: string; exec: Exec["exec"]; close(): Promise<unknown> }
 export interface ControlledVerifierDeps extends ControlledTaskDocker {
@@ -53,16 +55,16 @@ export class ControlledTaskCleanupError extends AggregateError {
     super(failures, scope === "snapshot" ? "controlled_snapshot_cleanup_failed" : "controlled_verifier_cleanup_failed");
   }
 }
-const dockerDeps: ControlledTaskDocker = {checked: (args, timeoutMs) => checked(args, timeoutMs), command: dockerCommand};
-const verifierDeps: ControlledVerifierDeps = {...dockerDeps, staging: image => TaskToolsRuntime.create({image, cpu: 1, memoryMb: 256}, 120_000)};
+export const controlledDockerDeps: ControlledTaskDocker = {checked: (args, timeoutMs) => checked(args, timeoutMs), command: dockerCommand};
+export const controlledVerifierDeps: ControlledVerifierDeps = {...controlledDockerDeps, staging: image => TaskToolsRuntime.create({image, cpu: 1, memoryMb: 256}, 120_000)};
 
 /** Freezes the task container, exports the single file through a read-only exporter and validates the bytes. */
-export async function snapshotControlledCandidate(runtime: Pick<TaskToolsRuntime, "inspect" | "container" | "volume">, image: string, docker: ControlledTaskDocker = dockerDeps): Promise<string> {
+export async function snapshotControlledCandidate(runtime: Pick<TaskToolsRuntime, "inspect" | "container" | "volume">, image: string, docker: ControlledTaskDocker = controlledDockerDeps, script: string = controlledCandidateSnapshotScript): Promise<string> {
   await runtime.inspect();
   const id = randomUUID(), name = `cg-export-${id}`;
   await docker.checked(["pause", runtime.container]);
   try {
-    const result = await docker.command(["run", "--name", name, "--label", `${owner}=${id}`, "--network", "none", "--read-only", "--user", "65532:65532", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--memory", "128m", "--pids-limit", "16", "--mount", `type=volume,src=${runtime.volume},dst=/task,readonly,volume-nocopy`, image, "node", "-e", controlledCandidateSnapshotScript], {timeoutMs: 30_000, maxBytes: 65_536});
+    const result = await docker.command(["run", "--name", name, "--label", `${owner}=${id}`, "--network", "none", "--read-only", "--user", "65532:65532", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--memory", "128m", "--pids-limit", "16", "--mount", `type=volume,src=${runtime.volume},dst=/task,readonly,volume-nocopy`, image, "node", "-e", script], {timeoutMs: 30_000, maxBytes: 65_536});
     assert.equal(result.code, 0, "candidate_snapshot_rejected");
     const encoded = result.stdout.trim();
     assert.ok(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encoded), "candidate_snapshot_encoding");
@@ -88,7 +90,7 @@ function oracle(values: unknown): {value?: number; error?: string} {
 }
 export interface ControlledVerifierResult { passed: boolean; cases: number; json_cases_passed: boolean; sparse_cases_passed: boolean; candidate_sha256: string }
 /** Independent verifier: candidate code runs offline in a throwaway read-only container; expected answers stay on the host. */
-export async function verifyControlledCandidate(source: string, image: string, deps: ControlledVerifierDeps = verifierDeps, signal?: AbortSignal): Promise<ControlledVerifierResult> {
+export async function verifyControlledCandidate(source: string, image: string, deps: ControlledVerifierDeps = controlledVerifierDeps, signal?: AbortSignal): Promise<ControlledVerifierResult> {
   validateControlledCandidateSource(source);
   signal?.throwIfAborted();
   // Staging setup can fail after creating its own resources but before returning them.
@@ -170,13 +172,13 @@ function editScript(before: string[], after: string[]): Op[] {
   return ops;
 }
 const blobId = (value: string) => createHash("sha1").update(`blob ${Buffer.byteLength(value)}\0`).update(value).digest("hex").slice(0, 7);
-const patchHeader = "diff --git a/sum.mjs b/sum.mjs\n";
 const noNewline = "\\ No newline at end of file";
 const range = (before: number, count: number) => count === 1 ? String(before + 1) : `${before + (count === 0 ? 0 : 1)},${count}`;
 const bodyLines = (prefix: string, token: string) => token.endsWith("\n") ? [prefix + token.slice(0, -1)] : [prefix + token, noNewline];
 
 /** Git-style unified diff (3 lines of context) from the fixed baseline to a candidate. */
-export function buildControlledPatch(source: string, baseline = controlledBaseline): string {
+export function buildControlledPatch(source: string, baseline = controlledBaseline, taskId: TaskRunTaskId = controlledTaskId): string {
+  const header = taskRunPatchHeader(taskId), file = taskRunPatchPaths[taskId];
   validateControlledCandidateSource(source);
   if (source === baseline) throw new Error("candidate_unchanged");
   const ops = editScript(lineTokens(baseline), lineTokens(source));
@@ -188,7 +190,7 @@ export function buildControlledPatch(source: string, baseline = controlledBaseli
   }
   const before = new Array<number>(ops.length + 1).fill(0), after = new Array<number>(ops.length + 1).fill(0);
   ops.forEach((op, index) => { before[index + 1] = before[index] + (op.t === "+" ? 0 : 1); after[index + 1] = after[index] + (op.t === "-" ? 0 : 1); });
-  const lines = [patchHeader.trimEnd(), `index ${blobId(baseline)}..${blobId(source)} 100644`, "--- a/sum.mjs", "+++ b/sum.mjs"];
+  const lines = [header.trimEnd(), `index ${blobId(baseline)}..${blobId(source)} 100644`, `--- a/${file}`, `+++ b/${file}`];
   for (const [first, last] of groups) {
     const from = Math.max(0, first - 3), to = Math.min(ops.length, last + 4);
     lines.push(`@@ -${range(before[from], before[to] - before[from])} +${range(after[from], after[to] - after[from])} @@`);
@@ -197,18 +199,19 @@ export function buildControlledPatch(source: string, baseline = controlledBaseli
   const patch = lines.join("\n") + "\n";
   // CRLF sources, oversize diffs and anything else the public contract
   // rejects cannot be reported as a patch.
-  if (!validTaskRunPatch(patch)) throw new Error("candidate_patch_invalid");
+  if (!validTaskRunPatch(patch, taskId)) throw new Error("candidate_patch_invalid");
   return patch;
 }
 const hunkHeader = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@$/;
 /** Strict single-file apply, in memory: any context mismatch, bad count or stray line throws. */
-export function applyControlledPatch(baseline: string, patch: string): string {
+export function applyControlledPatch(baseline: string, patch: string, taskId: TaskRunTaskId = controlledTaskId): string {
+  const header = taskRunPatchHeader(taskId), file = taskRunPatchPaths[taskId];
   const fail = (): never => { throw new Error("candidate_patch_apply_failed"); };
   const lines = patch.split("\n");
-  if (lines.pop() !== "" || lines.length < 5 || lines[0] !== patchHeader.trimEnd()) fail();
+  if (lines.pop() !== "" || lines.length < 5 || lines[0] !== header.trimEnd()) fail();
   let at = 1;
   if (/^index [0-9a-f]{7,40}\.\.[0-9a-f]{7,40} 100644$/.test(lines[at])) at++;
-  if (lines[at++] !== "--- a/sum.mjs" || lines[at++] !== "+++ b/sum.mjs") fail();
+  if (lines[at++] !== `--- a/${file}` || lines[at++] !== `+++ b/${file}`) fail();
   const base = lineTokens(baseline), out: string[] = [];
   let position = 0, hunks = 0;
   while (at < lines.length) {
@@ -236,8 +239,8 @@ export function applyControlledPatch(baseline: string, patch: string): string {
 }
 export interface ControlledPatch { patch: string; patch_sha256: string; base_sha256: string; candidate_sha256: string; applied_candidate_sha256: string }
 /** Builds the patch and proves it turns the baseline into exactly this candidate. */
-export function createControlledPatch(source: string, baseline = controlledBaseline): ControlledPatch {
-  const patch = buildControlledPatch(source, baseline), applied = applyControlledPatch(baseline, patch);
+export function createControlledPatch(source: string, baseline = controlledBaseline, taskId: TaskRunTaskId = controlledTaskId): ControlledPatch {
+  const patch = buildControlledPatch(source, baseline, taskId), applied = applyControlledPatch(baseline, patch, taskId);
   if (applied !== source) throw new Error("candidate_patch_roundtrip_failed");
   return {patch, patch_sha256: sha256(patch), base_sha256: sha256(baseline), candidate_sha256: sha256(source), applied_candidate_sha256: sha256(applied)};
 }

@@ -72,3 +72,75 @@ try {
   console.log(bytes.toString('base64'));
 } finally { f.closeSync(fd); }
 `;
+
+export interface TaskSnapshotFile { path: string; /** Pinned digest of a protected file; null marks the one writable file. */ sha256: string | null }
+export interface TaskSnapshotSpec { files: readonly TaskSnapshotFile[] }
+const snapshotPath = /^[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*$/;
+
+// Multi-file variant for tasks whose agent workspace is a small pinned tree.
+// The exporter walks /task with lstat only and rejects before stdout unless the
+// regular-file set equals the manifest and the directories are exactly the
+// manifest's parents. Protected files must match their pinned digest; only the
+// writable file passes the candidate content policy and is printed (base64).
+export function taskCandidateSnapshotScript(spec: TaskSnapshotSpec): string {
+  const paths = spec.files.map(file => file.path);
+  if (!spec.files.length || spec.files.length > 16 || new Set(paths).size !== paths.length ||
+    !paths.every(path => snapshotPath.test(path) && path.split("/").every(part => part !== "." && part !== "..")) ||
+    spec.files.filter(file => file.sha256 === null).length !== 1 ||
+    !spec.files.every(file => file.sha256 === null || /^[0-9a-f]{64}$/.test(file.sha256))) throw new Error("task_snapshot_spec_invalid");
+  return `
+const f = require('node:fs'), crypto = require('node:crypto');
+const spec = ${JSON.stringify({files: spec.files.map(file => ({path: file.path, sha256: file.sha256}))})};
+const validate = (${validateControlledCandidateBytes.toString()});
+const limit = 16384;
+const expected = new Map(spec.files.map(file => [file.path, file.sha256]));
+const dirs = new Set();
+for (const path of expected.keys()) { const parts = path.split('/'); for (let i = 1; i < parts.length; i++) dirs.add(parts.slice(0, i).join('/')); }
+function safe(s) {
+  if (!s.isFile() || s.isSymbolicLink() || s.nlink !== 1 || s.size > limit) throw Error('candidate_type');
+}
+function same(a, b) {
+  if (a.dev !== b.dev || a.ino !== b.ino || a.mode !== b.mode || a.nlink !== b.nlink || a.size !== b.size || a.mtimeMs !== b.mtimeMs || a.ctimeMs !== b.ctimeMs) throw Error('candidate_changed');
+}
+const seen = new Set();
+function walk(rel) {
+  const names = f.readdirSync(rel ? '/task/' + rel : '/task');
+  if (names.length > 32) throw Error('candidate_inventory');
+  for (const name of names) {
+    const path = rel ? rel + '/' + name : name, s = f.lstatSync('/task/' + path);
+    if (s.isDirectory() && !s.isSymbolicLink()) { if (!dirs.has(path)) throw Error('candidate_inventory'); walk(path); continue; }
+    safe(s);
+    if (!expected.has(path)) throw Error('candidate_inventory');
+    seen.add(path);
+  }
+}
+walk('');
+if (seen.size !== expected.size) throw Error('candidate_inventory');
+function read(path) {
+  const p = '/task/' + path;
+  const before = f.lstatSync(p); safe(before);
+  const fd = f.openSync(p, f.constants.O_RDONLY | f.constants.O_NOFOLLOW | f.constants.O_NONBLOCK);
+  try {
+    const opened = f.fstatSync(fd); safe(opened); same(before, opened);
+    const buffer = Buffer.alloc(limit + 1);
+    let used = 0;
+    while (used < buffer.length) {
+      const count = f.readSync(fd, buffer, used, buffer.length - used, null);
+      if (count === 0) break;
+      used += count;
+    }
+    if (used > limit || used !== opened.size) throw Error('candidate_content');
+    const after = f.fstatSync(fd); safe(after); same(opened, after);
+    const linked = f.lstatSync(p); safe(linked); same(after, linked);
+    return buffer.subarray(0, used);
+  } finally { f.closeSync(fd); }
+}
+let output;
+for (const [path, digest] of expected) {
+  const bytes = read(path);
+  if (digest === null) { validate(bytes); output = bytes; }
+  else if (crypto.createHash('sha256').update(bytes).digest('hex') !== digest) throw Error('candidate_protected_changed');
+}
+console.log(output.toString('base64'));
+`;
+}

@@ -45,7 +45,7 @@ test("all standalone auxiliary schemas preserve refs, Unicode lengths, unknown f
     schema_version: "1.0", task_id: software.id, task_version: 1, contract_hash: software.contract_hash,
     lease_id: "lease-1", attempt_id: "attempt-1", strategy_id: "invariant",
     agent: {provider: "codex", cli_version: "0.157.1", adapter_version: "0.1.0", model: "unknown", reasoning: "unknown", metadata_source: "client_reported"},
-    effective_limits: {cpu: 1, memory_mb: 1024, time_limit_sec: 900}, paid_api_allowed: false,
+    effective_limits: {cpu: 1, memory_mb: 256, time_limit_sec: 900}, paid_api_allowed: false,
   };
   const checkpoint = {
     schema_version: "1.0", checkpoint_id: "cp-1", task_id: software.id, task_version: 1,

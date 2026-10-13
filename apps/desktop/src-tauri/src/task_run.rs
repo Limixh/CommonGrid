@@ -27,14 +27,16 @@ use tauri::{
 };
 
 const DENIED: &str = "local_task_run_denied";
-const TASK_ID: &str = "controlled-sum-integers-v1";
+const CONTROLLED_TASK: &str = "controlled-sum-integers-v1";
+const SOFTWARE_TASK: &str = "software-bounds";
+// Mirrors taskRunTaskIds in the browser contract.
+const TASK_IDS: [&str; 2] = [CONTROLLED_TASK, SOFTWARE_TASK];
 const MAX_REVISION: u32 = 1_000_000_000;
 const MAX_TOOL_CALLS: u32 = 16;
 const MAX_PATCH_BYTES: usize = 49_152;
 const MAX_STATUS_BYTES: usize = 65_536;
 const MAX_FRAME_BYTES: usize = 65_536;
 const MAX_FRAMES: usize = 64;
-const PATCH_HEADER: &str = "diff --git a/sum.mjs b/sum.mjs\n";
 #[derive(Clone, Copy)]
 struct Limits {
     deadline: Duration,
@@ -71,13 +73,64 @@ enum Cleanup {
     Verified,
     Unknown,
 }
+// Maps a caller-supplied id onto the supported task it names, if any.
+fn task_id(value: &str) -> Option<&'static str> {
+    TASK_IDS.iter().copied().find(|id| *id == value)
+}
+// The single writable file of each task, as in taskRunPatchPaths.
+fn patch_path(task: &str) -> Option<&'static str> {
+    match task {
+        CONTROLLED_TASK => Some("sum.mjs"),
+        SOFTWARE_TASK => Some("src/search.ts"),
+        _ => None,
+    }
+}
+fn patch_header(task: &str) -> Option<String> {
+    patch_path(task).map(|path| format!("diff --git a/{path} b/{path}\n"))
+}
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
-struct Verifier {
+struct ControlledVerifier {
     passed: bool,
     cases: u32,
     json_cases_passed: bool,
     sparse_cases_passed: bool,
+}
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct SoftwareVerifier {
+    passed: bool,
+    cases: u32,
+    visible_tests_passed: bool,
+    hidden_cases_passed: bool,
+}
+// Each variant accepts exactly its own field set, so the other task's shape
+// never deserializes into it; TaskResult::valid binds the variant to the task.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(untagged)]
+enum Verifier {
+    Controlled(ControlledVerifier),
+    Software(SoftwareVerifier),
+}
+impl Verifier {
+    // (passed, cases, the two task checks) when the shape belongs to the task.
+    fn parts(&self, task: &str) -> Option<(bool, u32, bool, bool)> {
+        match (self, task) {
+            (Self::Controlled(v), CONTROLLED_TASK) => Some((
+                v.passed,
+                v.cases,
+                v.json_cases_passed,
+                v.sparse_cases_passed,
+            )),
+            (Self::Software(v), SOFTWARE_TASK) => Some((
+                v.passed,
+                v.cases,
+                v.visible_tests_passed,
+                v.hidden_cases_passed,
+            )),
+            _ => None,
+        }
+    }
 }
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -95,31 +148,34 @@ fn hash(value: &str) -> bool {
             .bytes()
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
-// A unified diff of the single controlled file: printable UTF-8 text without
-// NUL, bidi controls or carriage returns, beginning with the fixed header.
-fn valid_patch(value: &str) -> bool {
+// A unified diff of the task's single writable file: printable UTF-8 text
+// without NUL, bidi controls or carriage returns, beginning with its header.
+fn valid_patch(value: &str, task: &str) -> bool {
     !value.is_empty()
         && value.len() <= MAX_PATCH_BYTES
-        && value.starts_with(PATCH_HEADER)
+        && patch_header(task).is_some_and(|header| value.starts_with(&header))
         && !value
             .chars()
             .any(|c| matches!(c, '\0' | '\r' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}'))
 }
 impl TaskResult {
-    fn valid(&self, outcome: Outcome) -> bool {
-        let verifier = &self.verifier;
+    fn valid(&self, outcome: Outcome, task: &str) -> bool {
+        let Some((passed, cases, first, second)) = self.verifier.parts(task) else {
+            return false;
+        };
         hash(&self.candidate_sha256)
-            && (1..=1000).contains(&verifier.cases)
-            && verifier.passed == (verifier.json_cases_passed && verifier.sparse_cases_passed)
+            && (1..=1000).contains(&cases)
+            && passed == (first && second)
             && match outcome {
                 Outcome::Passed => {
-                    verifier.passed
+                    passed
                         && self.patch_sha256.as_deref().is_some_and(hash)
-                        && self.patch.as_deref().is_some_and(valid_patch)
+                        && self
+                            .patch
+                            .as_deref()
+                            .is_some_and(|patch| valid_patch(patch, task))
                 }
-                Outcome::Rejected => {
-                    !verifier.passed && self.patch_sha256.is_none() && self.patch.is_none()
-                }
+                Outcome::Rejected => !passed && self.patch_sha256.is_none() && self.patch.is_none(),
                 _ => false,
             }
     }
@@ -227,7 +283,7 @@ fn valid_operation(op: &Operation) -> bool {
                 && op
                     .result
                     .as_ref()
-                    .is_some_and(|result| result.valid(outcome))
+                    .is_some_and(|result| result.valid(outcome, op.task_id))
         }
         _ => {
             op.result.is_none()
@@ -427,11 +483,11 @@ impl TaskRun {
         if request.schema_version != "1.0"
             || !uuid(&request.request_id)
             || !uuid(&request.profile_id)
-            || request.task_id != TASK_ID
             || !request.approved
         {
             return Err(DENIED);
         }
+        let task = task_id(&request.task_id).ok_or(DENIED)?;
         let provider =
             profile_store::selected_provider(&store.join("managed-profiles"), &request.profile_id)
                 .map_err(|_| DENIED)?;
@@ -443,6 +499,7 @@ impl TaskRun {
             if operation.request_id == request.request_id {
                 return if operation.profile_id == request.profile_id
                     && operation.provider == provider
+                    && operation.task_id == task
                 {
                     Ok(inner.status.clone())
                 } else {
@@ -470,7 +527,7 @@ impl TaskRun {
             request_id: request.request_id,
             profile_id: request.profile_id,
             provider,
-            task_id: TASK_ID,
+            task_id: task,
             revision: 0,
             phase: Phase::Starting,
             outcome: None,
@@ -731,7 +788,7 @@ impl TaskRun {
                 }
             };
         let mut input = worker.child.stdin.take().unwrap();
-        let boot = serde_json::json!({"type":"task_run_boot", "schema_version":"1.0", "request_id":operation.request_id, "profile_id":operation.profile_id, "provider":operation.provider, "task_id":TASK_ID, "journal_root":journal, "assets_root":assets, "profile_registry_root":registry});
+        let boot = serde_json::json!({"type":"task_run_boot", "schema_version":"1.0", "request_id":operation.request_id, "profile_id":operation.profile_id, "provider":operation.provider, "task_id":operation.task_id, "journal_root":journal, "assets_root":assets, "profile_registry_root":registry});
         if writeln!(input, "{}", boot).is_err() {
             worker.terminate();
             self.finish(id, End::review("worker_failed"));
@@ -901,7 +958,7 @@ fn preflight(value: &serde_json::Value, shape: Shape) -> bool {
         && match shape {
             Shape::Start => {
                 request["profile_id"].as_str().is_some_and(uuid)
-                    && request["task_id"].as_str() == Some(TASK_ID)
+                    && request["task_id"].as_str().and_then(task_id).is_some()
                     && request["approved"].as_bool() == Some(true)
             }
             Shape::Cancel => request["expected_revision"]

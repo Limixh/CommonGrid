@@ -1,13 +1,15 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
-import { ControlledTaskCleanupError, controlledTaskId, createControlledPatch, seedControlledTask, snapshotControlledCandidate, verifyControlledCandidate, type ControlledVerifierResult } from "../../../packages/agent-adapters/src/controlled-task.ts";
+import type { TaskContract } from "@commongrid/task-schema";
+import { ControlledTaskCleanupError, controlledTaskId, createControlledPatch, seedControlledTask, snapshotControlledCandidate, verifyControlledCandidate, type ControlledPatch, type ControlledVerifierResult } from "../../../packages/agent-adapters/src/controlled-task.ts";
+import { seedSoftwareTask, snapshotSoftwareCandidate, softwareBaseline, softwareBoundsTaskId, softwareTaskPrompt, verifyCatalogSoftwareBundle, verifySoftwareCandidate, type SoftwareVerifierResult } from "../../../packages/agent-adapters/src/software-task.ts";
 import { TaskToolLimitError, runControlledProviderTurn, type ProviderTurnOptions } from "../../../packages/agent-adapters/src/controlled-task-session.ts";
 import { ManagedCliRuntime, startBridge, type ManagedRuntimeAssets } from "../../../packages/agent-adapters/src/managed-runtime.ts";
 import { assertBridgeHealthy, ProviderFailure } from "../../../packages/agent-adapters/src/session-protocol.ts";
 import { executeTaskTool } from "../../../packages/agent-adapters/src/task-tool.ts";
 import { TaskToolsRuntime } from "../../../packages/agent-adapters/src/task-runtime.ts";
-import { taskRunMaxFrameBytes, taskRunMaxToolCalls, taskRunObservedModels, taskRunRequestedModels, validateTaskRunResult, validateTaskRunStatus,
-  type TaskRunBoot, type TaskRunError, type TaskRunFrame, type TaskRunOutcome, type TaskRunResult } from "../../../packages/agent-adapters/src/task-run-protocol.ts";
+import { taskRunMaxFrameBytes, taskRunMaxToolCalls, taskRunObservedModels, taskRunRequestedModels, taskRunTaskIds, validateTaskRunResult, validateTaskRunStatus,
+  type TaskRunBoot, type TaskRunError, type TaskRunFrame, type TaskRunOutcome, type TaskRunResult, type TaskRunTaskId, type TaskRunVerifier } from "../../../packages/agent-adapters/src/task-run-protocol.ts";
 import { verifyAssets, verifyDockerPrerequisite } from "./cli-check.ts";
 import { BindingFailure, ProfileBindings, uuid, type ProfileBinding } from "./profile-bindings.ts";
 
@@ -18,7 +20,7 @@ export function parseTaskRunBoot(value: unknown): TaskRunBoot {
   const boot = value as TaskRunBoot;
   if (!boot || typeof boot !== "object" || Array.isArray(boot) || Object.keys(boot).sort().join() !== bootKeys ||
     boot.type !== "task_run_boot" || boot.schema_version !== "1.0" || typeof boot.request_id !== "string" || !uuid.test(boot.request_id) ||
-    typeof boot.profile_id !== "string" || !uuid.test(boot.profile_id) || !["codex", "claude"].includes(boot.provider) || boot.task_id !== controlledTaskId ||
+    typeof boot.profile_id !== "string" || !uuid.test(boot.profile_id) || !["codex", "claude"].includes(boot.provider) || !(taskRunTaskIds as readonly unknown[]).includes(boot.task_id) ||
     ![boot.journal_root, boot.assets_root, boot.profile_registry_root].every(root => typeof root === "string" && root.length < 4096 && !/[\x00\r\n]/.test(root) && path.isAbsolute(root)) ||
     path.basename(boot.profile_registry_root) !== "managed-profiles") throw new TaskRunFailure("worker_failed");
   return boot;
@@ -40,6 +42,10 @@ export interface TaskRunDependencies {
   provider(options: ProviderTurnOptions): Promise<void>;
   snapshot(sandbox: TaskRunSandbox, image: string): Promise<string>;
   verify(source: string, image: string, signal: AbortSignal): Promise<ControlledVerifierResult>;
+  /** software-bounds: proves the catalog contract and pinned bundle match before any Docker call. */
+  softwareBundle(assets: ManagedRuntimeAssets): Promise<TaskContract>;
+  softwareSnapshot(sandbox: TaskRunSandbox, image: string): Promise<string>;
+  softwareVerify(source: string, image: string, signal: AbortSignal): Promise<SoftwareVerifierResult>;
 }
 const dependencies: TaskRunDependencies = {
   bindings: root => new ProfileBindings(root),
@@ -51,6 +57,27 @@ const dependencies: TaskRunDependencies = {
   provider: runControlledProviderTurn,
   snapshot: (sandbox, image) => snapshotControlledCandidate(sandbox, image),
   verify: (source, image, signal) => verifyControlledCandidate(source, image, undefined, signal),
+  softwareBundle: assets => verifyCatalogSoftwareBundle(assets.baseImage),
+  softwareSnapshot: (sandbox, image) => snapshotSoftwareCandidate(sandbox, image),
+  softwareVerify: (source, image, signal) => verifySoftwareCandidate(source, image, undefined, signal),
+};
+// Per-task steps of the approved run: a plain two-entry lookup, no extra layer.
+type Verdict = ControlledVerifierResult | SoftwareVerifierResult;
+interface TaskSteps {
+  seed(sandbox: TaskRunSandbox): Promise<void>;
+  /** Task instructions; undefined keeps the provider default (controlled task). */
+  prompt: string | undefined;
+  snapshot(sandbox: TaskRunSandbox, image: string): Promise<string>;
+  verify(source: string, image: string, signal: AbortSignal): Promise<Verdict>;
+  patch(source: string): ControlledPatch;
+  verifier(verdict: Verdict): TaskRunVerifier;
+}
+const taskSteps: Record<TaskRunTaskId, (deps: TaskRunDependencies, contract: TaskContract | undefined) => TaskSteps> = {
+  [controlledTaskId]: deps => ({seed: seedControlledTask, prompt: undefined, snapshot: deps.snapshot, verify: deps.verify, patch: source => createControlledPatch(source),
+    verifier: verdict => { const {passed, cases, json_cases_passed, sparse_cases_passed} = verdict as ControlledVerifierResult; return {passed, cases, json_cases_passed, sparse_cases_passed}; }}),
+  [softwareBoundsTaskId]: (deps, contract) => ({seed: sandbox => seedSoftwareTask(sandbox), prompt: softwareTaskPrompt(contract!), snapshot: deps.softwareSnapshot, verify: deps.softwareVerify,
+    patch: source => createControlledPatch(source, softwareBaseline, softwareBoundsTaskId),
+    verifier: verdict => { const {passed, cases, visible_tests_passed, hidden_cases_passed} = verdict as SoftwareVerifierResult; return {passed, cases, visible_tests_passed, hidden_cases_passed}; }}),
 };
 const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
 const abortCode = (signal: AbortSignal): TaskRunError => signal.reason === "deadline_exceeded" ? "deadline_exceeded" : signal.reason === "worker_failed" ? "worker_failed" : "cancelled";
@@ -107,6 +134,10 @@ export async function runTaskRun(boot: TaskRunBoot, signal: AbortSignal, emit: (
     if (binding.state === "reserved") throw new TaskRunFailure("profile_needs_review");
     const assets = await deps.assets(boot);
     signal.throwIfAborted();
+    // A catalog task must match its pinned contract and bundle before anything touches Docker.
+    const contract = boot.task_id === softwareBoundsTaskId ? await deps.softwareBundle(assets).catch(() => { throw new TaskRunFailure("asset_invalid"); }) : undefined;
+    signal.throwIfAborted();
+    const steps = taskSteps[boot.task_id](deps, contract);
     // Codex needs the pinned catalog; a build without its public source reports it missing.
     if (boot.provider === "codex" && !assets.codexCatalog) throw new TaskRunFailure("asset_missing");
     await deps.prerequisite(assets, signal); signal.throwIfAborted();
@@ -122,13 +153,13 @@ export async function runTaskRun(boot: TaskRunBoot, signal: AbortSignal, emit: (
     try { sandbox = await deps.sandbox(assets.baseImage); }
     catch (failure) { if (failure instanceof AggregateError && failure.message === "sandbox_cleanup_failed") cleanupFailed = holdOwnership = true; throw failure; }
     signal.throwIfAborted();
-    await seedControlledTask(sandbox); signal.throwIfAborted();
+    await steps.seed(sandbox); signal.throwIfAborted();
     bridge = await deps.bridge(runtime, sandbox, signal); assertBridgeHealthy(bridge.stats); signal.throwIfAborted();
     emit({type: "progress", phase: "running"});
     const task = sandbox;
     // The supervisor accepts model/activity only while running: a late callback is dropped.
     accepting = true;
-    try { await deps.provider({provider: boot.provider, runtime, execute: arguments_ => executeTaskTool(task as TaskToolsRuntime, arguments_, signal), bridgeStats: bridge.stats, signal, trace,
+    try { await deps.provider({provider: boot.provider, runtime, execute: arguments_ => executeTaskTool(task as TaskToolsRuntime, arguments_, signal), bridgeStats: bridge.stats, signal, trace, prompt: steps.prompt,
       observer: {
         model: model => { if (accepting && seen.observed === null && (taskRunObservedModels[boot.provider] as readonly string[]).includes(model)) { seen.observed = model; emit({type: "model", observed: model}); } },
         toolCall: count => { if (!accepting) return; if (count > taskRunMaxToolCalls) throw new TaskToolLimitError(); if (count > seen.toolCalls) { seen.toolCalls = count; emit({type: "activity", tool_calls: count}); } },
@@ -138,15 +169,15 @@ export async function runTaskRun(boot: TaskRunBoot, signal: AbortSignal, emit: (
     emit({type: "progress", phase: "verifying"});
     // The provider process and relay are gone before the workspace is frozen.
     await bridge.close();
-    const source = await deps.snapshot(sandbox, assets.baseImage).catch(stepFailure(signal, "worker_failed")); signal.throwIfAborted();
-    const verdict = await deps.verify(source, assets.baseImage, signal).catch(stepFailure(signal, "verifier_failed")); signal.throwIfAborted();
+    const source = await steps.snapshot(sandbox, assets.baseImage).catch(stepFailure(signal, "worker_failed")); signal.throwIfAborted();
+    const verdict = await steps.verify(source, assets.baseImage, signal).catch(stepFailure(signal, "verifier_failed")); signal.throwIfAborted();
     if (verdict.candidate_sha256 !== sha256(source)) throw new TaskRunFailure("verifier_failed");
-    const verifier = {passed: verdict.passed, cases: verdict.cases, json_cases_passed: verdict.json_cases_passed, sparse_cases_passed: verdict.sparse_cases_passed};
-    if (!verdict.passed) { result = validateTaskRunResult({verifier, candidate_sha256: verdict.candidate_sha256, patch_sha256: null, patch: null}, "rejected"); error = "candidate_rejected"; }
+    const verifier = steps.verifier(verdict);
+    if (!verdict.passed) { result = validateTaskRunResult({verifier, candidate_sha256: verdict.candidate_sha256, patch_sha256: null, patch: null}, "rejected", boot.task_id); error = "candidate_rejected"; }
     else {
-      let evidence: ReturnType<typeof createControlledPatch>;
-      try { evidence = createControlledPatch(source); } catch { throw new TaskRunFailure("candidate_invalid"); }
-      result = validateTaskRunResult({verifier, candidate_sha256: verdict.candidate_sha256, patch_sha256: evidence.patch_sha256, patch: evidence.patch}, "passed");
+      let evidence: ControlledPatch;
+      try { evidence = steps.patch(source); } catch { throw new TaskRunFailure("candidate_invalid"); }
+      result = validateTaskRunResult({verifier, candidate_sha256: verdict.candidate_sha256, patch_sha256: evidence.patch_sha256, patch: evidence.patch}, "passed", boot.task_id);
     }
   } catch (failure) {
     // Snapshot/verifier containers have separate owners and cannot be proven gone

@@ -1,16 +1,18 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  acceptTaskRunUpdate, taskRunMaxToolCalls, taskRunRequestedModels,
-  type TaskRunError, type TaskRunOperation, type TaskRunOutcome, type TaskRunPhase, type TaskRunStatus, type TaskRunTaskId,
+  acceptTaskRunUpdate, taskRunMaxToolCalls, taskRunPatchPaths, taskRunRequestedModels,
+  type TaskRunError, type TaskRunOperation, type TaskRunOutcome, type TaskRunPhase, type TaskRunStatus, type TaskRunTaskId, type TaskRunVerifier,
 } from "@commongrid/agent-adapters/task-run";
 import type { ManagedProfile } from "@commongrid/agent-adapters/managed-profiles";
 import { cancelTaskRun, readTaskRun, startTaskRun, taskRunNative } from "./task-run-client";
 
+type TaskWords = {title: string; text: string; limits: string[]; checks: readonly [string, string]};
 type Words = {
-  title: string; description: string; refresh: string; cardTitle: string; cardText: string; model: string; observed: string; limitsTitle: string;
-  limits: string[]; quota: string; approve: string; start: string; cancel: string; unavailable: string; loading: string; submitting: string;
+  title: string; description: string; refresh: string; tasks: Record<TaskRunTaskId, TaskWords>; model: string; observed: string; limitsTitle: string;
+  quota: string; approve: string; start: string; cancel: string; unavailable: string; loading: string; submitting: string;
   cancelPending: string; error: string; paused: string; otherProfile: string; otherReview: string; toolCalls: string; verifier: string;
-  verifierPassed: (cases: number) => string; verifierRejected: (cases: number, json: boolean, sparse: boolean) => string;
+  verifierPassed: (cases: number, detail: string) => string; verifierRejected: (cases: number, detail: string) => string;
+  check: (label: string, passed: boolean) => string;
   candidate: string; patch: string; diff: string; copy: string; copied: string; copyFailed: string;
   historyTitle: string; historyDescription: string; activeTask: string; lastTask: string;
   phases: Record<Exclude<TaskRunPhase, "finished">, string>; outcomes: Record<TaskRunOutcome, string>;
@@ -19,20 +21,33 @@ type Words = {
 const words: Record<"tr" | "en", Words> = {
   tr: {
     title: "Onaylı görev", description: "Hesabı bağlı seçili profille, onayladığın tek bir kontrollü görevi izole ortamda çalıştır ve yalnız doğrulanmış sonucu gör.",
-    historyTitle: "Yerel görev durumu", historyDescription: "Burada daha önce başlatılan yerel sum.mjs görevinin durumunu izleyebilirsin. Bu sonuç seçilen katalog görevine ait değildir.",
+    historyTitle: "Yerel görev durumu", historyDescription: "Burada daha önce başlatılan yerel görevin durumunu izleyebilirsin. Bu durum seçilen katalog görevine ait değildir.",
     activeTask: "Çalışan görev", lastTask: "Son görev",
-    refresh: "Görev durumunu yenile", cardTitle: "Kontrollü doğrulama görevi: sum.mjs",
-    cardText: "Ajan, izole bir ortamda sum.mjs içindeki tamsayı toplama işlevini düzeltir. Sonuç bağımsız doğrulayıcıdan geçerse değişiklik diff olarak gösterilir.",
+    refresh: "Görev durumunu yenile",
+    tasks: {
+      "controlled-sum-integers-v1": {
+        title: "Kontrollü doğrulama görevi: sum.mjs",
+        text: "Ajan, izole bir ortamda sum.mjs içindeki tamsayı toplama işlevini düzeltir. Sonuç bağımsız doğrulayıcıdan geçerse değişiklik diff olarak gösterilir.",
+        limits: ["Görev çalışma alanında ağ erişimi yok.", `En fazla ${taskRunMaxToolCalls} araç çağrısı.`, "20 dakika süre sınırı.", "Yalnız sum.mjs değiştirilebilir.", "34 örnekli bağımsız doğrulayıcı.", "Yalnız doğrulanmış diff gösterilir."],
+        checks: ["JSON örnekleri", "seyrek örnekler"],
+      },
+      "software-bounds": {
+        title: "Yerel kaynak paketi görevi: src/search.ts",
+        text: "Ajan, izole bir ortamda src/search.ts içindeki lowerBound işlevinin sınır koşullarını düzeltir. Görünür testlerin ve bağımsız doğrulayıcının gizli örneklerinin geçmesi gerekir; doğrulanırsa değişiklik diff olarak gösterilir.",
+        limits: ["Görev çalışma alanında ağ erişimi yok.", `En fazla ${taskRunMaxToolCalls} araç çağrısı.`, "20 dakika süre sınırı.", "Yalnız src/search.ts değiştirilebilir.", "Görünür testler ve bağımsız doğrulayıcının gizli örnekleri geçmeli.", "Yalnız doğrulanmış diff gösterilir."],
+        checks: ["görünür testler", "gizli örnekler"],
+      },
+    },
     model: "Kullanılacak model", observed: "Gözlenen model", limitsTitle: "Sınırlar",
-    limits: ["Görev çalışma alanında ağ erişimi yok.", `En fazla ${taskRunMaxToolCalls} araç çağrısı.`, "20 dakika süre sınırı.", "34 örnekli bağımsız doğrulayıcı.", "Yalnız doğrulanmış diff gösterilir."],
     quota: "Bu görev kendi Claude veya Codex aboneliğinin kotasını kullanır.",
     approve: "Bu görevi seçili profilin hesabıyla çalıştırmayı onaylıyorum.", start: "Başlat", cancel: "İptal",
     unavailable: "Görev çalıştırma masaüstü uygulamasında kullanılabilir.", loading: "Görev durumu okunuyor…", submitting: "Görev başlatılıyor…", cancelPending: "İptal isteği gönderiliyor…",
     error: "Görev durumu doğrulanamadı. Son durumu yenileyip tekrar dene.", paused: "Otomatik güncelleme durdu. Son durumu yenileyebilirsin.",
     otherProfile: "Başka bir profilin görevi sürüyor.", otherReview: "Önceki bir görevin kapanışı doğrulanamadı; yeni görev başlatılamaz. İnceleme gerekli.",
     toolCalls: "Araç çağrısı", verifier: "Doğrulayıcı",
-    verifierPassed: cases => `${cases}/${cases} örnek geçti`,
-    verifierRejected: (cases, json, sparse) => `${cases} örnekli doğrulayıcı adayı reddetti (JSON örnekleri: ${json ? "geçti" : "kaldı"}, seyrek örnekler: ${sparse ? "geçti" : "kaldı"}).`,
+    verifierPassed: (cases, detail) => `${cases}/${cases} örnek geçti (${detail}).`,
+    verifierRejected: (cases, detail) => `${cases} örnekli doğrulayıcı adayı reddetti (${detail}).`,
+    check: (label, passed) => `${label}: ${passed ? "geçti" : "kaldı"}`,
     candidate: "Aday SHA-256", patch: "Diff SHA-256", diff: "Doğrulanmış diff", copy: "Diff'i kopyala", copied: "Diff panoya kopyalandı.", copyFailed: "Diff panoya kopyalanamadı.",
     phases: {starting: "Görev başlatılıyor…", preparing: "İzole ortam hazırlanıyor…", running: "Ajan çalışıyor…", verifying: "Bağımsız doğrulayıcı çalışıyor…", cleaning: "Ortam temizleniyor…"},
     outcomes: {
@@ -55,20 +70,33 @@ const words: Record<"tr" | "en", Words> = {
   },
   en: {
     title: "Approved task", description: "Run one approved, controlled task in an isolated environment with the selected profile whose account is connected, and see only the verified result.",
-    historyTitle: "Local task status", historyDescription: "Observe a previously started local sum.mjs task here. Its result does not belong to the selected catalog task.",
+    historyTitle: "Local task status", historyDescription: "Observe a previously started local task here. Its status does not belong to the selected catalog task.",
     activeTask: "Running task", lastTask: "Last task",
-    refresh: "Refresh task status", cardTitle: "Controlled verification task: sum.mjs",
-    cardText: "The agent fixes the integer summing function in sum.mjs inside an isolated environment. If the independent verifier accepts it, the change is shown as a diff.",
+    refresh: "Refresh task status",
+    tasks: {
+      "controlled-sum-integers-v1": {
+        title: "Controlled verification task: sum.mjs",
+        text: "The agent fixes the integer summing function in sum.mjs inside an isolated environment. If the independent verifier accepts it, the change is shown as a diff.",
+        limits: ["No network access in the task workspace.", `At most ${taskRunMaxToolCalls} tool calls.`, "20 minute time limit.", "Only sum.mjs can change.", "Independent verifier with 34 cases.", "Only the verified diff is shown."],
+        checks: ["JSON cases", "sparse cases"],
+      },
+      "software-bounds": {
+        title: "Local source bundle task: src/search.ts",
+        text: "The agent fixes the boundary conditions of lowerBound in src/search.ts inside an isolated environment. The visible tests and the independent verifier's hidden cases must pass; if they do, the change is shown as a diff.",
+        limits: ["No network access in the task workspace.", `At most ${taskRunMaxToolCalls} tool calls.`, "20 minute time limit.", "Only src/search.ts can change.", "Visible tests and the independent verifier's hidden cases must pass.", "Only the verified diff is shown."],
+        checks: ["visible tests", "hidden cases"],
+      },
+    },
     model: "Model that will be used", observed: "Observed model", limitsTitle: "Limits",
-    limits: ["No network access in the task workspace.", `At most ${taskRunMaxToolCalls} tool calls.`, "20 minute time limit.", "Independent verifier with 34 cases.", "Only the verified diff is shown."],
     quota: "This task uses the quota of your own Claude or Codex subscription.",
     approve: "I approve running this task with the selected profile's account.", start: "Start", cancel: "Cancel",
     unavailable: "Task runs are available in the desktop application.", loading: "Reading task status…", submitting: "Starting task…", cancelPending: "Sending cancellation…",
     error: "The task status could not be validated. Refresh the latest status and try again.", paused: "Automatic updates stopped. You can refresh the latest status.",
     otherProfile: "Another profile's task is running.", otherReview: "An earlier task's cleanup could not be confirmed; a new task cannot start. Review is required.",
     toolCalls: "Tool calls", verifier: "Verifier",
-    verifierPassed: cases => `${cases}/${cases} cases passed`,
-    verifierRejected: (cases, json, sparse) => `The ${cases}-case verifier rejected the candidate (JSON cases: ${json ? "passed" : "failed"}, sparse cases: ${sparse ? "passed" : "failed"}).`,
+    verifierPassed: (cases, detail) => `${cases}/${cases} cases passed (${detail}).`,
+    verifierRejected: (cases, detail) => `The ${cases}-case verifier rejected the candidate (${detail}).`,
+    check: (label, passed) => `${label}: ${passed ? "passed" : "failed"}`,
     candidate: "Candidate SHA-256", patch: "Diff SHA-256", diff: "Verified diff", copy: "Copy diff", copied: "Diff copied to the clipboard.", copyFailed: "The diff could not be copied.",
     phases: {starting: "Starting task…", preparing: "Preparing isolated environment…", running: "Agent is working…", verifying: "Independent verifier is running…", cleaning: "Cleaning up environment…"},
     outcomes: {
@@ -92,6 +120,10 @@ const words: Record<"tr" | "en", Words> = {
 };
 
 const short = (hash: string) => `${hash.slice(0, 12)}…`;
+// The verifier's two checks, in the order of the task's check labels.
+function verifierChecks(verifier: TaskRunVerifier): [boolean, boolean] {
+  return "visible_tests_passed" in verifier ? [verifier.visible_tests_passed, verifier.hidden_cases_passed] : [verifier.json_cases_passed, verifier.sparse_cases_passed];
+}
 function diffClass(line: string) {
   if (line.startsWith("+++") || line.startsWith("---") || line.startsWith("diff ") || line.startsWith("index ")) return "task-run-diff-meta";
   if (line.startsWith("@@")) return "task-run-diff-hunk";
@@ -113,6 +145,7 @@ const pollLimit = 1300;
 
 export function TaskRunPanel({language, profile, taskId, allowStart}: {language: "tr" | "en"; profile: ManagedProfile; taskId: TaskRunTaskId; allowStart: boolean}) {
   const t = words[language];
+  const card = t.tasks[taskId];
   const requestedModel = taskRunRequestedModels[profile.provider];
   const [status, setStatus] = useState<TaskRunStatus | null>(null);
   const [pending, setPending] = useState<"read" | "start" | "cancel" | null>("read");
@@ -193,6 +226,7 @@ export function TaskRunPanel({language, profile, taskId, allowStart}: {language:
   const finished = ours && operation.phase === "finished" ? operation : null;
   const passedResult = finished?.outcome === "passed" ? finished.result : null;
   const rejectedResult = finished?.outcome === "rejected" ? finished.result : null;
+  const verified = passedResult ?? rejectedResult;
   async function copyDiff() {
     try { await navigator.clipboard.writeText(passedResult!.patch!); setCopy("copied"); }
     catch { setCopy("failed"); }
@@ -202,11 +236,11 @@ export function TaskRunPanel({language, profile, taskId, allowStart}: {language:
     <div className="section-heading"><h3 id="task-run-title">{allowStart ? t.title : t.historyTitle}</h3>{taskRunNative() && <button className="secondary-button" disabled={pending === "start" || pending === "cancel"} onClick={refresh}>{t.refresh}</button>}</div>
     <p>{allowStart ? t.description : t.historyDescription}</p>
     {allowStart && <div className="task-run-card">
-      <h4>{t.cardTitle}</h4>
-      <p>{t.cardText}</p>
+      <h4>{card.title}</h4>
+      <p>{card.text}</p>
       <dl>
         <div><dt>{t.model}</dt><dd><code>{requestedModel}</code></dd></div>
-        <div><dt>{t.limitsTitle}</dt><dd><ul>{t.limits.map(limit => <li key={limit}>{limit}</li>)}</ul></dd></div>
+        <div><dt>{t.limitsTitle}</dt><dd><ul>{card.limits.map(limit => <li key={limit}>{limit}</li>)}</ul></dd></div>
       </dl>
       <p className="task-run-quota">{t.quota}</p>
     </div>}
@@ -226,20 +260,19 @@ export function TaskRunPanel({language, profile, taskId, allowStart}: {language:
     {!ours && active && <p role="status">{t.otherProfile}</p>}
     {!ours && operation?.outcome === "needs_review" && <p role="status">{t.otherReview}</p>}
     {ours && active && <div className="task-run-progress" role="status">
-      <span>{t.activeTask}: <code>{operation.task_id}</code> · sum.mjs</span>
+      <span>{t.activeTask}: <code>{operation.task_id}</code> · {taskRunPatchPaths[operation.task_id]}</span>
       <strong>{phaseText}</strong>
       <span>{t.toolCalls}: {operation.tool_calls} / {taskRunMaxToolCalls}</span>
       {operation.model.observed && <span>{t.observed}: <code>{operation.model.observed}</code></span>}
     </div>}
     {finished && <div className="cli-check-result task-run-result" role="status">
-      <span>{t.lastTask}: <code>{finished.task_id}</code> · sum.mjs</span>
+      <span>{t.lastTask}: <code>{finished.task_id}</code> · {taskRunPatchPaths[finished.task_id]}</span>
       <strong>{t.outcomes[finished.outcome!]}</strong>
       {finished.error_code && finished.error_code !== "cancelled" && finished.error_code !== "candidate_rejected" && <p>{t.errors(requestedModel)[finished.error_code]}</p>}
       {finished.tool_calls > 0 && <span>{t.toolCalls}: {finished.tool_calls} / {taskRunMaxToolCalls}</span>}
       {finished.model.observed && <span>{t.observed}: <code>{finished.model.observed}</code></span>}
-      {(passedResult || rejectedResult) && <p>{t.verifier}: {passedResult
-        ? t.verifierPassed(passedResult.verifier.cases)
-        : t.verifierRejected(rejectedResult!.verifier.cases, rejectedResult!.verifier.json_cases_passed, rejectedResult!.verifier.sparse_cases_passed)}</p>}
+      {verified && <p>{t.verifier}: {(verified.verifier.passed ? t.verifierPassed : t.verifierRejected)(verified.verifier.cases,
+        verifierChecks(verified.verifier).map((ok, index) => t.check(t.tasks[finished.task_id].checks[index], ok)).join(", "))}</p>}
     </div>}
     {passedResult && <div className="task-run-verified">
       <dl className="task-run-hashes">

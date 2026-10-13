@@ -1,11 +1,22 @@
 // Browser-safe observation of one approved task run on the selected profile.
-// Only the controlled task in the accepted narrow scope can be requested. No
+// Only tasks in the accepted narrow scope can be requested: the controlled
+// sum.mjs task and one catalog software task run from a pinned local bundle. No
 // prompt text, provider payload, host path or account identity crosses this
 // boundary; the verified patch is bounded and only present after verification.
 
 export type TaskRunProvider = "claude" | "codex";
-export const taskRunTaskIds = ["controlled-sum-integers-v1"] as const;
+export const taskRunTaskIds = ["controlled-sum-integers-v1", "software-bounds"] as const;
 export type TaskRunTaskId = typeof taskRunTaskIds[number];
+export const taskRunControlledTaskId: TaskRunTaskId = "controlled-sum-integers-v1";
+// The single writable file of each task; its unified diff starts with this path.
+export const taskRunPatchPaths: Readonly<Record<TaskRunTaskId, string>> = Object.freeze({
+  "controlled-sum-integers-v1": "sum.mjs", "software-bounds": "src/search.ts",
+});
+// Catalog contracts the native runner implements. A catalog selection can start
+// only when its id, version and contract hash equal this pin exactly.
+export const taskRunCatalogPins: Readonly<Partial<Record<TaskRunTaskId, Readonly<{task_version: number; contract_hash: string}>>>> = Object.freeze({
+  "software-bounds": Object.freeze({task_version: 1, contract_hash: "4823a3908e60b9bdeebf737c4f1d8c71a53c86981f5a4c6845877ba815f1216d"}),
+});
 export const taskRunPhases = ["starting", "preparing", "running", "verifying", "cleaning", "finished"] as const;
 export type TaskRunPhase = typeof taskRunPhases[number];
 export const taskRunErrors = [
@@ -25,7 +36,14 @@ export const taskRunRequestedModels: Readonly<Record<TaskRunProvider, string>> =
 export const taskRunObservedModels: Readonly<Record<TaskRunProvider, readonly string[]>> = Object.freeze({
   codex: Object.freeze(["gpt-6-luna"]), claude: Object.freeze(["claude-haiku-4-5-20251001", "claude-haiku-4-5", "claude-haiku-5-5"]),
 });
-export interface TaskRunVerifier { passed: boolean; cases: number; json_cases_passed: boolean; sparse_cases_passed: boolean }
+export interface TaskRunControlledVerifier { passed: boolean; cases: number; json_cases_passed: boolean; sparse_cases_passed: boolean }
+// Software tasks: the pristine visible tests and host-generated hidden cases.
+export interface TaskRunSoftwareVerifier { passed: boolean; cases: number; visible_tests_passed: boolean; hidden_cases_passed: boolean }
+export type TaskRunVerifier = TaskRunControlledVerifier | TaskRunSoftwareVerifier;
+export const taskRunVerifierChecks: Readonly<Record<TaskRunTaskId, readonly [string, string]>> = Object.freeze({
+  "controlled-sum-integers-v1": Object.freeze(["json_cases_passed", "sparse_cases_passed"] as const),
+  "software-bounds": Object.freeze(["visible_tests_passed", "hidden_cases_passed"] as const),
+});
 export interface TaskRunResult { verifier: TaskRunVerifier; candidate_sha256: string; patch_sha256: string | null; patch: string | null }
 export interface TaskRunModel { requested: string; observed: string | null }
 export interface TaskRunStartRequest { schema_version: "1.0"; request_id: string; profile_id: string; task_id: TaskRunTaskId; approved: true }
@@ -73,21 +91,26 @@ function oneOf<T extends string>(value: unknown, options: readonly T[]): value i
 }
 function invalid(): never { throw new Error("task_run_contract_invalid"); }
 const bytes = (value: string) => new TextEncoder().encode(value).byteLength;
-// A unified diff of the single controlled file: printable UTF-8 text without
-// NUL, bidi controls or carriage returns, beginning with the fixed header.
-export function validTaskRunPatch(value: unknown): value is string {
-  return typeof value === "string" && value.length > 0 && bytes(value) <= taskRunMaxPatchBytes &&
-    value.startsWith("diff --git a/sum.mjs b/sum.mjs\n") && !/[\0\r\u202a-\u202e\u2066-\u2069]/.test(value);
+export function taskRunPatchHeader(taskId: TaskRunTaskId): string {
+  const path = taskRunPatchPaths[taskId];
+  return `diff --git a/${path} b/${path}\n`;
 }
-export function validateTaskRunResult(value: unknown, outcome: TaskRunOutcome): TaskRunResult {
+// A unified diff of the task's single writable file: printable UTF-8 text
+// without NUL, bidi controls or carriage returns, beginning with its header.
+export function validTaskRunPatch(value: unknown, taskId: TaskRunTaskId = taskRunControlledTaskId): value is string {
+  return typeof value === "string" && value.length > 0 && bytes(value) <= taskRunMaxPatchBytes &&
+    value.startsWith(taskRunPatchHeader(taskId)) && !/[\0\r\u202a-\u202e\u2066-\u2069]/.test(value);
+}
+export function validateTaskRunResult(value: unknown, outcome: TaskRunOutcome, taskId: TaskRunTaskId = taskRunControlledTaskId): TaskRunResult {
   if (!exact(value, ["verifier", "candidate_sha256", "patch_sha256", "patch"]) || typeof value.candidate_sha256 !== "string" || !sha256.test(value.candidate_sha256)) invalid();
-  const verifier = value.verifier;
-  if (!exact(verifier, ["passed", "cases", "json_cases_passed", "sparse_cases_passed"]) || typeof verifier.passed !== "boolean" ||
-    typeof verifier.json_cases_passed !== "boolean" || typeof verifier.sparse_cases_passed !== "boolean" ||
+  if (!oneOf(taskId, taskRunTaskIds)) invalid();
+  const verifier = value.verifier, [first, second] = taskRunVerifierChecks[taskId];
+  if (!exact(verifier, ["passed", "cases", first, second]) || typeof verifier.passed !== "boolean" ||
+    typeof verifier[first] !== "boolean" || typeof verifier[second] !== "boolean" ||
     !Number.isSafeInteger(verifier.cases) || Number(verifier.cases) < 1 || Number(verifier.cases) > 1000 ||
-    verifier.passed !== (verifier.json_cases_passed && verifier.sparse_cases_passed)) invalid();
+    verifier.passed !== (verifier[first] && verifier[second])) invalid();
   if (outcome === "passed") {
-    if (!verifier.passed || typeof value.patch_sha256 !== "string" || !sha256.test(value.patch_sha256) || !validTaskRunPatch(value.patch)) invalid();
+    if (!verifier.passed || typeof value.patch_sha256 !== "string" || !sha256.test(value.patch_sha256) || !validTaskRunPatch(value.patch, taskId)) invalid();
   } else if (outcome === "rejected") {
     if (verifier.passed || value.patch_sha256 !== null || value.patch !== null) invalid();
   } else invalid();
@@ -125,7 +148,7 @@ export function validateTaskRunStatus(value: unknown): TaskRunStatus {
       if (op.outcome === "passed" || op.outcome === "rejected") {
         if (op.cleanup !== "verified" || op.model.observed === null || op.tool_calls < 1 ||
           op.error_code !== (op.outcome === "passed" ? null : "candidate_rejected")) invalid();
-        validateTaskRunResult(op.result, op.outcome);
+        validateTaskRunResult(op.result, op.outcome, op.task_id);
       } else {
         if (op.result !== null || op.error_code === null || op.error_code === "candidate_rejected" ||
           op.cleanup !== (op.outcome === "needs_review" ? "unknown" : "verified") ||
@@ -139,12 +162,13 @@ export function validateTaskRunStatus(value: unknown): TaskRunStatus {
 export function unavailableTaskRun(): TaskRunStatus {
   return {schema_version: "1.0", availability: "unavailable", operation: null};
 }
+// Both operations are validated exact objects, so key order is not significant.
+function canonical(value: unknown): unknown {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical((value as Record<string, unknown>)[key])])) : value;
+}
 function sameOperation(a: TaskRunOperation, b: TaskRunOperation): boolean {
-  return JSON.stringify(a) === JSON.stringify({request_id: b.request_id, profile_id: b.profile_id, provider: b.provider, task_id: b.task_id,
-    revision: b.revision, phase: b.phase, outcome: b.outcome, error_code: b.error_code, cleanup: b.cleanup, tool_calls: b.tool_calls,
-    model: {requested: b.model.requested, observed: b.model.observed},
-    result: b.result && {verifier: {passed: b.result.verifier.passed, cases: b.result.verifier.cases, json_cases_passed: b.result.verifier.json_cases_passed,
-      sparse_cases_passed: b.result.verifier.sparse_cases_passed}, candidate_sha256: b.result.candidate_sha256, patch_sha256: b.result.patch_sha256, patch: b.result.patch}});
+  return JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
 }
 // Observations of one request only move forward: revision, phase, tool calls
 // and the first observed model never rewind or change at an equal revision.

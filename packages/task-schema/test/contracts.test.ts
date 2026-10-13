@@ -74,7 +74,7 @@ const execution: ExecutionContext = {
     reasoning: "unknown",
     metadata_source: "client_reported",
   },
-  effective_limits: { cpu: 1, memory_mb: 1024, time_limit_sec: 900 },
+  effective_limits: { cpu: 1, memory_mb: 256, time_limit_sec: 900 },
   paid_api_allowed: false,
 };
 test("approved execution context validates", () =>
