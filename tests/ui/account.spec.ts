@@ -68,7 +68,7 @@ async function mockSelectedExecutionProfile(page: Page) {
 
 async function preparePrivateExecutionSelection(page: Page) {
   const task = catalog.tasks.find((item: { id: string }) => item.id === "software-bounds");
-  await expect(page.locator(".task-card")).toHaveCount(3);
+  await expect(page.locator(".task-card")).toHaveCount(catalog.tasks.length);
   await page.locator(".task-card").filter({ hasText: task.title }).click();
   await page.getByRole("button", { name: "Profil seçimini hazırla", exact: true }).click();
   const selection = page.getByTestId("execution-selection");
@@ -125,7 +125,7 @@ test("failed logout preserves a captured private task, while receipt expiry clea
 test("fixture account clearly shows disabled providers without a pretend login", async ({ page }) => {
   await mockAccount(page);
   await page.goto("/");
-  await expect(page.locator(".task-card")).toHaveCount(3);
+  await expect(page.locator(".task-card")).toHaveCount(catalog.tasks.length);
   await page.getByRole("navigation", { name: "Main navigation" }).getByRole("button", { name: "Hesabım", exact: true }).click();
   await expect(page.getByText("Hesap bağlantısı hazırlanıyor", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: /ile giriş yap/ })).toHaveCount(0);
@@ -139,7 +139,7 @@ test("authenticated database catalog and private receipts clear on successful lo
   const mocked = await mockAccount(page, { authenticated: true, database: true });
   await page.goto("/");
   await expect(page.getByText("Ortak görev kataloğu", { exact: true })).toBeVisible();
-  await expect(page.locator(".task-card")).toHaveCount(3);
+  await expect(page.locator(".task-card")).toHaveCount(catalog.tasks.length);
   await expect(page.getByRole("button", { name: "Görevi başlat", exact: true })).toBeDisabled();
   expect(mocked.receiptsRequested).toEqual([]);
   await page.getByRole("textbox", { name: "Görevlerde ara…" }).fill("private query");

@@ -1,7 +1,7 @@
 // Catalog / contract fixtures. The lean tasks and the plan task stay
-// non-executable placeholders. software-bounds is the one executable contract:
-// its workspace.commit identifies the pinned local bundle in
-// packages/agent-adapters/task-assets/software-bounds (see ADR 0021).
+// non-executable placeholders. software-bounds and software-intervals are the
+// executable contracts: each workspace.commit identifies the pinned local bundle
+// in packages/agent-adapters/task-assets/<task id> (see ADR 0021).
 import { mkdir, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { canonicalize } from "json-canonicalize";
@@ -191,7 +191,51 @@ Object.assign(software, {
     ],
   },
 });
-const tasks = [lean, software, plan].map((task) => ({
+// software-intervals: the second pinned catalog task, appended after the
+// existing contracts so lean, bounds and plan keep their hashes. Same project,
+// image, limits and forbidden patterns as software-bounds.
+const intervalsBundle = await loadSoftwareBundle("software-intervals");
+const intervalsCommand = "node --experimental-strip-types --test tests/intervals.test.ts";
+const intervals = structuredClone(software);
+Object.assign(intervals, {
+  id: "software-intervals",
+  title: "Aralık birleştirme",
+  description:
+    "Kapalı tamsayı aralıklarını birleştiren mergeIntervals fonksiyonunu düzelt: çakışan ve birbirine değen aralıklar birleşir, sonuç start değerine göre sıralı yeni bir dizidir ve girdi değiştirilmez.",
+  prompt:
+    "src/intervals.ts içindeki mergeIntervals(intervals) fonksiyonunu düzelt. intervals, [start, end] biçiminde güvenli tamsayı çiftlerinden oluşan kapalı aralıkların dizisidir; her çift için start <= end olur ve sıra keyfidir. Fonksiyon çakışan ve birbirine değen aralıkları birleştirir ([1, 3] ile [3, 5] birleşip [1, 5] olur; ortak noktası olmayan [1, 2] ile [3, 4] ayrı kalır), başka bir aralığın içinde kalan aralıkları da doğru ele alır ve start değerine göre artan sıralı YENİ bir dizi döndürür. Boş girdide [] döner. Girdi dizisini ve içindeki çiftleri değiştirme. Kaynakta child_process, node:fs ve process.exit ifadeleri bulunmamalıdır. Yalnızca src/intervals.ts dosyasını düzenle, test dosyalarını değiştirme.",
+  strategies: [
+    {
+      id: "sort-first",
+      instructions:
+        "Önce aralıkları girdiyi değiştirmeden bir kopya üzerinde start değerine göre sayısal olarak sırala; ardından tek geçişte her aralığı son birleştirilen aralıkla karşılaştır.",
+    },
+    {
+      id: "sweep",
+      instructions:
+        "Uç noktaları tek bir tarama ile işle: açık aralık sayısını izle, aynı koordinatta başlangıçları bitişlerden önce işle ve sayaç sıfıra indiğinde birleşik aralığı kapat.",
+    },
+  ],
+  workspace: {
+    ...base.workspace,
+    commit: intervalsBundle.ids.commit,
+    entry_files: ["src/intervals.ts", "tests/intervals.test.ts"],
+    writable_paths: ["src/intervals.ts"],
+  },
+  verification: {
+    ...software.verification,
+    local_precheck: intervalsCommand,
+    server_command: intervalsCommand,
+  },
+  node_id: "merge-intervals",
+  progress: {
+    milestones: [
+      { ...base.progress.milestones[0], id: "touching", name: "Değen aralıklar", check: `node --experimental-strip-types --test --test-name-pattern="touching|disjoint" tests/intervals.test.ts` },
+      { ...base.progress.milestones[1], id: "containment", name: "İç içe aralıklar", check: `node --experimental-strip-types --test --test-name-pattern="contained|not modified" tests/intervals.test.ts` },
+    ],
+  },
+});
+const tasks = [lean, software, plan, intervals].map((task) => ({
   ...task,
   contract_hash: createHash("sha256").update(canonicalize(task)).digest("hex"),
 }));
@@ -225,4 +269,4 @@ for (const relative of [
   await mkdir(new URL("./", url), { recursive: true });
   await writeFile(url, json);
 }
-console.log(`3 hashed contract fixtures written; software-bounds commit ${bundle.ids.commit}.`);
+console.log(`${tasks.length} hashed contract fixtures written; software-bounds commit ${bundle.ids.commit}, software-intervals commit ${intervalsBundle.ids.commit}.`);

@@ -67,8 +67,8 @@ async function openCatalog(page: Page, expectedCards: number) {
 
 test("fixture catalog without statuses shows unknown status and the real kind labels", async ({ page }) => {
   await page.goto("/");
-  await expect(page.locator(".task-card")).toHaveCount(3);
-  await expect(page.locator(".task-card .td-status-unknown")).toHaveCount(3);
+  await expect(page.locator(".task-card")).toHaveCount(catalog.tasks.length);
+  await expect(page.locator(".task-card .td-status-unknown")).toHaveCount(catalog.tasks.length);
   await expect(page.locator(".task-card .td-status-unknown").first()).toHaveText("Durum bilinmiyor");
   await expect(card(page, catalog.tasks[2].title).locator(".kind-badge")).toHaveText("AYRIŞTIRMA");
   await expect(card(page, catalog.tasks[0].title).locator(".kind-badge")).toHaveText("ÇÖZÜM");
@@ -76,7 +76,7 @@ test("fixture catalog without statuses shows unknown status and the real kind la
   await page.getByLabel("Duruma göre filtrele").selectOption("open");
   await expect(page.getByText("Bu filtrelerle eşleşen görev bulunamadı.")).toBeVisible();
   await page.getByLabel("Duruma göre filtrele").selectOption("unknown");
-  await expect(page.locator(".task-card")).toHaveCount(3);
+  await expect(page.locator(".task-card")).toHaveCount(catalog.tasks.length);
   await expect(panel(page)).toContainText("Bu görevin önkoşulu yok.");
 });
 

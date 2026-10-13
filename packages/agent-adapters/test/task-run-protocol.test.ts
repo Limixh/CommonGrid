@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   acceptTaskRunUpdate, taskRunCatalogPins, taskRunControlledTaskId, taskRunObservedModels, taskRunPatchHeader, taskRunPatchPaths,
-  taskRunRequestedModels, taskRunStrategyIds, taskRunTaskIds, unavailableTaskRun, validTaskRunStrategy, validTaskRunPatch, validateTaskRunCancel, validateTaskRunResult,
+  taskRunRequestedModels, taskRunStrategyIds, taskRunTaskIds, taskRunVerifierChecks, unavailableTaskRun, validTaskRunStrategy, validTaskRunPatch, validateTaskRunCancel, validateTaskRunResult,
   validateTaskRunStart, validateTaskRunStatus, type TaskRunOperation, type TaskRunStatus,
 } from "../src/task-run-protocol.ts";
 import { claudeFunctionalTestModel, claudeFunctionalTestObservedModels, codexFunctionalTestModel } from "../testing/functional-test-models.ts";
@@ -103,12 +103,16 @@ const softwareRejected = {verifier: {passed: false, cases: 40, visible_tests_pas
 const software = (changes: Partial<TaskRunOperation> = {}) => passed({task_id: "software-bounds", strategy_id: "invariant", result: softwareVerified, ...changes});
 
 test("each task has its own patch path, header and verifier checks", () => {
-  assert.deepEqual({...taskRunPatchPaths}, {"controlled-sum-integers-v1": "sum.mjs", "software-bounds": "src/search.ts"});
+  assert.deepEqual({...taskRunPatchPaths}, {"controlled-sum-integers-v1": "sum.mjs", "software-bounds": "src/search.ts", "software-intervals": "src/intervals.ts"});
+  assert.equal(taskRunPatchHeader("software-intervals"), "diff --git a/src/intervals.ts b/src/intervals.ts\n");
   assert.equal(taskRunPatchHeader("software-bounds"), "diff --git a/src/search.ts b/src/search.ts\n");
-  assert.deepEqual(taskRunTaskIds.map(id => taskRunControlledTaskId === id), [true, false]);
+  assert.deepEqual(taskRunTaskIds.map(id => taskRunControlledTaskId === id), [true, false, false]);
   assert.ok(validTaskRunPatch(softwarePatch, "software-bounds") && !validTaskRunPatch(softwarePatch, "controlled-sum-integers-v1"));
   assert.ok(validTaskRunPatch(patch) && !validTaskRunPatch(patch, "software-bounds"));
   assert.ok(taskRunCatalogPins["software-bounds"] && /^[0-9a-f]{64}$/.test(taskRunCatalogPins["software-bounds"].contract_hash));
+  assert.ok(taskRunCatalogPins["software-intervals"] && /^[0-9a-f]{64}$/.test(taskRunCatalogPins["software-intervals"].contract_hash));
+  assert.notEqual(taskRunCatalogPins["software-intervals"]!.contract_hash, taskRunCatalogPins["software-bounds"]!.contract_hash);
+  assert.notEqual(taskRunCatalogPins["software-intervals"]!.contract_hash, "0".repeat(64));
   assert.equal(taskRunCatalogPins["controlled-sum-integers-v1"], undefined);
   assert.deepEqual(validateTaskRunStart({schema_version: "1.0", request_id: request, profile_id: profile, task_id: "software-bounds", strategy_id: "invariant", approved: true}).task_id, "software-bounds");
 });
@@ -208,4 +212,38 @@ test("a request never changes its strategy; a later request may use another", ()
   assert.throws(() => acceptTaskRunUpdate(done, software({strategy_id: "boundary-first", revision: 10})), /stale/);
   const next = status({request_id: "30000000-0000-4000-8000-000000000003", task_id: "software-bounds", strategy_id: "boundary-first"});
   assert.equal(acceptTaskRunUpdate(done, next).operation?.strategy_id, "boundary-first");
+});
+
+const intervalsPatch = "diff --git a/src/intervals.ts b/src/intervals.ts\n--- a/src/intervals.ts\n+++ b/src/intervals.ts\n@@ -1 +1 @@\n-  sorted.sort();\n+  sorted.sort((a, b) => a[0] - b[0]);\n";
+const intervalsVerified = {...softwareVerified, patch: intervalsPatch};
+const intervals = (changes: Partial<TaskRunOperation> = {}) => passed({task_id: "software-intervals", strategy_id: "sort-first", result: intervalsVerified, ...changes});
+
+test("software-intervals has its own patch header and the software verifier checks", () => {
+  assert.ok(validTaskRunPatch(intervalsPatch, "software-intervals") && !validTaskRunPatch(intervalsPatch, "software-bounds") && !validTaskRunPatch(intervalsPatch));
+  assert.ok(!validTaskRunPatch(softwarePatch, "software-intervals"));
+  assert.deepEqual(taskRunVerifierChecks["software-intervals"], ["visible_tests_passed", "hidden_cases_passed"]);
+  assert.equal(validateTaskRunStatus(intervals()).operation?.result?.patch, intervalsPatch);
+  assert.deepEqual(validateTaskRunResult(intervalsVerified, "passed", "software-intervals"), intervalsVerified);
+  assert.deepEqual(validateTaskRunStatus(intervals({outcome: "rejected", error_code: "candidate_rejected", result: softwareRejected})).operation?.result, softwareRejected);
+  // The patch must name this task's writable file, and the other task's patch is refused.
+  for (const bad of [intervals({result: {...intervalsVerified, patch: softwarePatch}}), intervals({result: {...intervalsVerified, patch: intervalsVerified.patch.replace("src/intervals.ts", "src/other.ts")}}),
+    intervals({result: {...intervalsVerified, patch: null}}), intervals({result: verified}), software({result: intervalsVerified})]) assert.throws(() => validateTaskRunStatus(bad), /contract_invalid/);
+  assert.throws(() => validateTaskRunResult(verified, "passed", "software-intervals"), /contract_invalid/);
+});
+test("software-intervals strategy ids are sort-first and sweep, never the bounds ids", () => {
+  assert.deepEqual(taskRunStrategyIds["software-intervals"], ["sort-first", "sweep"]);
+  for (const id of ["sort-first", "sweep"]) assert.ok(validTaskRunStrategy("software-intervals", id));
+  for (const value of [null, undefined, "", "Sweep", "invariant", "boundary-first", "unknown", 1, ["sweep"]]) assert.ok(!validTaskRunStrategy("software-intervals", value), String(value));
+  for (const id of ["sort-first", "sweep"]) assert.ok(!validTaskRunStrategy("software-bounds", id) && !validTaskRunStrategy("controlled-sum-integers-v1", id));
+  const start = (task_id: string, strategy_id: unknown) => ({schema_version: "1.0", request_id: request, profile_id: profile, task_id, strategy_id, approved: true});
+  for (const id of ["sort-first", "sweep"]) assert.deepEqual(validateTaskRunStart(start("software-intervals", id)), start("software-intervals", id));
+  for (const value of [start("software-intervals", null), start("software-intervals", "invariant"), start("software-intervals", ""), start("software-bounds", "sweep"), start("controlled-sum-integers-v1", "sort-first")])
+    assert.throws(() => validateTaskRunStart(value), /contract_invalid/);
+  assert.equal(validateTaskRunStatus(intervals({strategy_id: "sweep"})).operation?.strategy_id, "sweep");
+  for (const value of [intervals({strategy_id: null}), intervals({strategy_id: "invariant"}), software({strategy_id: "sweep"})]) assert.throws(() => validateTaskRunStatus(value), /contract_invalid/);
+  // A request never changes its strategy, and never its task.
+  const running = status({task_id: "software-intervals", strategy_id: "sort-first", phase: "running", revision: 3, tool_calls: 2, model: {requested: "gpt-6-luna", observed: "gpt-6-luna"}});
+  assert.ok(acceptTaskRunUpdate(running, intervals({strategy_id: "sort-first", revision: 9})));
+  assert.throws(() => acceptTaskRunUpdate(running, intervals({strategy_id: "sweep", revision: 9})), /stale/);
+  assert.throws(() => acceptTaskRunUpdate(running, software({strategy_id: "invariant", revision: 9})), /stale/);
 });

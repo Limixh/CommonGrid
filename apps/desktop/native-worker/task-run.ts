@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import path from "node:path";
 import type { TaskContract } from "@commongrid/task-schema";
 import { ControlledTaskCleanupError, controlledTaskId, createControlledPatch, seedControlledTask, snapshotControlledCandidate, verifyControlledCandidate, type ControlledPatch, type ControlledVerifierResult } from "../../../packages/agent-adapters/src/controlled-task.ts";
-import { findSoftwareStrategy, type SoftwareStrategy, seedSoftwareTask, snapshotSoftwareCandidate, softwareBaseline, softwareBoundsTaskId, softwareTaskPrompt, verifyCatalogSoftwareBundle, verifySoftwareCandidate, type SoftwareVerifierResult } from "../../../packages/agent-adapters/src/software-task.ts";
+import { findSoftwareStrategy, type SoftwareStrategy, seedSoftwareTask, snapshotSoftwareCandidate, softwareTaskPrompt, softwareTaskSpecFor, softwareTaskSpecs, type SoftwareTaskSpec, verifyCatalogSoftwareBundle, verifySoftwareCandidate, type SoftwareVerifierResult } from "../../../packages/agent-adapters/src/software-task.ts";
 import { TaskToolLimitError, runControlledProviderTurn, type ProviderTurnOptions } from "../../../packages/agent-adapters/src/controlled-task-session.ts";
 import { ManagedCliRuntime, startBridge, type ManagedRuntimeAssets } from "../../../packages/agent-adapters/src/managed-runtime.ts";
 import { assertBridgeHealthy, ProviderFailure } from "../../../packages/agent-adapters/src/session-protocol.ts";
@@ -42,10 +42,10 @@ export interface TaskRunDependencies {
   provider(options: ProviderTurnOptions): Promise<void>;
   snapshot(sandbox: TaskRunSandbox, image: string): Promise<string>;
   verify(source: string, image: string, signal: AbortSignal): Promise<ControlledVerifierResult>;
-  /** software-bounds: proves the catalog contract and pinned bundle match before any Docker call. */
-  softwareBundle(assets: ManagedRuntimeAssets): Promise<TaskContract>;
-  softwareSnapshot(sandbox: TaskRunSandbox, image: string): Promise<string>;
-  softwareVerify(source: string, image: string, signal: AbortSignal): Promise<SoftwareVerifierResult>;
+  /** Catalog software task: proves the catalog contract and pinned bundle match before any Docker call. */
+  softwareBundle(assets: ManagedRuntimeAssets, spec: SoftwareTaskSpec): Promise<TaskContract>;
+  softwareSnapshot(sandbox: TaskRunSandbox, image: string, spec: SoftwareTaskSpec): Promise<string>;
+  softwareVerify(source: string, image: string, signal: AbortSignal, spec: SoftwareTaskSpec): Promise<SoftwareVerifierResult>;
 }
 const dependencies: TaskRunDependencies = {
   bindings: root => new ProfileBindings(root),
@@ -57,11 +57,11 @@ const dependencies: TaskRunDependencies = {
   provider: runControlledProviderTurn,
   snapshot: (sandbox, image) => snapshotControlledCandidate(sandbox, image),
   verify: (source, image, signal) => verifyControlledCandidate(source, image, undefined, signal),
-  softwareBundle: assets => verifyCatalogSoftwareBundle(assets.baseImage),
-  softwareSnapshot: (sandbox, image) => snapshotSoftwareCandidate(sandbox, image),
-  softwareVerify: (source, image, signal) => verifySoftwareCandidate(source, image, undefined, signal),
+  softwareBundle: (assets, spec) => verifyCatalogSoftwareBundle(assets.baseImage, spec),
+  softwareSnapshot: (sandbox, image, spec) => snapshotSoftwareCandidate(sandbox, image, undefined, spec),
+  softwareVerify: (source, image, signal, spec) => verifySoftwareCandidate(source, image, undefined, signal, spec),
 };
-// Per-task steps of the approved run: a plain two-entry lookup, no extra layer.
+// Per-task steps of the approved run: the controlled task plus one entry per catalog software spec, no extra layer.
 type Verdict = ControlledVerifierResult | SoftwareVerifierResult;
 interface TaskSteps {
   seed(sandbox: TaskRunSandbox): Promise<void>;
@@ -72,12 +72,18 @@ interface TaskSteps {
   patch(source: string): ControlledPatch;
   verifier(verdict: Verdict): TaskRunVerifier;
 }
-const taskSteps: Record<TaskRunTaskId, (deps: TaskRunDependencies, contract: TaskContract | undefined, strategy: SoftwareStrategy | undefined) => TaskSteps> = {
+type StepsFactory = (deps: TaskRunDependencies, contract: TaskContract | undefined, strategy: SoftwareStrategy | undefined) => TaskSteps;
+const softwareSteps = (spec: SoftwareTaskSpec): StepsFactory => (deps, contract, strategy) => ({
+  seed: sandbox => seedSoftwareTask(sandbox, undefined, spec), prompt: softwareTaskPrompt(contract!, strategy!, spec),
+  snapshot: (sandbox, image) => deps.softwareSnapshot(sandbox, image, spec), verify: (source, image, signal) => deps.softwareVerify(source, image, signal, spec),
+  patch: source => createControlledPatch(source, spec.baseline, spec.id),
+  verifier: verdict => { const {passed, cases, visible_tests_passed, hidden_cases_passed} = verdict as SoftwareVerifierResult; return {passed, cases, visible_tests_passed, hidden_cases_passed}; },
+});
+const taskSteps: Record<TaskRunTaskId, StepsFactory> = {
   [controlledTaskId]: deps => ({seed: seedControlledTask, prompt: undefined, snapshot: deps.snapshot, verify: deps.verify, patch: source => createControlledPatch(source),
     verifier: verdict => { const {passed, cases, json_cases_passed, sparse_cases_passed} = verdict as ControlledVerifierResult; return {passed, cases, json_cases_passed, sparse_cases_passed}; }}),
-  [softwareBoundsTaskId]: (deps, contract, strategy) => ({seed: sandbox => seedSoftwareTask(sandbox), prompt: softwareTaskPrompt(contract!, strategy!), snapshot: deps.softwareSnapshot, verify: deps.softwareVerify,
-    patch: source => createControlledPatch(source, softwareBaseline, softwareBoundsTaskId),
-    verifier: verdict => { const {passed, cases, visible_tests_passed, hidden_cases_passed} = verdict as SoftwareVerifierResult; return {passed, cases, visible_tests_passed, hidden_cases_passed}; }}),
+  "software-bounds": softwareSteps(softwareTaskSpecs["software-bounds"]),
+  "software-intervals": softwareSteps(softwareTaskSpecs["software-intervals"]),
 };
 const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
 const abortCode = (signal: AbortSignal): TaskRunError => signal.reason === "deadline_exceeded" ? "deadline_exceeded" : signal.reason === "worker_failed" ? "worker_failed" : "cancelled";
@@ -135,7 +141,8 @@ export async function runTaskRun(boot: TaskRunBoot, signal: AbortSignal, emit: (
     const assets = await deps.assets(boot);
     signal.throwIfAborted();
     // A catalog task must match its pinned contract and bundle before anything touches Docker.
-    const contract = boot.task_id === softwareBoundsTaskId ? await deps.softwareBundle(assets).catch(() => { throw new TaskRunFailure("asset_invalid"); }) : undefined;
+    const softwareSpec = softwareTaskSpecFor(boot.task_id);
+    const contract = softwareSpec ? await deps.softwareBundle(assets, softwareSpec).catch(() => { throw new TaskRunFailure("asset_invalid"); }) : undefined;
     // Only the strategy id came from the boot; its instructions are read from the verified contract.
     const strategy = contract && findSoftwareStrategy(contract, boot.strategy_id);
     if (contract && !strategy) throw new TaskRunFailure("asset_invalid");

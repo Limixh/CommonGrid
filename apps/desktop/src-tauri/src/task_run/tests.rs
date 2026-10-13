@@ -15,6 +15,7 @@ use tauri::{
 const TASK_ID: &str = CONTROLLED_TASK;
 const PATCH_HEADER: &str = "diff --git a/sum.mjs b/sum.mjs\n";
 const SOFT_PATCH: &str = "diff --git a/src/search.ts b/src/search.ts\n--- a/src/search.ts\n+++ b/src/search.ts\n@@ -1 +1 @@\n-old\n+new\n";
+const INTERVALS_PATCH: &str = "diff --git a/src/intervals.ts b/src/intervals.ts\n--- a/src/intervals.ts\n+++ b/src/intervals.ts\n@@ -1 +1 @@\n-old\n+new\n";
 const ID: &str = "11111111-1111-4111-8111-111111111111";
 const OTHER: &str = "33333333-3333-4333-8333-333333333333";
 const PROFILE: &str = "22222222-2222-4222-8222-222222222222";
@@ -217,6 +218,8 @@ const OK={verifier:{passed:true,cases:34,json_cases_passed:true,sparse_cases_pas
 const NO={verifier:{passed:false,cases:34,json_cases_passed:true,sparse_cases_passed:false},candidate_sha256:H,patch_sha256:null,patch:null};
 const SPATCH='diff --git a/src/search.ts b/src/search.ts\n--- a/src/search.ts\n+++ b/src/search.ts\n@@ -1 +1 @@\n-old\n+new\n';
 const SOK={verifier:{passed:true,cases:21,visible_tests_passed:true,hidden_cases_passed:true},candidate_sha256:H,patch_sha256:H2,patch:SPATCH};
+const IPATCH='diff --git a/src/intervals.ts b/src/intervals.ts\n--- a/src/intervals.ts\n+++ b/src/intervals.ts\n@@ -1 +1 @@\n-old\n+new\n';
+const IOK={verifier:{passed:true,cases:21,visible_tests_passed:true,hidden_cases_passed:true},candidate_sha256:H,patch_sha256:H2,patch:IPATCH};
 const P=phase=>emit({type:'progress',phase}),A=tool_calls=>emit({type:'activity',tool_calls}),M=observed=>emit({type:'model',observed});
 const R=(outcome,error_code,cleanup,result)=>emit({type:'result',outcome,error_code,cleanup,result});
 const RUN=()=>{P('preparing');P('running');M(MODEL);A(1);A(3);P('verifying');P('cleaning');};
@@ -358,6 +361,9 @@ fn patch_of(extra: &str) -> Value {
 }
 fn soft_ok_result() -> Value {
     json!({"verifier":{"passed":true,"cases":21,"visible_tests_passed":true,"hidden_cases_passed":true},"candidate_sha256":H,"patch_sha256":H2,"patch":SOFT_PATCH})
+}
+fn intervals_ok_result() -> Value {
+    json!({"verifier":{"passed":true,"cases":21,"visible_tests_passed":true,"hidden_cases_passed":true},"candidate_sha256":H,"patch_sha256":H2,"patch":INTERVALS_PATCH})
 }
 fn soft_no_result() -> Value {
     json!({"verifier":{"passed":false,"cases":21,"visible_tests_passed":true,"hidden_cases_passed":false},"candidate_sha256":H,"patch_sha256":null,"patch":null})
@@ -2148,14 +2154,25 @@ fn only_one_run_is_active_and_a_second_request_is_denied() {
 
 #[test]
 fn task_ids_and_patch_headers_follow_the_browser_contract() {
-    assert_eq!(TASK_IDS, ["controlled-sum-integers-v1", "software-bounds"]);
+    assert_eq!(
+        TASK_IDS,
+        [
+            "controlled-sum-integers-v1",
+            "software-bounds",
+            "software-intervals"
+        ]
+    );
     assert_eq!(task_id("software-bounds"), Some(SOFTWARE_TASK));
+    assert_eq!(task_id("software-intervals"), Some(INTERVALS_TASK));
     assert_eq!(task_id("controlled-sum-integers-v1"), Some(CONTROLLED_TASK));
     for unknown in [
         "",
         "Software-Bounds",
         "software-bounds ",
         "software-bounds-v2",
+        "Software-Intervals",
+        "software-intervals ",
+        "software-intervals-v2",
     ] {
         assert_eq!(task_id(unknown), None, "{unknown:?}");
     }
@@ -2163,6 +2180,10 @@ fn task_ids_and_patch_headers_follow_the_browser_contract() {
     assert_eq!(
         patch_header(SOFTWARE_TASK).as_deref(),
         Some("diff --git a/src/search.ts b/src/search.ts\n")
+    );
+    assert_eq!(
+        patch_header(INTERVALS_TASK).as_deref(),
+        Some("diff --git a/src/intervals.ts b/src/intervals.ts\n")
     );
     assert_eq!(patch_header("other"), None);
     let request = |task: &str| json!({"request":{"schema_version":"1.0","request_id":ID,"profile_id":PROFILE,"task_id":task,"strategy_id":"invariant","approved":true}});
@@ -2174,6 +2195,15 @@ fn task_ids_and_patch_headers_follow_the_browser_contract() {
     assert!(valid_patch(SOFT_PATCH, SOFTWARE_TASK) && !valid_patch(SOFT_PATCH, CONTROLLED_TASK));
     assert!(valid_patch(PATCH, CONTROLLED_TASK) && !valid_patch(PATCH, SOFTWARE_TASK));
     assert!(!valid_patch(SOFT_PATCH, "other") && !valid_patch(PATCH, ""));
+    assert!(valid_patch(INTERVALS_PATCH, INTERVALS_TASK));
+    for (patch, task) in [
+        (INTERVALS_PATCH, SOFTWARE_TASK),
+        (INTERVALS_PATCH, CONTROLLED_TASK),
+        (SOFT_PATCH, INTERVALS_TASK),
+        (PATCH, INTERVALS_TASK),
+    ] {
+        assert!(!valid_patch(patch, task), "{task}");
+    }
     assert!(!valid_patch(
         "diff --git a/search.ts b/search.ts\n+x\n",
         SOFTWARE_TASK
@@ -2192,6 +2222,16 @@ fn verifier_shapes_are_exclusive_and_bound_to_their_task() {
     assert!(software_no.valid(Outcome::Rejected, SOFTWARE_TASK));
     assert!(!software.valid(Outcome::Rejected, SOFTWARE_TASK));
     assert!(!software_no.valid(Outcome::Passed, SOFTWARE_TASK));
+    // The software shape is valid for both software tasks, with each own patch.
+    let intervals: TaskResult = serde_json::from_value(intervals_ok_result()).unwrap();
+    assert!(matches!(intervals.verifier, Verifier::Software(_)));
+    assert!(intervals.valid(Outcome::Passed, INTERVALS_TASK));
+    assert!(software_no.valid(Outcome::Rejected, INTERVALS_TASK));
+    assert!(!software.valid(Outcome::Passed, INTERVALS_TASK));
+    assert!(!intervals.valid(Outcome::Passed, SOFTWARE_TASK));
+    assert!(!intervals.valid(Outcome::Passed, CONTROLLED_TASK));
+    assert!(!controlled.valid(Outcome::Passed, INTERVALS_TASK));
+    assert!(!controlled_no.valid(Outcome::Rejected, INTERVALS_TASK));
     // A verifier of the other task's shape never validates, in both directions.
     for outcome in [Outcome::Passed, Outcome::Rejected] {
         assert!(!software.valid(outcome, CONTROLLED_TASK));
@@ -2459,8 +2499,10 @@ fn unknown_tasks_and_task_changes_on_a_request_are_denied() {
 #[test]
 fn strategy_ids_follow_the_browser_contract() {
     assert_eq!(SOFTWARE_STRATEGIES, ["invariant", "boundary-first"]);
+    assert_eq!(INTERVALS_STRATEGIES, ["sort-first", "sweep"]);
     assert!(task_strategies(CONTROLLED_TASK).is_empty());
     assert_eq!(task_strategies(SOFTWARE_TASK), SOFTWARE_STRATEGIES);
+    assert_eq!(task_strategies(INTERVALS_TASK), INTERVALS_STRATEGIES);
     assert!(task_strategies("other").is_empty());
     // The controlled task takes exactly null; the software task exactly one id.
     assert_eq!(strategy_id(CONTROLLED_TASK, None), Some(None));
@@ -2475,6 +2517,26 @@ fn strategy_ids_follow_the_browser_contract() {
         Some(Some("boundary-first"))
     );
     assert_eq!(strategy_id(SOFTWARE_TASK, None), None);
+    // Each software task accepts only its own strategies.
+    for strategy in INTERVALS_STRATEGIES {
+        assert_eq!(
+            strategy_id(INTERVALS_TASK, Some(strategy)),
+            Some(Some(strategy))
+        );
+        assert_eq!(strategy_id(SOFTWARE_TASK, Some(strategy)), None);
+        assert_eq!(strategy_id(CONTROLLED_TASK, Some(strategy)), None);
+    }
+    for strategy in SOFTWARE_STRATEGIES {
+        assert_eq!(strategy_id(INTERVALS_TASK, Some(strategy)), None);
+    }
+    assert_eq!(strategy_id(INTERVALS_TASK, None), None);
+    for unknown in ["", "Sweep", "sweep ", "sort_first", "invariant", "other"] {
+        assert_eq!(
+            strategy_id(INTERVALS_TASK, Some(unknown)),
+            None,
+            "{unknown:?}"
+        );
+    }
     for unknown in ["", "Invariant", "invariant ", "boundary_first", "other"] {
         assert_eq!(
             strategy_id(SOFTWARE_TASK, Some(unknown)),
@@ -2487,6 +2549,8 @@ fn strategy_ids_follow_the_browser_contract() {
         (CONTROLLED_TASK, json!(null)),
         (SOFTWARE_TASK, json!("invariant")),
         (SOFTWARE_TASK, json!("boundary-first")),
+        (INTERVALS_TASK, json!("sort-first")),
+        (INTERVALS_TASK, json!("sweep")),
     ] {
         let value = request(task, strategy);
         assert!(preflight(&value, Shape::Start), "{value}");
@@ -2504,6 +2568,14 @@ fn strategy_ids_follow_the_browser_contract() {
         (SOFTWARE_TASK, json!(true)),
         (SOFTWARE_TASK, json!(["invariant"])),
         (SOFTWARE_TASK, json!({"id":"invariant"})),
+        (SOFTWARE_TASK, json!("sweep")),
+        (INTERVALS_TASK, json!("invariant")),
+        (INTERVALS_TASK, json!("boundary-first")),
+        (INTERVALS_TASK, json!(null)),
+        (INTERVALS_TASK, json!("")),
+        (INTERVALS_TASK, json!("SWEEP")),
+        (INTERVALS_TASK, json!(1)),
+        (INTERVALS_TASK, json!(["sweep"])),
     ] {
         let value = request(task, strategy);
         assert!(!preflight(&value, Shape::Start), "{value}");
@@ -2641,6 +2713,12 @@ fn invalid_strategies_and_strategy_changes_on_a_request_are_denied() {
         (SOFTWARE_TASK, Some("")),
         (SOFTWARE_TASK, Some("unknown")),
         (SOFTWARE_TASK, Some("Boundary-First")),
+        (SOFTWARE_TASK, Some("sweep")),
+        (INTERVALS_TASK, None),
+        (INTERVALS_TASK, Some("")),
+        (INTERVALS_TASK, Some("invariant")),
+        (INTERVALS_TASK, Some("boundary-first")),
+        (INTERVALS_TASK, Some("Sweep")),
     ] {
         assert!(admit(task, strategy).is_err(), "{task} {strategy:?}");
     }
@@ -2733,10 +2811,211 @@ fn operations_must_pair_their_task_with_a_matching_strategy() {
     assert!(valid_operation(&software));
     software.strategy_id = Some("unknown");
     assert!(!valid_operation(&software));
+    software.strategy_id = Some("sweep");
+    assert!(!valid_operation(&software));
+    let mut intervals = controlled.clone();
+    intervals.task_id = INTERVALS_TASK;
+    assert!(!valid_operation(&intervals));
+    intervals.strategy_id = Some("invariant");
+    assert!(!valid_operation(&intervals));
+    for strategy in INTERVALS_STRATEGIES {
+        intervals.strategy_id = Some(strategy);
+        assert!(valid_operation(&intervals));
+    }
     // The projection places strategy_id right after task_id.
     let text = serde_json::to_string(&controlled).unwrap();
     assert!(
         text.contains(r#""task_id":"controlled-sum-integers-v1","strategy_id":null,"revision""#)
+    );
+}
+
+// One result frame against a Cleaning-phase software-intervals snapshot.
+fn intervals_cleaning(frame: Value, accepted: bool) {
+    let (owner, _rx) = primed(Provider::Codex, Phase::Cleaning, 3, Some("gpt-6-luna"));
+    {
+        let mut inner = owner.inner.lock().unwrap();
+        let operation = inner.status.operation.as_mut().unwrap();
+        operation.task_id = INTERVALS_TASK;
+        operation.strategy_id = Some("sweep");
+    }
+    let mut result = None;
+    assert_eq!(feed(&owner, &frame, &mut result), accepted, "{frame}");
+    assert_eq!(result.is_some(), accepted, "{frame}");
+}
+
+#[test]
+fn intervals_task_starts_with_each_strategy_and_boots_with_its_id() {
+    let fixture = Fixture::new();
+    fixture.registry("codex");
+    let body = "RUN();R('passed',null,'verified',IOK);";
+    let root = fixture.resources(&worker_with(
+        "codex",
+        INTERVALS_TASK,
+        Some("sort-first"),
+        body,
+    ));
+    for strategy in INTERVALS_STRATEGIES {
+        // The worker exits on any boot whose task or strategy differs, so a
+        // passed result proves the boot carried exactly the admitted ones.
+        fixture.swap(
+            &root,
+            &worker_with("codex", INTERVALS_TASK, Some(strategy), body),
+        );
+        let owner = Owner::new();
+        let admitted = go_strategy(
+            &owner,
+            &fixture,
+            &root,
+            ID,
+            INTERVALS_TASK,
+            Some(strategy.into()),
+        )
+        .unwrap();
+        assert_eq!(
+            value(&admitted)["operation"]["task_id"],
+            json!("software-intervals")
+        );
+        assert_eq!(
+            value(&admitted)["operation"]["strategy_id"],
+            json!(strategy)
+        );
+        assert!(valid_status(&admitted));
+        let end = wait(&owner, Phase::Finished);
+        assert_eq!(
+            (end.outcome, end.task_id, end.strategy_id),
+            (Some(Outcome::Passed), INTERVALS_TASK, Some(strategy))
+        );
+        assert!(valid_operation(&end));
+    }
+}
+
+#[test]
+fn intervals_strategies_and_tasks_are_not_interchangeable() {
+    let fixture = Fixture::new();
+    fixture.registry("codex");
+    let absent = fixture.directory.join("absent");
+    let owner = Owner::new();
+    for (task, strategy) in [
+        (INTERVALS_TASK, "invariant"),
+        (INTERVALS_TASK, "boundary-first"),
+        (INTERVALS_TASK, "Sweep"),
+        (INTERVALS_TASK, ""),
+        (SOFTWARE_TASK, "sort-first"),
+        (SOFTWARE_TASK, "sweep"),
+        (CONTROLLED_TASK, "sweep"),
+    ] {
+        assert!(
+            go_strategy(
+                &owner,
+                &fixture,
+                &absent,
+                ID,
+                task,
+                Some(strategy.to_string())
+            )
+            .is_err(),
+            "{task} {strategy:?}"
+        );
+    }
+    assert!(go_strategy(&owner, &fixture, &absent, ID, INTERVALS_TASK, None).is_err());
+    assert!(owner.status().operation.is_none() && !owner.active());
+    assert!(!fixture.home().exists());
+}
+
+#[test]
+fn intervals_results_are_bound_to_the_intervals_patch_and_software_verifier() {
+    // A full happy frame sequence publishes the software verifier and its patch.
+    let fixture = Fixture::new();
+    fixture.registry("codex");
+    let root = fixture.resources(&worker_with(
+        "codex",
+        INTERVALS_TASK,
+        Some("sweep"),
+        "RUN();R('passed',null,'verified',IOK);",
+    ));
+    let owner = Owner::new();
+    go_strategy(
+        &owner,
+        &fixture,
+        &root,
+        ID,
+        INTERVALS_TASK,
+        Some("sweep".into()),
+    )
+    .unwrap();
+    let end = wait(&owner, Phase::Finished);
+    assert!(valid_operation(&end) && end.task_id == INTERVALS_TASK);
+    assert_eq!(
+        value(&owner.status()),
+        json!({"schema_version":"1.0","availability":"available","operation":{"request_id":ID,"profile_id":PROFILE,"provider":"codex","task_id":"software-intervals","strategy_id":"sweep","revision":8,"phase":"finished","outcome":"passed","error_code":null,"cleanup":"verified","tool_calls":3,"model":{"requested":"gpt-6-luna","observed":"gpt-6-luna"},"result":{"verifier":{"passed":true,"cases":21,"visible_tests_passed":true,"hidden_cases_passed":true},"candidate_sha256":H,"patch_sha256":H2,"patch":INTERVALS_PATCH}}})
+    );
+    // The same frames at the frame level: the software shape with the
+    // intervals patch is accepted, a rejection carries no patch.
+    intervals_cleaning(
+        result_frame("passed", json!(null), "verified", intervals_ok_result()),
+        true,
+    );
+    intervals_cleaning(
+        result_frame(
+            "rejected",
+            json!("candidate_rejected"),
+            "verified",
+            soft_no_result(),
+        ),
+        true,
+    );
+    for frame in [
+        // The bounds patch header on an intervals run.
+        result_frame("passed", json!(null), "verified", soft_ok_result()),
+        // The controlled patch header and verifier shape.
+        result_frame("passed", json!(null), "verified", ok_result()),
+        result_frame(
+            "rejected",
+            json!("candidate_rejected"),
+            "verified",
+            no_result(),
+        ),
+        result_frame("passed", json!(null), "verified", {
+            let mut r = intervals_ok_result();
+            r["verifier"]["hidden_cases_passed"] = json!(false);
+            r
+        }),
+    ] {
+        intervals_cleaning(frame, false);
+    }
+    // Conversely the intervals patch never fits the bounds or controlled task.
+    soft_cleaning(
+        result_frame("passed", json!(null), "verified", intervals_ok_result()),
+        false,
+    );
+    codex_cleaning(
+        result_frame("passed", json!(null), "verified", intervals_ok_result()),
+        false,
+    );
+    // A worker built for another task refuses an intervals boot.
+    fixture.swap(
+        &root,
+        &worker_with(
+            "codex",
+            SOFTWARE_TASK,
+            Some("invariant"),
+            "RUN();R('passed',null,'verified',SOK);",
+        ),
+    );
+    let refused = Owner::new();
+    go_strategy(
+        &refused,
+        &fixture,
+        &root,
+        ID,
+        INTERVALS_TASK,
+        Some("sweep".into()),
+    )
+    .unwrap();
+    let mismatch = wait(&refused, Phase::Finished);
+    assert_eq!(
+        (mismatch.outcome, mismatch.error_code.as_deref()),
+        (Some(Outcome::NeedsReview), Some("worker_failed"))
     );
 }
 

@@ -63,7 +63,7 @@ async function mock(page: Page, options: Options = {}) {
 const nav = (page: Page) => page.getByRole("navigation", { name: "Main navigation" });
 async function openContributions(page: Page, section?: "Gönderilen sonuçlar" | "Kaydedilen ilerleme") {
   await page.goto("/");
-  await expect(page.locator(".task-card")).toHaveCount(3);
+  await expect(page.locator(".task-card")).toHaveCount(catalog.tasks.length);
   await nav(page).getByRole("button", { name: "Katkılarım", exact: true }).click();
   if (section) await page.getByRole("button", { name: section, exact: true }).click();
   await expect(page.locator(".receipt-card")).not.toHaveCount(0);

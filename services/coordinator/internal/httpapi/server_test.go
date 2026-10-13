@@ -66,7 +66,7 @@ func TestTaskFilteringAndExecutionGate(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &data); err != nil {
 		t.Fatal(err)
 	}
-	if len(data.Items) != 1 || data.Execution || data.Source != "fixture" {
+	if len(data.Items) != 2 || data.Execution || data.Source != "fixture" {
 		t.Fatalf("unexpected response: %s", w.Body.String())
 	}
 }

@@ -1,4 +1,10 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { test, expect } from "@playwright/test";
+// The served catalog is the coordinator fixture: counts follow it instead of a hard-coded number of cards.
+const catalog = JSON.parse(readFileSync(path.join(process.cwd(), "services/coordinator/internal/catalog/catalog.json"), "utf8"));
+const total: number = catalog.tasks.length;
+const softwareTotal: number = catalog.tasks.filter((task: { type: string }) => task.type === "software").length;
 test("loads verified contracts, filters tasks and displays immutable JSON", async ({
   page,
 }) => {
@@ -6,9 +12,9 @@ test("loads verified contracts, filters tasks and displays immutable JSON", asyn
   page.on("pageerror", (err) => errors.push(err.message));
   await page.goto("/");
   await expect(page.getByText("Koordinatör bağlı")).toBeVisible();
-  await expect(page.locator(".task-card")).toHaveCount(3);
-  await page.getByRole("button", { name: "Yazılım 1", exact: true }).click();
-  await expect(page.locator(".task-card")).toHaveCount(1);
+  await expect(page.locator(".task-card")).toHaveCount(total);
+  await page.getByRole("button", { name: `Yazılım ${softwareTotal}`, exact: true }).click();
+  await expect(page.locator(".task-card")).toHaveCount(softwareTotal);
   await expect(
     page.getByRole("button", { name: "Görevi başlat", exact: true }),
   ).toBeDisabled();
@@ -70,7 +76,7 @@ test("workspace fits narrow screen without horizontal overflow", async ({
 }) => {
   await page.setViewportSize({ width: 780, height: 1000 });
   await page.goto("/");
-  await expect(page.locator(".task-card")).toHaveCount(3);
+  await expect(page.locator(".task-card")).toHaveCount(total);
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,

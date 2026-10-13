@@ -715,3 +715,88 @@ test("history mode labels the task that is really running or last ran, not the s
   await expect(result).toContainText("34/34 örnek geçti"); await expect(result).toContainText("JSON örnekleri: geçti");
   await expect(panel.getByTestId("task-run-diff").locator(".task-run-diff-meta").first()).toHaveText("diff --git a/sum.mjs b/sum.mjs");
 });
+
+// Second runnable catalog task: software-intervals (same flow, own card, strategies and diff path).
+const intervalsId = "software-intervals";
+const intervalsTask = catalogFixture.tasks.find((task: {id: string}) => task.id === intervalsId);
+const intervalsPin = taskRunCatalogPins[intervalsId]!;
+const intervalsPatch = [
+  "diff --git a/src/intervals.ts b/src/intervals.ts", "--- a/src/intervals.ts", "+++ b/src/intervals.ts", "@@ -4,3 +4,3 @@", " export function mergeIntervals(intervals: ReadonlyArray<readonly [number, number]>): Array<[number, number]> {",
+  "-  const sorted = intervals as Array<[number, number]>;", "+  const sorted = [...intervals].sort((a, b) => a[0] - b[0]);", "+  // <b onmouseover=\"window.__pwned = true\">", " }", "",
+].join("\n");
+const intervalsOperation = (changes: Partial<TaskRunOperation> = {}) => operation({task_id: intervalsId, strategy_id: "sort-first", ...changes});
+const intervalsPassed = envelope(intervalsOperation({
+  revision: 9, phase: "finished", outcome: "passed", cleanup: "verified", tool_calls: 5,
+  result: {verifier: {passed: true, cases: 40, visible_tests_passed: true, hidden_cases_passed: true}, candidate_sha256: candidateHash, patch_sha256: patchHash, patch: intervalsPatch},
+}));
+
+test("(pin) the catalog fixture's software-intervals contract equals the contract the runner pins and differs from software-bounds", () => {
+  expect(intervalsTask).toBeDefined();
+  expect(intervalsTask.task_version).toBe(intervalsPin.task_version);
+  expect(intervalsTask.contract_hash).toBe(intervalsPin.contract_hash);
+  expect(intervalsTask.contract_hash).not.toBe(softwareTask.contract_hash);
+  expect(intervalsTask.strategies.map((item: {id: string}) => item.id)).toEqual(["sort-first", "sweep"]);
+});
+
+for (const strategy of ["sort-first", "sweep"]) {
+  test(`(pin) software-intervals prepared from the catalog with ${strategy} explains the local bundle, needs approval and starts with the strict request`, async ({page}) => {
+    await freezeClock(page); await mockNative(page); await page.goto("/");
+    await expect(page.locator(".task-card")).toHaveCount(catalogFixture.tasks.length);
+    const selection = await prepareCatalog(page, intervalsTask, strategy);
+    for (const value of [intervalsTask.title, intervalsTask.id, intervalsTask.contract_hash, strategy, "Bu katalog görevi yerelde çalıştırılabilir.", "depo klonlanmadan sabitlenmiş yerel bir kaynak paketinden"])
+      await expect(selection).toContainText(value);
+    await expect(selection).not.toContainText("henüz çalıştırılamıyor");
+    const panel = page.locator(".task-run-panel");
+    await expect(panel).toHaveAttribute("aria-busy", "false");
+    const card = panel.locator(".task-run-card");
+    await expect(card.locator("h4")).toHaveText("Yerel kaynak paketi görevi: src/intervals.ts");
+    await expect(card).toContainText("mergeIntervals"); await expect(card).toContainText("Yalnız src/intervals.ts değiştirilebilir");
+    await expect(card).not.toContainText("lowerBound"); await expect(card).not.toContainText("src/search.ts"); await expect(card).not.toContainText("34 örnekli");
+    await expect(card.locator("code")).toHaveText([strategy, "gpt-6-luna"]);
+    // The card shows the id only, never the contract's instruction text.
+    await expect(card).not.toContainText(intervalsTask.strategies.find((item: {id: string}) => item.id === strategy).instructions as string);
+    await expect(panel.getByRole("checkbox")).not.toBeChecked(); await expect(start(panel)).toBeDisabled();
+    await approve(panel); await expect(start(panel)).toBeEnabled();
+    await page.getByRole("button", {name: "Change language", exact: true}).click();
+    await expect(selection).toContainText("This catalog task can run locally.");
+    await expect(card.locator("h4")).toHaveText("Local source bundle task: src/intervals.ts");
+    await panel.getByRole("button", {name: "Start", exact: true}).click();
+    const starts = (await calls(page)).filter(call => call.command === "local_task_run_start");
+    expect(starts).toHaveLength(1);
+    expect(starts[0].args).toEqual({request: {schema_version: "1.0", request_id: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/), profile_id: profileId, task_id: intervalsId, strategy_id: strategy, approved: true}});
+    expect(Object.keys(starts[0].args.request).sort()).toEqual(["approved", "profile_id", "request_id", "schema_version", "strategy_id", "task_id"]);
+    const progress = panel.locator(".task-run-progress");
+    await expect(progress).toContainText(`Applied strategy: ${strategy}`); await expect(progress).toContainText(intervalsId); await expect(progress).toContainText("src/intervals.ts");
+    await expect(progress).not.toContainText("src/search.ts"); await expect(progress).not.toContainText("sum.mjs");
+  });
+}
+
+test("a software-intervals run that passed shows the verifier checks, hashes and the src/intervals.ts diff as plain text lines", async ({page}) => {
+  await freezeClock(page); await mockNative(page, intervalsPassed); const panel = await open(page);
+  const result = panel.locator(".task-run-result");
+  await expect(result).toContainText("Görev doğrulandı");
+  await expect(result).toContainText(`${intervalsId} · src/intervals.ts`); await expect(result).not.toContainText("sum.mjs"); await expect(result).not.toContainText("src/search.ts");
+  await expect(result).toContainText("Uygulanan yaklaşım: sort-first");
+  await expect(result).toContainText("40/40 örnek geçti"); await expect(result).toContainText("görünür testler: geçti"); await expect(result).toContainText("gizli örnekler: geçti");
+  const diff = panel.getByTestId("task-run-diff");
+  await expect(diff.locator(".task-run-diff-meta")).toHaveText(["diff --git a/src/intervals.ts b/src/intervals.ts", "--- a/src/intervals.ts", "+++ b/src/intervals.ts"]);
+  await expect(diff.locator(".task-run-diff-add")).toHaveText(["+  const sorted = [...intervals].sort((a, b) => a[0] - b[0]);", "+  // <b onmouseover=\"window.__pwned = true\">"]);
+  await expect(diff.locator("b")).toHaveCount(0);
+  expect(await page.evaluate(() => (window as MockWindow).__pwned)).toBeUndefined();
+  await panel.getByRole("button", {name: "Diff'i kopyala", exact: true}).click();
+  expect(await page.evaluate(() => (window as MockWindow).__taskMock.copied)).toBe(intervalsPatch);
+  await page.getByRole("button", {name: "Change language", exact: true}).click();
+  await expect(result).toContainText("Task verified"); await expect(result).toContainText("Applied strategy: sort-first"); await expect(result).toContainText("visible tests: passed");
+});
+
+test("a software-intervals patch for the wrong file or another task's strategy is an invalid observation", async ({page}) => {
+  await freezeClock(page); await mockNative(page, intervalsPassed); const panel = await open(page);
+  await expect(panel.locator(".task-run-result")).toContainText(`${intervalsId} · src/intervals.ts`);
+  const wrongFile = envelope({...(intervalsPassed.operation as TaskRunOperation), result: {...(intervalsPassed.operation as TaskRunOperation).result!, patch: softwarePatch}});
+  const wrongStrategy = envelope({...(intervalsPassed.operation as TaskRunOperation), request_id: "c0000000-0000-4000-8000-000000000002", strategy_id: "invariant"});
+  for (const bad of [wrongFile, wrongStrategy]) {
+    await setValue(page, bad); await refresh(page);
+    await expect(panel.getByRole("alert")).toContainText("Görev durumu doğrulanamadı");
+    await expect(panel.getByTestId("task-run-diff")).not.toContainText("src/search.ts");
+  }
+});

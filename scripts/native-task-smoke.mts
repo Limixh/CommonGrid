@@ -10,7 +10,7 @@ import { validateManagedProfilesStatus } from "../packages/agent-adapters/src/ma
 import { acceptProfileSessionUpdate, validateClaudeAuthorizationUrl, validateProfileSessionStatus, type ProfileSessionStatus } from "../packages/agent-adapters/src/profile-session-protocol.ts";
 import { acceptTaskRunUpdate, taskRunObservedModels, taskRunRequestedModels, validateTaskRunStatus, type TaskRunOperation, type TaskRunProvider, type TaskRunStatus, type TaskRunTaskId, taskRunStrategyIds } from "../packages/agent-adapters/src/task-run-protocol.ts";
 import { applyControlledPatch, controlledBaseline, controlledVerifierCases } from "../packages/agent-adapters/src/controlled-task.ts";
-import { softwareBaseline, softwareBoundsTask, softwareVerifierCases } from "../packages/agent-adapters/src/software-task.ts";
+import { softwareTaskSpecFor } from "../packages/agent-adapters/src/software-task.ts";
 import { readOperationJournals } from "../packages/agent-adapters/src/operation-journal.ts";
 import { operationLeaseLabels } from "../packages/agent-adapters/src/operation-lease.ts";
 import { ProfileBindings } from "../apps/desktop/native-worker/profile-bindings.ts";
@@ -26,7 +26,7 @@ import { createNativeUiTrace, safeNativeUiErrorCategory } from "./native-ui-trac
 // No DOM dumps, raw errors, videos or challenge screenshots. Claude real-account
 // mode collects only bounded allowlisted UI/IPC events and safe session metadata.
 const arguments_ = process.argv.slice(2);
-const usage = "Usage: npm run test:native-task-smoke -- [--provider codex|claude] [--task controlled|software-bounds [--strategy <approved id>]] [--real-account] [--show] [--reuse-session <v4 UUID>]\nDefault: Codex signed-out task failure and cancellation without model inference.\n--task software-bounds: select the catalog task from the workspace (served by a local fixture-mode coordinator on 127.0.0.1:8787) instead of the controlled sum.mjs task; --strategy picks one of its approved strategies in the workspace (default: the first).\n--real-account: wait for official user authorization; run one gpt-6-luna (Codex) or haiku (Claude) task.\nCodex prints its official device URL/code once. Fresh Claude login requires --real-account --show: use the app's official browser button and paste the code only into its masked field. Claude URL/code/state are never printed.\n--reuse-session: use only an already authenticated .local/native-task-smoke/<UUID>/appdata store; requires --real-account. Official CLI status must verify authentication before one cheap task. No login, fallback or automatic retry; --show is optional for reuse. New reports/config/artifacts go into a separate run directory.\n--show: show the isolated native window (requires --real-account).\nThe isolated app store and official profile volumes are retained; host auth is never copied.";
+const usage = "Usage: npm run test:native-task-smoke -- [--provider codex|claude] [--task controlled|software-bounds|software-intervals [--strategy <approved id>]] [--real-account] [--show] [--reuse-session <v4 UUID>]\nDefault: Codex signed-out task failure and cancellation without model inference.\n--task software-bounds|software-intervals: select that catalog task from the workspace (served by a local fixture-mode coordinator on 127.0.0.1:8787) instead of the controlled sum.mjs task; --strategy picks one of its approved strategies in the workspace (default: the first).\n--real-account: wait for official user authorization; run one gpt-6-luna (Codex) or haiku (Claude) task.\nCodex prints its official device URL/code once. Fresh Claude login requires --real-account --show: use the app's official browser button and paste the code only into its masked field. Claude URL/code/state are never printed.\n--reuse-session: use only an already authenticated .local/native-task-smoke/<UUID>/appdata store; requires --real-account. Official CLI status must verify authentication before one cheap task. No login, fallback or automatic retry; --show is optional for reuse. New reports/config/artifacts go into a separate run directory.\n--show: show the isolated native window (requires --real-account).\nThe isolated app store and official profile volumes are retained; host auth is never copied.";
 if (arguments_.includes("--help")) { console.log(usage); process.exit(0); }
 let provider: TaskRunProvider = "codex", realAccount = false, show = false;
 let sourceSessionRunId: string | null = null;
@@ -42,11 +42,11 @@ for (let index = 0; index < arguments_.length; index++) {
     assert.ok(value === "codex" || value === "claude", "native_task_smoke_invalid_provider"); provider = value;
   } else if (argument === "--strategy") {
     const value = arguments_[++index];
-    assert.ok(typeof value === "string" && taskRunStrategyIds["software-bounds"].includes(value), "native_task_smoke_invalid_strategy"); requestedStrategy = value;
+    assert.ok(typeof value === "string" && Object.values(taskRunStrategyIds).some(ids => ids.includes(value)), "native_task_smoke_invalid_strategy"); requestedStrategy = value;
   } else if (argument === "--task") {
     const value = arguments_[++index];
-    assert.ok(value === "controlled" || value === "software-bounds", "native_task_smoke_invalid_task");
-    taskId = value === "controlled" ? "controlled-sum-integers-v1" : value;
+    assert.ok(value === "controlled" || (typeof value === "string" && softwareTaskSpecFor(value)), "native_task_smoke_invalid_task");
+    taskId = value === "controlled" ? "controlled-sum-integers-v1" : value as TaskRunTaskId;
   } else if (argument === "--reuse-session") {
     const value = arguments_[++index];
     assert.ok(typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value), "native_task_smoke_invalid_source_session_run_id");
@@ -61,13 +61,15 @@ if (process.platform !== "win32") throw new Error("native_task_smoke_requires_wi
 assert.equal(taskRunRequestedModels.codex, "gpt-6-luna", "native_task_smoke_cheap_model_policy_changed");
 assert.equal(taskRunRequestedModels.claude, "haiku", "native_task_smoke_cheap_model_policy_changed");
 const requestedModel = taskRunRequestedModels[provider];
-const software = taskId === "software-bounds";
+const softwareSpec = softwareTaskSpecFor(taskId), software = softwareSpec !== undefined;
 assert.ok(software || requestedStrategy === null, "native_task_smoke_strategy_requires_software_task");
+assert.ok(requestedStrategy === null || taskRunStrategyIds[taskId].includes(requestedStrategy), "native_task_smoke_invalid_strategy");
 // The UI sends only the id; the worker reads the instructions from the verified contract.
-const strategyId: string | null = software ? requestedStrategy ?? taskRunStrategyIds["software-bounds"][0] : null;
-const expectedCases = software ? softwareVerifierCases : controlledVerifierCases;
-const taskBaseline = software ? softwareBaseline : controlledBaseline;
-const softwareTitle = (softwareBoundsTask as {title: string}).title;
+const strategyId: string | null = software ? requestedStrategy ?? taskRunStrategyIds[taskId][0] : null;
+const expectedCases = softwareSpec?.verifierCases ?? controlledVerifierCases;
+const taskBaseline = softwareSpec?.baseline ?? controlledBaseline;
+const softwareTask = softwareSpec?.catalogTask as {title: string; contract_hash: string} | undefined;
+const softwareTitle = softwareTask?.title;
 const coordinatorOrigin = "http://127.0.0.1:8787";
 const profileName = provider === "claude" ? "Claude native task smoke" : "Codex native task smoke";
 
@@ -133,7 +135,7 @@ const independentManagedCleanup: {
   managed_containers_absent: false, profile_claims_absent: false};
 const controller = new AbortController();
 let completion: Promise<{result?: unknown; error?: unknown}> | undefined;
-// The fixture-mode coordinator serves the public catalog for --task software-bounds.
+// The fixture-mode coordinator serves the public catalog for the software --task values.
 const coordinatorController = new AbortController();
 let coordinatorCompletion: Promise<{error?: unknown}> | undefined;
 let coordinatorCleanup: CommandCleanup = {method: "none", status: "not_started"};
@@ -373,12 +375,12 @@ try {
   if (observeClaudeUi) { stage = "install_passive_ui_observer"; await nativeUiTrace.install(page); stage = "open_agents"; }
   if (software) {
     stage = "select_catalog_task";
-    await page.locator(".task-card").filter({hasText: softwareTitle}).click();
+    await page.locator(".task-card").filter({hasText: softwareTitle!}).click();
     await page.locator("#strategy").selectOption(strategyId!);
     await page.getByRole("button", {name: "Profil seçimini hazırla", exact: true}).click();
     const selection = page.locator(".execution-selection-panel");
     await expect(selection).toHaveAttribute("data-selection-kind", "catalog");
-    await expect(selection).toContainText((softwareBoundsTask as {contract_hash: string}).contract_hash);
+    await expect(selection).toContainText(softwareTask!.contract_hash);
     await expect(selection.getByText("Bu katalog görevi yerelde çalıştırılabilir.", {exact: true})).toBeVisible();
     assert.ok(coordinatorRequests.includes("/api/v1/tasks"), "native_task_smoke_catalog_not_from_fixture_coordinator");
     checks.push("workspace_catalog_from_fixture_coordinator_prepares_pinned_software_task_on_native_profile_screen");
@@ -533,7 +535,7 @@ try {
     assert.equal(result.cleanup, "verified"); assert.ok(result.tool_calls > 0 && result.tool_calls <= 16);
     assert.ok(result.result?.patch && result.result.patch_sha256);
     assert.deepEqual(result.result.verifier, software
-      ? {passed: true, cases: softwareVerifierCases, visible_tests_passed: true, hidden_cases_passed: true}
+      ? {passed: true, cases: expectedCases, visible_tests_passed: true, hidden_cases_passed: true}
       : {passed: true, cases: controlledVerifierCases, json_cases_passed: true, sparse_cases_passed: true});
     assert.equal(expectedCases, software ? 40 : 34);
     const digest = (value: string) => createHash("sha256").update(value).digest("hex");
@@ -547,7 +549,7 @@ try {
     authenticatedTask = "passed";
     const model = provider === "claude" ? "haiku" : "gpt_6_luna";
     checks.push(software
-      ? `real_${model}_native_ui_software_bounds_task_passes_visible_tests_40_hidden_cases_and_patch_roundtrip_hashes`
+      ? `real_${model}_native_ui_${taskId.replaceAll("-", "_")}_task_passes_visible_tests_40_hidden_cases_and_patch_roundtrip_hashes`
       : `real_${model}_native_ui_task_passes_34_independent_cases_and_patch_roundtrip_hashes`);
     stage = "account_status_after_task";
     await sessionStatusUi(page, "authenticated");

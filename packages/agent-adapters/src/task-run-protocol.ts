@@ -1,21 +1,22 @@
 // Browser-safe observation of one approved task run on the selected profile.
 // Only tasks in the accepted narrow scope can be requested: the controlled
-// sum.mjs task and one catalog software task run from a pinned local bundle. No
+// sum.mjs task and catalog software tasks run from pinned local bundles. No
 // prompt text, provider payload, host path or account identity crosses this
 // boundary; the verified patch is bounded and only present after verification.
 
 export type TaskRunProvider = "claude" | "codex";
-export const taskRunTaskIds = ["controlled-sum-integers-v1", "software-bounds"] as const;
+export const taskRunTaskIds = ["controlled-sum-integers-v1", "software-bounds", "software-intervals"] as const;
 export type TaskRunTaskId = typeof taskRunTaskIds[number];
 export const taskRunControlledTaskId: TaskRunTaskId = "controlled-sum-integers-v1";
 // The single writable file of each task; its unified diff starts with this path.
 export const taskRunPatchPaths: Readonly<Record<TaskRunTaskId, string>> = Object.freeze({
-  "controlled-sum-integers-v1": "sum.mjs", "software-bounds": "src/search.ts",
+  "controlled-sum-integers-v1": "sum.mjs", "software-bounds": "src/search.ts", "software-intervals": "src/intervals.ts",
 });
 // Catalog contracts the native runner implements. A catalog selection can start
 // only when its id, version and contract hash equal this pin exactly.
 export const taskRunCatalogPins: Readonly<Partial<Record<TaskRunTaskId, Readonly<{task_version: number; contract_hash: string}>>>> = Object.freeze({
   "software-bounds": Object.freeze({task_version: 1, contract_hash: "4823a3908e60b9bdeebf737c4f1d8c71a53c86981f5a4c6845877ba815f1216d"}),
+  "software-intervals": Object.freeze({task_version: 1, contract_hash: "5f1f13e5b3623bbd61f9479ec4944e99c71efd2cb49a608a6b4ba4c881adb6f2"}),
 });
 // Approved strategy ids of each pinned contract, in contract order. A catalog
 // task run names exactly one; the controlled task has none (strategy_id null).
@@ -24,6 +25,7 @@ export const taskRunCatalogPins: Readonly<Partial<Record<TaskRunTaskId, Readonly
 export const taskRunStrategyIds: Readonly<Record<TaskRunTaskId, readonly string[]>> = Object.freeze({
   "controlled-sum-integers-v1": Object.freeze([] as string[]),
   "software-bounds": Object.freeze(["invariant", "boundary-first"]),
+  "software-intervals": Object.freeze(["sort-first", "sweep"]),
 });
 export function validTaskRunStrategy(taskId: TaskRunTaskId, strategyId: unknown): strategyId is string | null {
   const allowed = taskRunStrategyIds[taskId];
@@ -55,6 +57,7 @@ export type TaskRunVerifier = TaskRunControlledVerifier | TaskRunSoftwareVerifie
 export const taskRunVerifierChecks: Readonly<Record<TaskRunTaskId, readonly [string, string]>> = Object.freeze({
   "controlled-sum-integers-v1": Object.freeze(["json_cases_passed", "sparse_cases_passed"] as const),
   "software-bounds": Object.freeze(["visible_tests_passed", "hidden_cases_passed"] as const),
+  "software-intervals": Object.freeze(["visible_tests_passed", "hidden_cases_passed"] as const),
 });
 export interface TaskRunResult { verifier: TaskRunVerifier; candidate_sha256: string; patch_sha256: string | null; patch: string | null }
 export interface TaskRunModel { requested: string; observed: string | null }

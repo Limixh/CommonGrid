@@ -29,8 +29,9 @@ use tauri::{
 const DENIED: &str = "local_task_run_denied";
 const CONTROLLED_TASK: &str = "controlled-sum-integers-v1";
 const SOFTWARE_TASK: &str = "software-bounds";
+const INTERVALS_TASK: &str = "software-intervals";
 // Mirrors taskRunTaskIds in the browser contract.
-const TASK_IDS: [&str; 2] = [CONTROLLED_TASK, SOFTWARE_TASK];
+const TASK_IDS: [&str; 3] = [CONTROLLED_TASK, SOFTWARE_TASK, INTERVALS_TASK];
 const MAX_REVISION: u32 = 1_000_000_000;
 const MAX_TOOL_CALLS: u32 = 16;
 const MAX_PATCH_BYTES: usize = 49_152;
@@ -80,9 +81,11 @@ fn task_id(value: &str) -> Option<&'static str> {
 // Mirrors taskRunStrategyIds: the approved strategy ids of each task. The
 // controlled task has none; a catalog task run names exactly one of its own.
 const SOFTWARE_STRATEGIES: [&str; 2] = ["invariant", "boundary-first"];
+const INTERVALS_STRATEGIES: [&str; 2] = ["sort-first", "sweep"];
 fn task_strategies(task: &str) -> &'static [&'static str] {
     match task {
         SOFTWARE_TASK => &SOFTWARE_STRATEGIES,
+        INTERVALS_TASK => &INTERVALS_STRATEGIES,
         _ => &[],
     }
 }
@@ -100,6 +103,7 @@ fn patch_path(task: &str) -> Option<&'static str> {
     match task {
         CONTROLLED_TASK => Some("sum.mjs"),
         SOFTWARE_TASK => Some("src/search.ts"),
+        INTERVALS_TASK => Some("src/intervals.ts"),
         _ => None,
     }
 }
@@ -140,7 +144,7 @@ impl Verifier {
                 v.json_cases_passed,
                 v.sparse_cases_passed,
             )),
-            (Self::Software(v), SOFTWARE_TASK) => Some((
+            (Self::Software(v), SOFTWARE_TASK | INTERVALS_TASK) => Some((
                 v.passed,
                 v.cases,
                 v.visible_tests_passed,

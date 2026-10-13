@@ -13,7 +13,7 @@ import { verifyAssets, type Boot } from "../../../apps/desktop/native-worker/cli
 import { parseTaskRunBoot, runTaskRun, taskRunBindingRoot, type TaskRunBoot, type TaskRunDependencies, type TaskRunFrame, type TaskRunRuntime, type TaskRunSandbox } from "../../../apps/desktop/native-worker/task-run.ts";
 import { ControlledTaskCleanupError, applyControlledPatch, controlledBaseline, createControlledPatch, controlledVerifierCases } from "../src/controlled-task.ts";
 import { contractHash } from "@commongrid/task-schema";
-import { softwareBaseline, softwareBoundsTask, softwareBoundsTaskId, softwareTaskPrompt, verifySoftwareBundle } from "../src/software-task.ts";
+import { softwareBaseline, softwareBoundsTask, softwareBoundsTaskId, softwareIntervalsBaseline, softwareIntervalsTask, softwareIntervalsTaskId, softwareTaskPrompt, softwareTaskSpecFor, verifySoftwareBundle, type SoftwareTaskId, type SoftwareTaskSpec } from "../src/software-task.ts";
 import { TaskToolLimitError, runControlledProviderTurn, type ProviderProcessFactory, type ProviderTurnOptions } from "../src/controlled-task-session.ts";
 import type { ManagedRuntimeAssets } from "../src/managed-runtime.ts";
 import { ProviderFailure } from "../src/session-protocol.ts";
@@ -22,13 +22,22 @@ import { acceptTaskRunUpdate, taskRunMaxFrameBytes, taskRunMaxToolCalls, taskRun
 import pins from "../runtime-assets/native-cli-assets.lock.json";
 
 const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
-const expectedStrategy = (id: string | null) => (softwareBoundsTask as {strategies: Array<{id: string; instructions: string}>}).strategies.find(item => item.id === id)!;
+const softwareTasks = {"software-bounds": softwareBoundsTask, "software-intervals": softwareIntervalsTask} as const;
+const softwareIds = ["software-bounds", "software-intervals"] as const;
+const expectedStrategy = (id: string | null, task: SoftwareTaskId = softwareBoundsTaskId) => (softwareTasks[task] as {strategies: Array<{id: string; instructions: string}>}).strategies.find(item => item.id === id)!;
+const defaultStrategy = (task: TaskRunTaskId) => task === "software-bounds" ? "invariant" : task === "software-intervals" ? "sort-first" : null;
 const correct = "export function sumIntegers(values) {\n  if (!Array.isArray(values)) throw new TypeError('Expected an array');\n  let total = 0;\n  for (const value of values) {\n    if (!Number.isSafeInteger(value)) throw new TypeError('Expected safe integers');\n    total += value;\n    if (!Number.isSafeInteger(total)) throw new RangeError('Unsafe sum');\n  }\n  return total;\n}\n";
 const fixedSoftware = softwareBaseline.replace("values.length - 1", "values.length");
+const fixedIntervals = softwareIntervalsBaseline
+  .replace("const sorted = intervals as Array<[number, number]>;" + String.fromCharCode(10) + "  sorted.sort();", "const sorted = [...intervals].sort((a, b) => a[0] - b[0]);")
+  .replace("start < last[1]) last[1] = end;", "start <= last[1]) last[1] = Math.max(last[1], end);");
+if (fixedIntervals === softwareIntervalsBaseline) throw new Error("intervals reference fix did not apply");
+const fixedFor = (task: TaskRunTaskId) => task === "software-intervals" ? fixedIntervals : fixedSoftware;
+const baselineFor = (task: TaskRunTaskId) => task === "software-intervals" ? softwareIntervalsBaseline : softwareBaseline;
 const softwareImage = "node@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392";
-const bootFor = (provider: TaskRunProvider, task: TaskRunTaskId = "controlled-sum-integers-v1", strategy: string | null = task === softwareBoundsTaskId ? "invariant" : null): TaskRunBoot => ({type: "task_run_boot", schema_version: "1.0", request_id: randomUUID(), profile_id: randomUUID(), provider, task_id: task, strategy_id: strategy,
+const bootFor = (provider: TaskRunProvider, task: TaskRunTaskId = "controlled-sum-integers-v1", strategy: string | null = defaultStrategy(task)): TaskRunBoot => ({type: "task_run_boot", schema_version: "1.0", request_id: randomUUID(), profile_id: randomUUID(), provider, task_id: task, strategy_id: strategy,
   journal_root: path.resolve("fixture-journal"), assets_root: path.resolve("fixture-assets"), profile_registry_root: path.resolve("fixture-appdata", "managed-profiles")});
-const assetsFor = (boot: TaskRunBoot, catalog = true): ManagedRuntimeAssets => ({baseImage: boot.task_id === softwareBoundsTaskId ? softwareImage : "node@sha256:" + "0".repeat(64), journalRoot: boot.journal_root, bridgeRoot: boot.assets_root,
+const assetsFor = (boot: TaskRunBoot, catalog = true): ManagedRuntimeAssets => ({baseImage: softwareTaskSpecFor(boot.task_id) ? softwareImage : "node@sha256:" + "0".repeat(64), journalRoot: boot.journal_root, bridgeRoot: boot.assets_root,
   binaries: {claude: {binaryPath: path.resolve("fixture-claude"), sha256: "0".repeat(64)}, codex: {binaryPath: path.resolve("fixture-codex"), sha256: "1".repeat(64)}},
   ...(catalog ? {codexCatalog: {filePath: path.resolve("fixture-assets", "codex-coding-catalog.json"), sha256: pins.codex_catalog.sha256}} : {})});
 
@@ -63,17 +72,18 @@ function fixture(options: Options = {}) {
     async bridge() { calls.push("bridge"); return {stats, close() { calls.push("bridge-close"); }}; },
     async provider(turn: ProviderTurnOptions) {
       calls.push("provider"); assert.equal(turn.provider, provider);
-      assert.equal(turn.prompt, boot.task_id === softwareBoundsTaskId ? softwareTaskPrompt(softwareBoundsTask as {prompt: string}, expectedStrategy(boot.strategy_id)) : undefined); assert.equal(retained, 1); assert.equal(turn.runtime, runtime); assert.equal(turn.bridgeStats, stats);
+      const spec = softwareTaskSpecFor(boot.task_id);
+      assert.equal(turn.prompt, spec ? softwareTaskPrompt(spec.catalogTask as {prompt: string}, expectedStrategy(boot.strategy_id, spec.id), spec) : undefined); assert.equal(retained, 1); assert.equal(turn.runtime, runtime); assert.equal(turn.bridgeStats, stats);
       turn.observer.model(taskRunObservedModels[provider][0]); turn.observer.toolCall(1); turn.observer.toolCall(2); turn.trace.quiescent = true;
     },
-    async softwareBundle(actual) {
-      calls.push("bundle"); assert.equal(actual, assets);
+    async softwareBundle(actual, spec) {
+      calls.push("bundle"); assert.equal(actual, assets); assert.equal(spec, softwareTaskSpecFor(boot.task_id));
       // The runner pins the real contract hash in task-run-protocol; this stand-in binds the shipped catalog entry itself.
-      const task = softwareBoundsTask as {task_version: number; contract_hash: string};
-      return verifySoftwareBundle(task, {task_version: task.task_version, contract_hash: task.contract_hash, image: actual.baseImage});
+      const task = spec.catalogTask as {task_version: number; contract_hash: string};
+      return verifySoftwareBundle(task, {task_version: task.task_version, contract_hash: task.contract_hash, image: actual.baseImage}, undefined, spec);
     },
-    async softwareSnapshot(actual, image) { calls.push("software-snapshot"); assert.equal(actual, sandbox); assert.equal(image, assets.baseImage); return fixedSoftware; },
-    async softwareVerify(source, image) { calls.push("software-verify"); assert.equal(image, assets.baseImage); return {passed: true, cases: 40, visible_tests_passed: true, hidden_cases_passed: true, candidate_sha256: sha256(source)}; },
+    async softwareSnapshot(actual, image, spec) { calls.push("software-snapshot"); assert.equal(actual, sandbox); assert.equal(image, assets.baseImage); assert.equal(spec, softwareTaskSpecFor(boot.task_id)); return fixedFor(spec.id); },
+    async softwareVerify(source, image, _signal, spec) { calls.push("software-verify"); assert.equal(image, assets.baseImage); assert.equal(spec, softwareTaskSpecFor(boot.task_id)); return {passed: true, cases: 40, visible_tests_passed: true, hidden_cases_passed: true, candidate_sha256: sha256(source)}; },
     async snapshot(actual, image) { calls.push("snapshot"); assert.equal(actual, sandbox); assert.equal(image, assets.baseImage); return correct; },
     async verify(source, image) { calls.push("verify"); assert.equal(image, assets.baseImage); return {passed: true, cases: controlledVerifierCases, json_cases_passed: true, sparse_cases_passed: true, candidate_sha256: sha256(source)}; },
   };
@@ -510,123 +520,153 @@ test("worker entry dispatches task runs and keeps stdout framed for an unbound p
   } finally { await rm(directory, {recursive: true, force: true}); }
 });
 
-// ---- Catalog software task (software-bounds) --------------------------------
+// ---- Catalog software tasks (software-bounds, software-intervals) -----------
 
-test("boot accepts exactly the two approved task ids", () => {
-  for (const task of ["controlled-sum-integers-v1", "software-bounds"] as const) assert.equal(parseTaskRunBoot(bootFor("claude", task)).task_id, task);
-  for (const value of ["lean-add-comm", "Software-Bounds", "software-bounds ", ""]) assert.throws(() => parseTaskRunBoot({...bootFor("codex", "software-bounds"), task_id: value}));
+const writablePath = {"software-bounds": "src/search.ts", "software-intervals": "src/intervals.ts"} as const;
+const strategyText = {
+  "software-bounds": {
+    invariant: "Yarı açık [lo, hi) aralığının invariantını koru; önce en küçük karşı örneği bul.",
+    "boundary-first": "Önce boş dizi ve uç değerleri incele, ardından tekrar eden değerleri ele al.",
+  },
+  "software-intervals": {
+    "sort-first": "Önce aralıkları girdiyi değiştirmeden bir kopya üzerinde start değerine göre sayısal olarak sırala; ardından tek geçişte her aralığı son birleştirilen aralıkla karşılaştır.",
+    sweep: "Uç noktaları tek bir tarama ile işle: açık aralık sayısını izle, aynı koordinatta başlangıçları bitişlerden önce işle ve sayaç sıfıra indiğinde birleşik aralığı kapat.",
+  },
+} as const;
+const strategiesOf = (task: SoftwareTaskId) => Object.keys(strategyText[task]) as Array<keyof typeof strategyText[typeof task] & string>;
+
+test("boot accepts exactly the three approved task ids", () => {
+  for (const task of ["controlled-sum-integers-v1", "software-bounds", "software-intervals"] as const) assert.equal(parseTaskRunBoot(bootFor("claude", task)).task_id, task);
+  for (const value of ["lean-add-comm", "Software-Bounds", "software-bounds ", "software-interval", "software-intervals ", "Software-Intervals", ""]) assert.throws(() => parseTaskRunBoot({...bootFor("codex", "software-bounds"), task_id: value}));
 });
-test("software happy path: bundle is proven before Docker, the task prompt reaches the provider and the patch targets src/search.ts", async () => {
-  for (const provider of ["codex", "claude"] as const) {
-    const f = fixture({provider, task: "software-bounds", catalog: provider === "codex"}); await f.run();
-    const middle = provider === "codex" ? ["install-catalog", "start", "exec"] : ["start"];
-    assert.deepEqual(f.calls, ["read", "assets", "bundle", "prerequisite", "restore", "begin", ...middle, "retain", "sandbox", "seed", "seed", "seed", "bridge", "provider", "bridge-close", "software-snapshot", "software-verify", "bridge-close", "sandbox-close", "stop", "release", "finish"]);
-    assert.ok(!f.calls.includes("snapshot") && !f.calls.includes("verify"));
-    const final = result(f.frames), expected = createControlledPatch(fixedSoftware, softwareBaseline, "software-bounds");
-    assert.equal(final.outcome, "passed"); assert.equal(final.error_code, null); assert.equal(final.cleanup, "verified");
-    assert.deepEqual(final.result, {verifier: {passed: true, cases: 40, visible_tests_passed: true, hidden_cases_passed: true}, candidate_sha256: sha256(fixedSoftware), patch_sha256: expected.patch_sha256, patch: expected.patch});
-    assert.ok(final.result!.patch!.startsWith("diff --git a/src/search.ts b/src/search.ts\n"));
-    assert.equal(applyControlledPatch(softwareBaseline, final.result!.patch!, "software-bounds"), fixedSoftware);
-    const status = supervise(f.boot, f.frames);
-    assert.equal(status.operation?.outcome, "passed"); assert.equal(status.operation?.task_id, "software-bounds");
-  }
-});
-test("software rejection reports the verifier split and carries no patch", async () => {
-  const f = fixture({task: "software-bounds"});
-  f.deps.softwareVerify = async source => ({passed: false, cases: 40, visible_tests_passed: true, hidden_cases_passed: false, candidate_sha256: sha256(source)});
-  await f.run();
-  assert.deepEqual(result(f.frames), {type: "result", outcome: "rejected", error_code: "candidate_rejected", cleanup: "verified",
-    result: {verifier: {passed: false, cases: 40, visible_tests_passed: true, hidden_cases_passed: false}, candidate_sha256: sha256(fixedSoftware), patch_sha256: null, patch: null}});
-  assert.equal(supervise(f.boot, f.frames).operation?.outcome, "rejected");
-  // A verdict for a different candidate than the one exported is a verifier failure, never a pass.
-  const wrong = fixture({task: "software-bounds"}); wrong.deps.softwareVerify = async () => ({passed: true, cases: 40, visible_tests_passed: true, hidden_cases_passed: true, candidate_sha256: "0".repeat(64)});
-  await wrong.run(); assert.equal(result(wrong.frames).error_code, "verifier_failed"); assert.equal(result(wrong.frames).result, null);
-});
-test("an invalid or foreign software bundle stops with asset_invalid before any Docker call", async () => {
-  const task = softwareBoundsTask as Record<string, any>;
-  const rehash = async (change: (value: any) => void) => { const value = structuredClone(task); change(value); value.contract_hash = await contractHash(value as never); return value; };
-  const variants: Array<[string, (f: ReturnType<typeof fixture>) => Promise<void> | void]> = [
-    ["bundle check throws", f => { f.deps.softwareBundle = async () => { calls(f).push("bundle"); throw new Error("PRIVATE_BUNDLE_DETAIL"); }; }],
-    ["tampered contract", f => { f.deps.softwareBundle = async assets => { calls(f).push("bundle"); return verifySoftwareBundle({...task, title: "changed"}, {task_version: 1, contract_hash: task.contract_hash, image: assets.baseImage}); }; }],
-    ["different commit", async f => { const value = await rehash(v => { v.workspace.commit = "2".repeat(40); }); f.deps.softwareBundle = async assets => { calls(f).push("bundle"); return verifySoftwareBundle(value, {task_version: 1, contract_hash: value.contract_hash, image: assets.baseImage}); }; }],
-    ["different image", f => { f.deps.softwareBundle = async () => { calls(f).push("bundle"); return verifySoftwareBundle(task, {task_version: 1, contract_hash: task.contract_hash, image: "node@sha256:" + "0".repeat(64)}); }; }],
-    ["stale pin", f => { f.deps.softwareBundle = async assets => { calls(f).push("bundle"); return verifySoftwareBundle(task, {task_version: 1, contract_hash: "0".repeat(64), image: assets.baseImage}); }; }],
-  ];
-  const calls = (f: ReturnType<typeof fixture>) => f.calls;
-  for (const [name, setup] of variants) {
-    const f = fixture({task: "software-bounds"}); await setup(f); await f.run();
-    assert.deepEqual(f.calls, ["read", "assets", "bundle"], name);
-    assert.deepEqual(types(f.frames), ["preparing", "cleaning", "result"], name);
-    assert.deepEqual(result(f.frames), {type: "result", outcome: "failed", error_code: "asset_invalid", cleanup: "verified", result: null}, name);
-    assert.ok(!JSON.stringify(f.frames).includes("PRIVATE"), name); supervise(f.boot, f.frames);
-  }
-  // The controlled task never consults the software bundle.
+for (const task of softwareIds) {
+  const writable = writablePath[task];
+  test(`${task}: happy path proves the bundle before Docker, the task prompt reaches the provider and the patch targets ${writable}`, async () => {
+    for (const provider of ["codex", "claude"] as const) {
+      const f = fixture({provider, task, catalog: provider === "codex"}); await f.run();
+      const middle = provider === "codex" ? ["install-catalog", "start", "exec"] : ["start"];
+      assert.deepEqual(f.calls, ["read", "assets", "bundle", "prerequisite", "restore", "begin", ...middle, "retain", "sandbox", "seed", "seed", "seed", "bridge", "provider", "bridge-close", "software-snapshot", "software-verify", "bridge-close", "sandbox-close", "stop", "release", "finish"]);
+      assert.ok(!f.calls.includes("snapshot") && !f.calls.includes("verify"));
+      const final = result(f.frames), expected = createControlledPatch(fixedFor(task), baselineFor(task), task);
+      assert.equal(final.outcome, "passed"); assert.equal(final.error_code, null); assert.equal(final.cleanup, "verified");
+      assert.deepEqual(final.result, {verifier: {passed: true, cases: 40, visible_tests_passed: true, hidden_cases_passed: true}, candidate_sha256: sha256(fixedFor(task)), patch_sha256: expected.patch_sha256, patch: expected.patch});
+      assert.ok(final.result!.patch!.startsWith(`diff --git a/${writable} b/${writable}\n`));
+      assert.equal(applyControlledPatch(baselineFor(task), final.result!.patch!, task), fixedFor(task));
+      const status = supervise(f.boot, f.frames);
+      assert.equal(status.operation?.outcome, "passed"); assert.equal(status.operation?.task_id, task);
+    }
+  });
+  test(`${task}: rejection reports the verifier split and carries no patch`, async () => {
+    const f = fixture({task});
+    f.deps.softwareVerify = async source => ({passed: false, cases: 40, visible_tests_passed: true, hidden_cases_passed: false, candidate_sha256: sha256(source)});
+    await f.run();
+    assert.deepEqual(result(f.frames), {type: "result", outcome: "rejected", error_code: "candidate_rejected", cleanup: "verified",
+      result: {verifier: {passed: false, cases: 40, visible_tests_passed: true, hidden_cases_passed: false}, candidate_sha256: sha256(fixedFor(task)), patch_sha256: null, patch: null}});
+    assert.equal(supervise(f.boot, f.frames).operation?.outcome, "rejected");
+    // A verdict for a different candidate than the one exported is a verifier failure, never a pass.
+    const wrong = fixture({task}); wrong.deps.softwareVerify = async () => ({passed: true, cases: 40, visible_tests_passed: true, hidden_cases_passed: true, candidate_sha256: "0".repeat(64)});
+    await wrong.run(); assert.equal(result(wrong.frames).error_code, "verifier_failed"); assert.equal(result(wrong.frames).result, null);
+  });
+  test(`${task}: an invalid or foreign software bundle stops with asset_invalid before any Docker call`, async () => {
+    const catalogTask = softwareTasks[task] as Record<string, any>;
+    const rehash = async (change: (value: any) => void) => { const value = structuredClone(catalogTask); change(value); value.contract_hash = await contractHash(value as never); return value; };
+    const pinOf = (value: any, image: string) => ({task_version: 1, contract_hash: value.contract_hash, image});
+    const foreign = softwareTasks[task === "software-bounds" ? "software-intervals" : "software-bounds"] as Record<string, any>;
+    const variants: Array<[string, (f: ReturnType<typeof fixture>) => Promise<void> | void]> = [
+      ["bundle check throws", f => { f.deps.softwareBundle = async () => { f.calls.push("bundle"); throw new Error("PRIVATE_BUNDLE_DETAIL"); }; }],
+      ["tampered contract", f => { f.deps.softwareBundle = async (assets, spec) => { f.calls.push("bundle"); return verifySoftwareBundle({...catalogTask, title: "changed"}, pinOf(catalogTask, assets.baseImage), undefined, spec); }; }],
+      ["different commit", async f => { const value = await rehash(v => { v.workspace.commit = "2".repeat(40); }); f.deps.softwareBundle = async (assets, spec) => { f.calls.push("bundle"); return verifySoftwareBundle(value, pinOf(value, assets.baseImage), undefined, spec); }; }],
+      ["different image", f => { f.deps.softwareBundle = async (_assets, spec) => { f.calls.push("bundle"); return verifySoftwareBundle(catalogTask, pinOf(catalogTask, "node@sha256:" + "0".repeat(64)), undefined, spec); }; }],
+      ["stale pin", f => { f.deps.softwareBundle = async (assets, spec) => { f.calls.push("bundle"); return verifySoftwareBundle(catalogTask, pinOf({contract_hash: "0".repeat(64)}, assets.baseImage), undefined, spec); }; }],
+      ["the other task's contract", f => { f.deps.softwareBundle = async (assets, spec) => { f.calls.push("bundle"); return verifySoftwareBundle(foreign, pinOf(foreign, assets.baseImage), undefined, spec); }; }],
+    ];
+    for (const [name, setup] of variants) {
+      const f = fixture({task}); await setup(f); await f.run();
+      assert.deepEqual(f.calls, ["read", "assets", "bundle"], name);
+      assert.deepEqual(types(f.frames), ["preparing", "cleaning", "result"], name);
+      assert.deepEqual(result(f.frames), {type: "result", outcome: "failed", error_code: "asset_invalid", cleanup: "verified", result: null}, name);
+      assert.ok(!JSON.stringify(f.frames).includes("PRIVATE"), name); supervise(f.boot, f.frames);
+    }
+  });
+  test(`${task}: candidate policy failures become candidate_invalid and verifier cleanup uncertainty needs review`, async () => {
+    for (const message of ["candidate_unchanged", "candidate_forbidden_pattern", "candidate_protected_changed"]) {
+      const f = fixture({task}); f.deps.softwareSnapshot = async () => { throw new Error(message); }; await f.run();
+      assert.deepEqual(result(f.frames), {type: "result", outcome: "failed", error_code: "candidate_invalid", cleanup: "verified", result: null}, message);
+      assert.ok(!f.calls.includes("software-verify")); supervise(f.boot, f.frames);
+    }
+    const broken = fixture({task}); broken.deps.softwareSnapshot = async () => { throw new Error("docker exploded"); }; await broken.run();
+    assert.equal(result(broken.frames).error_code, "worker_failed");
+    const leaked = fixture({task}); leaked.deps.softwareVerify = async () => { throw new ControlledTaskCleanupError("verifier", [new Error("PRIVATE")]); }; await leaked.run();
+    assert.deepEqual(result(leaked.frames), {type: "result", outcome: "needs_review", error_code: "cleanup_failed", cleanup: "unknown", result: null});
+    assert.ok(!leaked.calls.includes("finish")); supervise(leaked.boot, leaked.frames);
+    const failing = fixture({task}); failing.deps.softwareVerify = async () => { throw new Error("docker exploded"); }; await failing.run();
+    assert.equal(result(failing.frames).error_code, "verifier_failed");
+    // A patch that cannot be built against this task's baseline is candidate_invalid.
+    const unchanged = fixture({task}); unchanged.deps.softwareSnapshot = async () => baselineFor(task); unchanged.deps.softwareVerify = async source => ({passed: true, cases: 40, visible_tests_passed: true, hidden_cases_passed: true, candidate_sha256: sha256(source)});
+    await unchanged.run(); assert.equal(result(unchanged.frames).error_code, "candidate_invalid"); assert.equal(result(unchanged.frames).result, null);
+  });
+
+
+  // ---- Approved strategy -----------------------------------------------------
+
+  test(`${task}: boot carries the strategy id only, an approved id of this task`, () => {
+    const ids = strategiesOf(task), other = task === "software-bounds" ? strategiesOf("software-intervals") : strategiesOf("software-bounds");
+    for (const id of ids) assert.equal(parseTaskRunBoot(bootFor("codex", task, id)).strategy_id, id);
+    for (const value of [null, undefined, "", "Invariant", "invariant ", "unknown", "lean-plan", ["x"], {id: ids[0]}, 1, ...other]) assert.throws(() => parseTaskRunBoot({...bootFor("codex", task), strategy_id: value}), /worker_failed/, `${task} with ${JSON.stringify(value)}`);
+    const {strategy_id: _strategy, ...missing} = bootFor("claude", task);
+    assert.throws(() => parseTaskRunBoot(missing), /worker_failed/);
+    assert.throws(() => parseTaskRunBoot({...bootFor("claude", task), instructions: "free text"}), /worker_failed/);
+  });
+  test(`${task}: each approved strategy reaches the provider as its contract instructions inside the fixed prompt`, async () => {
+    const contract = softwareTasks[task] as {prompt: string}, ids = strategiesOf(task);
+    for (const provider of ["codex", "claude"] as const) for (const strategy of ids) {
+      const f = fixture({provider, task, strategy, catalog: provider === "codex"});
+      let prompt: string | undefined; const original = f.deps.provider;
+      f.deps.provider = async turn => { prompt = turn.prompt; await original(turn); };
+      await f.run();
+      assert.equal(result(f.frames).outcome, "passed", `${provider}/${strategy}`);
+      assert.ok(prompt!.startsWith(contract.prompt + "\n\nApproved strategy (" + strategy + "): " + (strategyText[task] as Record<string, string>)[strategy] + "\nThis strategy only guides your approach; it does not change the task or its acceptance criteria.\n\n"), `${provider}/${strategy}`);
+      assert.ok(prompt!.includes(`Edit only /task/${writable},`) && !prompt!.includes(`/task/${writablePath[task === "software-bounds" ? "software-intervals" : "software-bounds"]}`), `${provider}/${strategy}`);
+      for (const other of ids.filter(id => id !== strategy)) assert.ok(!prompt!.includes((strategyText[task] as Record<string, string>)[other]) && !prompt!.includes(`(${other})`));
+      assert.equal(supervise(f.boot, f.frames).operation?.strategy_id, strategy);
+      // The strategy id never appears in a worker frame; only the supervisor's public projection carries it.
+      assert.ok(!JSON.stringify(f.frames).includes(strategy) && !JSON.stringify(f.frames).includes("Approved strategy"));
+    }
+  });
+  test(`${task}: a strategy missing from, or a strategy list differing in, the verified contract is asset_invalid before any Docker call`, async () => {
+    const catalogTask = softwareTasks[task] as Record<string, any>, [first, second] = strategiesOf(task);
+    const rehash = async (change: (value: any) => void) => { const value = structuredClone(catalogTask); change(value); value.contract_hash = await contractHash(value as never); return value; };
+    const verifyWith = (f: ReturnType<typeof fixture>, value: any) => { f.deps.softwareBundle = async (actual, spec) => { f.calls.push("bundle"); return verifySoftwareBundle(value, {task_version: 1, contract_hash: value.contract_hash, image: actual.baseImage}, undefined, spec); }; };
+    const variants: Array<[string, string, (f: ReturnType<typeof fixture>) => Promise<void> | void]> = [
+      ["verified contract lacks the requested strategy", first, f => { f.deps.softwareBundle = async (actual, spec) => { f.calls.push("bundle"); const verified = await verifySoftwareBundle(catalogTask, {task_version: 1, contract_hash: catalogTask.contract_hash, image: actual.baseImage}, undefined, spec); return {...verified, strategies: verified.strategies.filter(item => item.id !== first)}; }; }],
+      ["contract renames a strategy id", second, async f => verifyWith(f, await rehash(v => { v.strategies[1].id = "edges"; }))],
+      ["contract reorders strategies", first, async f => verifyWith(f, await rehash(v => { v.strategies.reverse(); }))],
+      ["contract adds a strategy", first, async f => verifyWith(f, await rehash(v => { v.strategies.push({id: "extra", instructions: "Ek."}); }))],
+    ];
+    for (const [name, strategy, setup] of variants) {
+      const f = fixture({task, strategy}); await setup(f); await f.run();
+      assert.deepEqual(f.calls, ["read", "assets", "bundle"], name);
+      assert.deepEqual(types(f.frames), ["preparing", "cleaning", "result"], name);
+      assert.deepEqual(result(f.frames), {type: "result", outcome: "failed", error_code: "asset_invalid", cleanup: "verified", result: null}, name);
+      supervise(f.boot, f.frames);
+    }
+  });
+}
+test("the controlled task never consults the software bundle and carries no strategy", async () => {
   const controlled = fixture(); controlled.deps.softwareBundle = async () => { throw new Error("must not run"); }; await controlled.run();
   assert.equal(result(controlled.frames).outcome, "passed"); assert.ok(!controlled.calls.includes("bundle"));
-});
-test("software candidate policy failures become candidate_invalid and verifier cleanup uncertainty needs review", async () => {
-  for (const message of ["candidate_unchanged", "candidate_forbidden_pattern", "candidate_protected_changed"]) {
-    const f = fixture({task: "software-bounds"}); f.deps.softwareSnapshot = async () => { throw new Error(message); }; await f.run();
-    assert.deepEqual(result(f.frames), {type: "result", outcome: "failed", error_code: "candidate_invalid", cleanup: "verified", result: null}, message);
-    assert.ok(!f.calls.includes("software-verify")); supervise(f.boot, f.frames);
-  }
-  const broken = fixture({task: "software-bounds"}); broken.deps.softwareSnapshot = async () => { throw new Error("docker exploded"); }; await broken.run();
-  assert.equal(result(broken.frames).error_code, "worker_failed");
-  const leaked = fixture({task: "software-bounds"}); leaked.deps.softwareVerify = async () => { throw new ControlledTaskCleanupError("verifier", [new Error("PRIVATE")]); }; await leaked.run();
-  assert.deepEqual(result(leaked.frames), {type: "result", outcome: "needs_review", error_code: "cleanup_failed", cleanup: "unknown", result: null});
-  assert.ok(!leaked.calls.includes("finish")); supervise(leaked.boot, leaked.frames);
-  const failing = fixture({task: "software-bounds"}); failing.deps.softwareVerify = async () => { throw new Error("docker exploded"); }; await failing.run();
-  assert.equal(result(failing.frames).error_code, "verifier_failed");
-});
-
-// ---- Approved strategy -------------------------------------------------------
-
-const strategyText = {
-  invariant: "Yarı açık [lo, hi) aralığının invariantını koru; önce en küçük karşı örneği bul.",
-  "boundary-first": "Önce boş dizi ve uç değerleri incele, ardından tekrar eden değerleri ele al.",
-} as const;
-test("boot carries the strategy id only: null for the controlled task, an approved id for software-bounds", () => {
+  assert.equal(supervise(controlled.boot, controlled.frames).operation?.strategy_id, null);
+  for (const value of ["invariant", "boundary-first", "sort-first", "sweep", "", 0]) assert.throws(() => parseTaskRunBoot({...bootFor("claude"), strategy_id: value}), /worker_failed/, `controlled with ${JSON.stringify(value)}`);
   assert.equal(parseTaskRunBoot(bootFor("claude")).strategy_id, null);
-  for (const id of ["invariant", "boundary-first"]) assert.equal(parseTaskRunBoot(bootFor("codex", "software-bounds", id)).strategy_id, id);
-  for (const value of ["invariant", "boundary-first", "", 0]) assert.throws(() => parseTaskRunBoot({...bootFor("codex"), strategy_id: value}), /worker_failed/, `controlled with ${JSON.stringify(value)}`);
-  for (const value of [null, undefined, "", "Invariant", "invariant ", "unknown", "lean-plan", ["invariant"], {id: "invariant"}, 1])
-    assert.throws(() => parseTaskRunBoot({...bootFor("codex", "software-bounds"), strategy_id: value}), /worker_failed/, `software with ${JSON.stringify(value)}`);
-  const {strategy_id: _strategy, ...missing} = bootFor("claude", "software-bounds");
-  assert.throws(() => parseTaskRunBoot(missing), /worker_failed/);
-  assert.throws(() => parseTaskRunBoot({...bootFor("claude", "software-bounds"), instructions: "free text"}), /worker_failed/);
 });
-test("each approved strategy reaches the provider as its contract instructions inside the fixed prompt", async () => {
-  const task = softwareBoundsTask as {prompt: string};
-  for (const provider of ["codex", "claude"] as const) for (const strategy of ["invariant", "boundary-first"] as const) {
-    const f = fixture({provider, task: "software-bounds", strategy, catalog: provider === "codex"});
-    let prompt: string | undefined; const original = f.deps.provider;
-    f.deps.provider = async turn => { prompt = turn.prompt; await original(turn); };
-    await f.run();
-    assert.equal(result(f.frames).outcome, "passed", `${provider}/${strategy}`);
-    assert.ok(prompt!.startsWith(task.prompt + "\n\nApproved strategy (" + strategy + "): " + strategyText[strategy] + "\nThis strategy only guides your approach; it does not change the task or its acceptance criteria.\n\n"), `${provider}/${strategy}`);
-    const other = strategy === "invariant" ? "boundary-first" : "invariant";
-    assert.ok(!prompt!.includes(strategyText[other]) && !prompt!.includes(`(${other})`));
-    assert.equal(supervise(f.boot, f.frames).operation?.strategy_id, strategy);
-    // The strategy id never appears in a worker frame; only the supervisor's public projection carries it.
-    assert.ok(!JSON.stringify(f.frames).includes(strategy) && !JSON.stringify(f.frames).includes("Approved strategy"));
+test("the worker hands each software task its own spec: the other task's spec never reaches bundle, snapshot or verifier", async () => {
+  const seen: string[] = [];
+  for (const task of softwareIds) {
+    const f = fixture({task}), { softwareBundle, softwareSnapshot, softwareVerify } = f.deps;
+    f.deps.softwareBundle = async (assets, spec) => { seen.push("bundle:" + spec.id); return softwareBundle(assets, spec); };
+    f.deps.softwareSnapshot = async (sandbox, image, spec) => { seen.push("snapshot:" + spec.id); return softwareSnapshot(sandbox, image, spec); };
+    f.deps.softwareVerify = async (source, image, signal, spec) => { seen.push("verify:" + spec.id); return softwareVerify(source, image, signal, spec); };
+    await f.run(); assert.equal(result(f.frames).outcome, "passed");
   }
-  // The controlled task keeps the provider's default instructions and no strategy.
-  const controlled = fixture(); await controlled.run(); assert.equal(supervise(controlled.boot, controlled.frames).operation?.strategy_id, null);
-});
-test("a strategy missing from, or a strategy list differing in, the verified contract is asset_invalid before any Docker call", async () => {
-  const task = softwareBoundsTask as Record<string, any>;
-  const rehash = async (change: (value: any) => void) => { const value = structuredClone(task); change(value); value.contract_hash = await contractHash(value as never); return value; };
-  const variants: Array<[string, string, (f: ReturnType<typeof fixture>) => Promise<void> | void]> = [
-    ["verified contract lacks the requested strategy", "invariant", f => { f.deps.softwareBundle = async actual => { f.calls.push("bundle"); const verified = await verifySoftwareBundle(task, {task_version: 1, contract_hash: task.contract_hash, image: actual.baseImage}); return {...verified, strategies: verified.strategies.filter(item => item.id !== "invariant")}; }; }],
-    ["contract renames a strategy id", "boundary-first", async f => { const value = await rehash(v => { v.strategies[1].id = "edges"; }); f.deps.softwareBundle = async actual => { f.calls.push("bundle"); return verifySoftwareBundle(value, {task_version: 1, contract_hash: value.contract_hash, image: actual.baseImage}); }; }],
-    ["contract reorders strategies", "invariant", async f => { const value = await rehash(v => { v.strategies.reverse(); }); f.deps.softwareBundle = async actual => { f.calls.push("bundle"); return verifySoftwareBundle(value, {task_version: 1, contract_hash: value.contract_hash, image: actual.baseImage}); }; }],
-    ["contract adds a strategy", "invariant", async f => { const value = await rehash(v => { v.strategies.push({id: "extra", instructions: "Ek."}); }); f.deps.softwareBundle = async actual => { f.calls.push("bundle"); return verifySoftwareBundle(value, {task_version: 1, contract_hash: value.contract_hash, image: actual.baseImage}); }; }],
-  ];
-  for (const [name, strategy, setup] of variants) {
-    const f = fixture({task: "software-bounds", strategy}); await setup(f); await f.run();
-    assert.deepEqual(f.calls, ["read", "assets", "bundle"], name);
-    assert.deepEqual(types(f.frames), ["preparing", "cleaning", "result"], name);
-    assert.deepEqual(result(f.frames), {type: "result", outcome: "failed", error_code: "asset_invalid", cleanup: "verified", result: null}, name);
-    supervise(f.boot, f.frames);
-  }
+  assert.deepEqual(seen, ["bundle:software-bounds", "snapshot:software-bounds", "verify:software-bounds", "bundle:software-intervals", "snapshot:software-intervals", "verify:software-intervals"]);
 });
