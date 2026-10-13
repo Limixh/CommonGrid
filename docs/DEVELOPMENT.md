@@ -1,6 +1,6 @@
 # Geliştirme rehberi
 
-CommonGrid tam v1 hedefiyle geliştiriliyor. Şu an görev inceleme, hesap/katkı temeli, dosya teslimi, bağımsız doğrulayıcı bağlantısı, kalıcı profil seçimi, native CLI sürüm kontrolü ve Codex/Claude resmi giriş ekranları var. Bağlı profille onaylı kontrollü görev akışı Windows uygulamasında gerçek Codex/Luna hesabıyla kabul edildi; arayüzde doğrulanmış diff gösteriliyor. Yeni Claude giriş akışının gerçek hesap ve Haiku göreviyle native kabulü bekliyor; diğer platformlar ve daha geniş görev kapsamları [GO_GATE.md](GO_GATE.md) içinde takip edilir.
+CommonGrid tam v1 hedefiyle geliştiriliyor. Şu an görev inceleme, hesap/katkı temeli, dosya teslimi, bağımsız doğrulayıcı bağlantısı, kalıcı profil seçimi, native CLI sürüm kontrolü ve Codex/Claude resmi giriş ekranları var. Bağlı profille onaylı kontrollü görev akışı Windows uygulamasında gerçek Codex/Luna ve Claude/Haiku hesaplarıyla kabul edildi; arayüzde 34 örnekten geçen diff gösteriliyor. Claude'un uygulama içi resmi girişi de gerçek hesapla doğrulandı; diğer platformlar ve daha geniş görev kapsamları [GO_GATE.md](GO_GATE.md) içinde takip edilir.
 
 Bu dosya kurulum ve çalışma rehberidir. Tarihli test sonuçları ve önceki kararların uygulama kayıtları [DEVELOPMENT_HISTORY.md](DEVELOPMENT_HISTORY.md) içinde korunur. Ürün gereksinimleri [spec'te](../PROJECT_SPEC1.2.md), planlanan fazlar [roadmap'te](../implementation_roadmap1.3.md), karar gerekçeleri [ADR'lerde](../spike/adr/) bulunur.
 
@@ -52,13 +52,15 @@ Windows başlatıcısı Docker Desktop Linux motorunun sabit yerel named pipe'ı
 | npm run test:native-cli-smoke | Windows/WebView2 native başlatıcı, iki resmi CLI sürümü, idempotency, iptal, app-owned journal ve gerçek Docker cleanup; hesap/model yok |
 | npm run test:native-profile-smoke | Windows/WebView2 üzerinde profil oluşturma/seçme ve aynı izole depoyla uygulama restart'ı; CLI, Docker veya hesap/model çağrısı yok |
 | npm run test:native-session-smoke | Windows/WebView2 ve gerçek Docker üzerinde yeni izole profilde resmi giriş challenge'ı, iptal ve hesapsız status/logout; kullanıcı yetkilendirmesi ve model çağrısı yok. `-- --provider claude` Claude'u seçer; varsayılan Codex. `-- --provider claude --exercise-browser` görünür uygulamadan resmi sayfayı açar, 30 saniye girişin beklemeye devam ettiğini sınar, sonra iptal eder; kod alanı boş kalır |
-| npm run test:native-task-smoke | Windows/WebView2 üzerinde görev onayı, bağlı olmayan profil hatası ve hesapsız iptal/cleanup; varsayılan koşu model çağırmaz. `-- --real-account` yalnız bir Luna görevi çalıştırır. `-- --provider claude --real-account --show` resmi girişi maskeli uygulama alanıyla tamamladıktan sonra yalnız bir Haiku görevi, 34 örnek ve diff hash kontrolü çalıştırır |
+| npm run test:native-task-smoke | Windows/WebView2 üzerinde görev onayı, bağlı olmayan profil hatası ve hesapsız iptal/cleanup; varsayılan koşu model çağırmaz. `-- --real-account` yalnız bir Luna görevi çalıştırır. `-- --provider claude --real-account --show` resmi girişi maskeli uygulama alanıyla tamamladıktan sonra yalnız bir Haiku görevi, 34 örnek ve diff hash kontrolü çalıştırır. `-- --provider claude --real-account --reuse-session <v4 UUID>` daha önce giriş yapılmış izole test deposunu resmi status ile doğrular, yeni rapor dizininde tek Haiku görevi çalıştırır; bu modda `--show` isteğe bağlıdır |
 | npm run test:artifacts | Önce install:trivy; gerçek gizli bilgi tarayıcısı ve dosya/verifier kontrolleri |
 | npm run spike:session-continuity | Yeni hesapsız Docker profilleriyle kalıcı claim, restart, aynı profile yarış ve cleanup |
 | npm run spike:owner-crash | Yeni sentetik profillerde gerçek host Node worker SIGKILL, işlem sahipliği ve açık orphan uzlaştırması; gerçek hesap/model yok |
 | npm run spike:managed-adversarial | Hesapsız Docker saldırı ve kaynak sınırı senaryoları |
 | npm run test:spike | Ayrı Temporal deneme modülünün testleri |
 | node scripts/go.mjs vet ./... | Go statik kontrolü |
+
+Native smoke aracı koşu bittiğinde kendi izole penceresini kapatır. 2026-10-13 tarihli [ayrı model kullanmayan native pencere kontrolünde](../spike/results/native-task-haiku-windows-2026-10-13.json) onay kutusu Başlat düğmesini açıp kapattı; Başlat tıklanmadı, görev oluşturulmadı ve pencere en az 30 saniye açık kaldıktan sonra açık bırakıldı. Bu kontrol gerçek Haiku görev kabulünden ayrıdır.
 
 Gerçek hesabı kullanan komutlar olağan test paketinde çalışmaz. Testte Codex Luna ve Claude Haiku kullanılır; erişilemezse durulur. Kota kasıtlı tüketilmez, pahalı modele veya ücretli API'ye otomatik geçilmez. Ayrıntılar [AGENTS.md](../AGENTS.md) ve [izole oturum rehberinde](../spike/cli-session/MANAGED_SESSIONS.md).
 

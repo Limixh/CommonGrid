@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readdir, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readdir, realpath, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -20,43 +20,69 @@ import { createNativeUiTrace, safeNativeUiErrorCategory } from "./native-ui-trac
 // Default: a fresh signed-out profile, no account import and no inference.
 // --real-account is explicit consent to one cheap-model task after the user
 // authorizes the official flow. Only Codex's device challenge goes to stdout;
-// Claude requires a visible app and manual entry in its masked code field.
+// Fresh Claude login requires a visible app and manual entry in its masked code
+// field. --reuse-session uses only a previously authorized isolated run store.
 // No DOM dumps, raw errors, videos or challenge screenshots. Claude real-account
 // mode collects only bounded allowlisted UI/IPC events and safe session metadata.
 const arguments_ = process.argv.slice(2);
-const usage = "Usage: npm run test:native-task-smoke -- [--provider codex|claude] [--real-account] [--show]\nDefault: Codex signed-out task failure and cancellation without model inference.\n--real-account: wait for official user authorization; run one gpt-6-luna (Codex) or haiku (Claude) task.\nCodex prints its official device URL/code once. Claude requires --real-account --show: use the app's official browser button and paste the code only into its masked field. Claude URL/code/state are never printed.\n--show: show the isolated native window (requires --real-account).\nThe isolated app store and official profile volumes are retained; host auth is never copied.";
+const usage = "Usage: npm run test:native-task-smoke -- [--provider codex|claude] [--real-account] [--show] [--reuse-session <v4 UUID>]\nDefault: Codex signed-out task failure and cancellation without model inference.\n--real-account: wait for official user authorization; run one gpt-6-luna (Codex) or haiku (Claude) task.\nCodex prints its official device URL/code once. Fresh Claude login requires --real-account --show: use the app's official browser button and paste the code only into its masked field. Claude URL/code/state are never printed.\n--reuse-session: use only an already authenticated .local/native-task-smoke/<UUID>/appdata store; requires --real-account. Official CLI status must verify authentication before one cheap task. No login, fallback or automatic retry; --show is optional for reuse. New reports/config/artifacts go into a separate run directory.\n--show: show the isolated native window (requires --real-account).\nThe isolated app store and official profile volumes are retained; host auth is never copied.";
 if (arguments_.includes("--help")) { console.log(usage); process.exit(0); }
 let provider: TaskRunProvider = "codex", realAccount = false, show = false;
+let sourceSessionRunId: string | null = null;
 const seenArguments = new Set<string>();
 for (let index = 0; index < arguments_.length; index++) {
   const argument = arguments_[index];
-  assert.ok(["--provider", "--real-account", "--show"].includes(argument), "native_task_smoke_unknown_argument");
+  assert.ok(["--provider", "--real-account", "--show", "--reuse-session"].includes(argument), "native_task_smoke_unknown_argument");
   assert.ok(!seenArguments.has(argument), "native_task_smoke_duplicate_argument"); seenArguments.add(argument);
   if (argument === "--provider") {
     const value = arguments_[++index];
     assert.ok(value === "codex" || value === "claude", "native_task_smoke_invalid_provider"); provider = value;
+  } else if (argument === "--reuse-session") {
+    const value = arguments_[++index];
+    assert.ok(typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value), "native_task_smoke_invalid_source_session_run_id");
+    sourceSessionRunId = value.toLowerCase();
   } else if (argument === "--real-account") realAccount = true;
   else show = true;
 }
 assert.ok(!show || realAccount, "native_task_smoke_visible_login_requires_real_account_flag");
-assert.ok(provider !== "claude" || !realAccount || show, "native_task_smoke_claude_real_account_requires_visible_app");
+assert.ok(!sourceSessionRunId || realAccount, "native_task_smoke_reuse_requires_real_account_flag");
+assert.ok(provider !== "claude" || !realAccount || show || sourceSessionRunId, "native_task_smoke_claude_real_account_requires_visible_app");
 if (process.platform !== "win32") throw new Error("native_task_smoke_requires_windows_webview2");
 assert.equal(taskRunRequestedModels.codex, "gpt-6-luna", "native_task_smoke_cheap_model_policy_changed");
 assert.equal(taskRunRequestedModels.claude, "haiku", "native_task_smoke_cheap_model_policy_changed");
 const requestedModel = taskRunRequestedModels[provider];
 const profileName = provider === "claude" ? "Claude native task smoke" : "Codex native task smoke";
 
-const directory = path.resolve(root, ".local/native-task-smoke", randomUUID()), appdata = path.join(directory, "appdata");
+const smokeRoot = path.resolve(root, ".local/native-task-smoke");
+const directory = path.join(smokeRoot, randomUUID());
+const appdata = path.join(sourceSessionRunId ? path.join(smokeRoot, sourceSessionRunId) : directory, "appdata");
 function withinRun(filename: string) {
   const resolved = path.resolve(filename), relative = path.relative(directory, resolved);
   assert.ok(relative && !relative.startsWith("..") && !path.isAbsolute(relative), "native_task_smoke_path_outside_run");
   return resolved;
 }
-await mkdir(directory, {recursive: true});
+function withinAppdata(filename: string) {
+  const resolved = path.resolve(filename), relative = path.relative(appdata, resolved);
+  assert.ok(relative && !relative.startsWith("..") && !path.isAbsolute(relative), "native_task_smoke_path_outside_isolated_appdata");
+  return resolved;
+}
+if (sourceSessionRunId) {
+  // Directory metadata only: never inspect private account files. Reject a
+  // redirected store as well as arbitrary paths masquerading as a run UUID.
+  try {
+    const sourceRun = path.join(smokeRoot, sourceSessionRunId);
+    const sourceInfo = await lstat(sourceRun), appdataInfo = await lstat(appdata);
+    assert.ok(sourceInfo.isDirectory() && !sourceInfo.isSymbolicLink() && appdataInfo.isDirectory() && !appdataInfo.isSymbolicLink());
+    const expected = path.join(await realpath(smokeRoot), sourceSessionRunId, "appdata");
+    assert.equal((await realpath(appdata)).toLowerCase(), expected.toLowerCase());
+  } catch { throw new Error("native_task_smoke_source_store_missing_invalid_or_redirected"); }
+}
+await mkdir(smokeRoot, {recursive: true});
+await mkdir(directory);
 const config = withinRun(path.join(directory, "tauri-smoke.json"));
 await writeFile(config, JSON.stringify({app: {
-  appDirectoriesOverride: withinRun(appdata),
-  windows: [{label: "main", title: provider === "claude" && realAccount ? "CommonGrid — Claude hesabını bağla" : "CommonGrid native task smoke", visible: show, width: 1380, height: 1200}],
+  appDirectoriesOverride: sourceSessionRunId ? appdata : withinRun(appdata),
+  windows: [{label: "main", title: sourceSessionRunId ? "CommonGrid isolated session task smoke" : provider === "claude" && realAccount ? "CommonGrid — Claude hesabını bağla" : "CommonGrid native task smoke", visible: show, width: 1380, height: 1200}],
 }}, null, 2) + "\n");
 
 const checks: string[] = [];
@@ -78,6 +104,8 @@ let failureCode: string | null = null;
 let uiFailureCategory: string | null = null;
 let browser: Browser | undefined, activePage: Page | undefined;
 let taskSnapshot: TaskRunStatus | null = null, sessionSnapshot: ProfileSessionStatus | null = null;
+let sourceTaskRequestId: string | undefined, sourceSessionRequestId: string | undefined;
+let reuseOperationsStarted = false;
 let verified: {cases: number; candidate_sha256: string; patch_sha256: string; applied_candidate_sha256: string} | null = null;
 const independentManagedCleanup: {
   status: "not_checked" | "failed" | "verified"; journal_operations: number;
@@ -170,7 +198,7 @@ async function sessionStatusUi(page: Page, expected: "authenticated" | "unauthen
   return operation;
 }
 async function verifyBinding(profileId: string) {
-  const bindingRoot = withinRun(path.join(appdata, "managed-profile-sessions"));
+  const bindingRoot = withinAppdata(path.join(appdata, "managed-profile-sessions"));
   assert.deepEqual(await readdir(bindingRoot), [`${profileId}.json`]);
   const binding = await new ProfileBindings(bindingRoot).read(profileId, provider);
   assert.ok(binding);
@@ -183,7 +211,7 @@ async function verifyBinding(profileId: string) {
 async function verifyIndependentManagedCleanup(profileId: string) {
   independentManagedCleanup.status = "failed";
   const binding = await verifyBinding(profileId);
-  const catalog = await readOperationJournals(withinRun(path.join(appdata, "managed-operation-journal")));
+  const catalog = await readOperationJournals(withinAppdata(path.join(appdata, "managed-operation-journal")));
   assert.equal(catalog.status, "available", "native_task_smoke_journal_unavailable");
   assert.ok(catalog.operations.length > 0, "native_task_smoke_journal_missing");
   for (const operation of catalog.operations) {
@@ -214,9 +242,11 @@ async function verifyIndependentManagedCleanup(profileId: string) {
 // Best effort only. Never cancel a replacement request; resynchronize once if
 // progress changed the revision while a failure cleanup request was in flight.
 async function cancelOwnedOperation(page: Page, kind: "task" | "session") {
+  if (sourceSessionRunId && !reuseOperationsStarted) return;
   const read = kind === "task" ? task : session;
   const before = (await read(page)).operation;
   if (!before || before.phase === "finished") return;
+  if (sourceSessionRunId && before.request_id === (kind === "task" ? sourceTaskRequestId : sourceSessionRequestId)) return;
   const command = kind === "task" ? "local_task_run_cancel" : "local_profile_session_cancel";
   try { await invoke(page, command, {request: {schema_version: "1.0", request_id: before.request_id, expected_revision: before.revision}}); }
   catch {
@@ -229,7 +259,7 @@ async function cancelOwnedOperation(page: Page, kind: "task" | "session") {
 }
 
 try {
-  console.log(`Building isolated native Windows task acceptance (${realAccount ? "explicit real-account mode" : "signed-out mode; no inference"})…`);
+  console.log(`Building isolated native Windows task acceptance (${sourceSessionRunId ? "explicit existing-isolated-session mode" : realAccount ? "explicit real-account mode" : "signed-out mode; no inference"})…`);
   assertNotInterrupted();
   try {
     // Build output remains bounded in memory and is discarded, never reported.
@@ -277,82 +307,144 @@ try {
   if (observeClaudeUi) { stage = "install_passive_ui_observer"; await nativeUiTrace.install(page); stage = "open_agents"; }
   await page.getByRole("button", {name: "Ajanlar ve ortam", exact: true}).click();
   const profiles = page.locator(".managed-profiles-panel"), sessionPanel = page.locator(".profile-session-panel");
-  await expect(profiles).toHaveAttribute("aria-busy", "false"); stage = "fresh_profile";
-  const empty = validateManagedProfilesStatus(await invoke(page, "local_managed_profiles_status"));
-  assert.equal(empty.availability, "available"); assert.deepEqual(empty.profiles, []); assert.equal(empty.selected_profile_id, null);
-  await profiles.getByLabel("Profil adı", {exact: true}).fill(profileName);
-  await profiles.getByLabel("Ajan", {exact: true}).selectOption(provider);
-  await profiles.getByRole("button", {name: "Profil oluştur", exact: true}).click();
   await expect(profiles).toHaveAttribute("aria-busy", "false");
-  await profiles.locator(".managed-profile-list li").filter({hasText: profileName}).getByRole("button", {name: "Bu profili seç", exact: true}).click();
-  await expect(sessionPanel).toHaveAttribute("aria-busy", "false");
-  const catalog = validateManagedProfilesStatus(await invoke(page, "local_managed_profiles_status")), profileId = catalog.selected_profile_id;
-  assert.ok(profileId); assert.equal(catalog.profiles.length, 1); assert.equal(catalog.profiles[0].provider, provider);
-  assert.equal((await task(page)).operation, null); assert.equal((await session(page)).operation, null);
-  checks.push(`real_native_ui_creates_and_selects_fresh_isolated_${provider}_profile`);
-
-  stage = "unbound_task"; console.log("Checking task approval and unbound-profile failure through the native UI…");
-  await startTaskUi(page);
-  const unbound = (await waitTask(page, status => status.operation?.phase === "finished", 30_000)).operation!;
-  evidence("unbound", unbound);
-  assert.equal(unbound.profile_id, profileId); assert.equal(unbound.outcome, "failed"); assert.equal(unbound.error_code, "profile_unbound");
-  assert.equal(unbound.cleanup, "verified"); assert.equal(unbound.tool_calls, 0); assert.equal(unbound.model.observed, null); assert.equal(unbound.result, null);
   const taskPanel = page.locator(".task-run-panel");
-  await expect(taskPanel.getByText("Bu profil için bağlı bir hesap ortamı yok. Yukarıdaki panelden hesabını bağla.", {exact: true})).toBeVisible();
-  assert.equal(await taskPanel.locator(".task-run-diff").count(), 0);
-  checks.push("native_ui_requires_per_run_approval_and_reports_unbound_profile_with_verified_cleanup");
-
-  stage = "device_login"; authentication = realAccount ? "pending" : "not_requested";
-  console.log(`Preparing the isolated profile through the official ${provider === "claude" ? "Claude authorization" : "Codex device"} flow…`);
-  await sessionPanel.getByRole("button", {name: provider === "claude" ? "Claude hesabını bağla" : "Codex hesabını bağla", exact: true}).click();
-  // Keep the observation snapshot immutable: clearing this transient local
-  // copy must not make a same-revision challenge poll look like a rewind.
-  const waiting = structuredClone((await waitSession(page, status => status.operation?.phase === "waiting_for_login" && !!status.operation.challenge, 300_000)).operation!);
-  assert.equal(waiting.profile_id, profileId); assert.equal(waiting.provider, provider); assert.ok(waiting.challenge);
-  if (provider === "claude") {
-    assert.ok("authorization_url" in waiting.challenge);
-    validateClaudeAuthorizationUrl(waiting.challenge.authorization_url);
-    const codeField = sessionPanel.getByLabel("Claude geçici giriş kodu", {exact: true});
-    await expect(codeField).toBeVisible(); await expect(codeField).toHaveAttribute("type", "password");
-    await expect(sessionPanel.getByRole("button", {name: "Claude giriş sayfasını aç", exact: true})).toBeVisible();
-    checks.push("official_claude_authorization_challenge_reaches_real_native_profile_masked_code_ui");
+  let profileId: string, previousTaskRequest: string | undefined;
+  if (sourceSessionRunId) {
+    stage = "reuse_selected_profile";
+    const catalog = validateManagedProfilesStatus(await invoke(page, "local_managed_profiles_status"));
+    assert.equal(catalog.availability, "available");
+    assert.equal(catalog.profiles.length, 1, "native_task_smoke_reuse_requires_exactly_one_profile");
+    const selected = catalog.profiles[0];
+    assert.equal(selected.provider, provider, "native_task_smoke_reuse_provider_mismatch");
+    assert.equal(catalog.selected_profile_id, selected.profile_id, "native_task_smoke_reuse_requires_selected_profile");
+    profileId = selected.profile_id;
+    await expect(sessionPanel).toHaveAttribute("aria-busy", "false");
+    const existingTask = (await task(page)).operation;
+    sourceTaskRequestId = existingTask?.request_id; previousTaskRequest = sourceTaskRequestId;
+    if (existingTask && existingTask.phase !== "finished") throw new SmokeFailure("reuse_existing_task_active");
+    const existingSession = (await session(page)).operation;
+    sourceSessionRequestId = existingSession?.request_id;
+    if (existingSession && existingSession.phase !== "finished") throw new SmokeFailure("reuse_existing_session_active");
+    checks.push("real_native_ui_loads_exact_single_matching_selected_isolated_profile_without_fresh_login");
+    stage = "reuse_official_authenticated_status"; authentication = "pending";
+    await verifyBinding(profileId);
+    reuseOperationsStarted = true;
+    const authenticated = await sessionStatusUi(page, "authenticated");
+    assert.equal(authenticated.profile_id, profileId);
+    accountAuthorized = true; authentication = "passed";
+    checks.push("official_cli_status_verifies_existing_isolated_session_authenticated_before_one_cheap_task");
   } else {
-    assert.ok("user_code" in waiting.challenge);
-    assert.equal(waiting.challenge.verification_url, "https://auth.openai.com/codex/device");
-    assert.ok(/^[A-Z0-9-]{4,32}$/.test(waiting.challenge.user_code));
-    await expect(sessionPanel.getByTestId("profile-session-code")).toBeVisible();
-    checks.push("official_codex_device_challenge_reaches_real_native_profile_ui");
-  }
-  challengeSeen = true;
-  if (realAccount) {
+    await expect(profiles).toHaveAttribute("aria-busy", "false"); stage = "fresh_profile";
+    const empty = validateManagedProfilesStatus(await invoke(page, "local_managed_profiles_status"));
+    assert.equal(empty.availability, "available"); assert.deepEqual(empty.profiles, []); assert.equal(empty.selected_profile_id, null);
+    await profiles.getByLabel("Profil adı", {exact: true}).fill(profileName);
+    await profiles.getByLabel("Ajan", {exact: true}).selectOption(provider);
+    await profiles.getByRole("button", {name: "Profil oluştur", exact: true}).click();
+    await expect(profiles).toHaveAttribute("aria-busy", "false");
+    await profiles.locator(".managed-profile-list li").filter({hasText: profileName}).getByRole("button", {name: "Bu profili seç", exact: true}).click();
+    await expect(sessionPanel).toHaveAttribute("aria-busy", "false");
+    const catalog = validateManagedProfilesStatus(await invoke(page, "local_managed_profiles_status"));
+    profileId = catalog.selected_profile_id!;
+    assert.ok(profileId); assert.equal(catalog.profiles.length, 1); assert.equal(catalog.profiles[0].provider, provider);
+    assert.equal((await task(page)).operation, null); assert.equal((await session(page)).operation, null);
+    checks.push(`real_native_ui_creates_and_selects_fresh_isolated_${provider}_profile`);
+
+    stage = "unbound_task"; console.log("Checking task approval and unbound-profile failure through the native UI…");
+    await startTaskUi(page);
+    const unbound = (await waitTask(page, status => status.operation?.phase === "finished", 30_000)).operation!;
+    previousTaskRequest = unbound.request_id;
+    evidence("unbound", unbound);
+    assert.equal(unbound.profile_id, profileId); assert.equal(unbound.outcome, "failed"); assert.equal(unbound.error_code, "profile_unbound");
+    assert.equal(unbound.cleanup, "verified"); assert.equal(unbound.tool_calls, 0); assert.equal(unbound.model.observed, null); assert.equal(unbound.result, null);
+
+    await expect(taskPanel.getByText("Bu profil için bağlı bir hesap ortamı yok. Yukarıdaki panelden hesabını bağla.", {exact: true})).toBeVisible();
+    assert.equal(await taskPanel.locator(".task-run-diff").count(), 0);
+    checks.push("native_ui_requires_per_run_approval_and_reports_unbound_profile_with_verified_cleanup");
+
+    stage = "device_login"; authentication = realAccount ? "pending" : "not_requested";
+    console.log(`Preparing the isolated profile through the official ${provider === "claude" ? "Claude authorization" : "Codex device"} flow…`);
+    await sessionPanel.getByRole("button", {name: provider === "claude" ? "Claude hesabını bağla" : "Codex hesabını bağla", exact: true}).click();
+    // Keep the observation snapshot immutable: clearing this transient local
+    // copy must not make a same-revision challenge poll look like a rewind.
+    const waiting = structuredClone((await waitSession(page, status => status.operation?.phase === "waiting_for_login" && !!status.operation.challenge, 300_000)).operation!);
+    assert.equal(waiting.profile_id, profileId); assert.equal(waiting.provider, provider); assert.ok(waiting.challenge);
     if (provider === "claude") {
-      // The user opens the browser using the actual native app button and
-      // submits the code only in its masked field. Never read that field,
-      // automate browser auth, print the URL/state, or copy private auth.
-      await sessionPanel.getByLabel("Claude geçici giriş kodu", {exact: true}).scrollIntoViewIfNeeded();
-      console.log("Waiting for user: in the visible CommonGrid window, click 'Claude giriş sayfasını aç', complete official login, paste the returned code only into 'Claude geçici giriş kodu', and click 'Giriş kodunu gönder'.");
+      assert.ok("authorization_url" in waiting.challenge);
+      validateClaudeAuthorizationUrl(waiting.challenge.authorization_url);
+      const codeField = sessionPanel.getByLabel("Claude geçici giriş kodu", {exact: true});
+      await expect(codeField).toBeVisible(); await expect(codeField).toHaveAttribute("type", "password");
+      await expect(sessionPanel.getByRole("button", {name: "Claude giriş sayfasını aç", exact: true})).toBeVisible();
+      checks.push("official_claude_authorization_challenge_reaches_real_native_profile_masked_code_ui");
     } else {
       assert.ok("user_code" in waiting.challenge);
-      console.log(`Official authorization: https://auth.openai.com/codex/device\nDevice code: ${waiting.challenge.user_code}`);
-      challengePrinted = true;
+      assert.equal(waiting.challenge.verification_url, "https://auth.openai.com/codex/device");
+      assert.ok(/^[A-Z0-9-]{4,32}$/.test(waiting.challenge.user_code));
+      await expect(sessionPanel.getByTestId("profile-session-code")).toBeVisible();
+      checks.push("official_codex_device_challenge_reaches_real_native_profile_ui");
     }
-    waiting.challenge = null;
-    stage = "await_official_authorization";
-    const authorized = (await waitSession(page, status => status.operation?.phase === "finished", 650_000)).operation!;
-    assert.equal(authorized.request_id, waiting.request_id); assert.equal(authorized.action, "login"); assert.equal(authorized.provider, provider);
-    if (authorized.outcome !== "passed" || authorized.session_state !== "authenticated" || authorized.cleanup !== "verified")
-      throw new SmokeFailure(`session_${authorized.error_code ?? "authentication_not_completed"}`);
-    accountAuthorized = true; authentication = "passed";
-    await expect(sessionPanel.getByTestId("profile-session-code")).toHaveCount(0);
-    await expect(sessionPanel.getByLabel("Claude geçici giriş kodu", {exact: true})).toHaveCount(0);
-    await verifyBinding(profileId);
-    await sessionStatusUi(page, "authenticated");
-    checks.push("official_user_authorization_and_followup_status_verify_fresh_isolated_authenticated_profile");
+    challengeSeen = true;
+    if (realAccount) {
+      if (provider === "claude") {
+        // The user opens the browser using the actual native app button and
+        // submits the code only in its masked field. Never read that field,
+        // automate browser auth, print the URL/state, or copy private auth.
+        await sessionPanel.getByLabel("Claude geçici giriş kodu", {exact: true}).scrollIntoViewIfNeeded();
+        console.log("Waiting for user: in the visible CommonGrid window, click 'Claude giriş sayfasını aç', complete official login, paste the returned code only into 'Claude geçici giriş kodu', and click 'Giriş kodunu gönder'.");
+      } else {
+        assert.ok("user_code" in waiting.challenge);
+        console.log(`Official authorization: https://auth.openai.com/codex/device\nDevice code: ${waiting.challenge.user_code}`);
+        challengePrinted = true;
+      }
+      waiting.challenge = null;
+      stage = "await_official_authorization";
+      const authorized = (await waitSession(page, status => status.operation?.phase === "finished", 650_000)).operation!;
+      assert.equal(authorized.request_id, waiting.request_id); assert.equal(authorized.action, "login"); assert.equal(authorized.provider, provider);
+      if (authorized.outcome !== "passed" || authorized.session_state !== "authenticated" || authorized.cleanup !== "verified")
+        throw new SmokeFailure(`session_${authorized.error_code ?? "authentication_not_completed"}`);
+      accountAuthorized = true; authentication = "passed";
+      await expect(sessionPanel.getByTestId("profile-session-code")).toHaveCount(0);
+      await expect(sessionPanel.getByLabel("Claude geçici giriş kodu", {exact: true})).toHaveCount(0);
+      await verifyBinding(profileId);
+      await sessionStatusUi(page, "authenticated");
+      checks.push("official_user_authorization_and_followup_status_verify_fresh_isolated_authenticated_profile");
+    } else {
+      waiting.challenge = null; stage = "cancel_login";
+      console.log("Cancelling the undisclosed authorization challenge without authorizing an account…");
+      await sessionPanel.getByRole("button", {name: "Bağlantı işlemini iptal et", exact: true}).click();
+      const cancelled = (await waitSession(page, status => status.operation?.phase === "finished", 45_000)).operation!;
+      assert.equal(cancelled.request_id, waiting.request_id); assert.equal(cancelled.outcome, "cancelled");
+      assert.equal(cancelled.cleanup, "verified"); assert.equal(cancelled.challenge, null);
+      await expect(sessionPanel.getByTestId("profile-session-code")).toHaveCount(0);
+      await expect(sessionPanel.getByLabel("Claude geçici giriş kodu", {exact: true})).toHaveCount(0);
+      await verifyBinding(profileId);
+      await sessionStatusUi(page, "unauthenticated");
+      checks.push("undisclosed_login_cancel_verifies_cleanup_and_official_signed_out_profile_status");
+      stage = "signed_out_task_cancel";
+      console.log("Starting and cancelling a signed-out task before any model can be authorized…");
+      await startTaskUi(page);
+      const started = (await waitTask(page, status => !!status.operation, 10_000, unbound.request_id)).operation!;
+      assert.ok(started.phase === "starting" || started.phase === "preparing", "native_task_smoke_cancel_window_missed");
+      assert.equal(started.model.observed, null); assert.equal(started.tool_calls, 0);
+      await taskPanel.getByRole("button", {name: "İptal", exact: true}).click();
+      const cancelledTask = (await waitTask(page, status => status.operation?.phase === "finished", 60_000)).operation!;
+      evidence("signed_out_cancel", cancelledTask);
+      assert.equal(cancelledTask.request_id, started.request_id); assert.equal(cancelledTask.outcome, "cancelled"); assert.equal(cancelledTask.error_code, "cancelled");
+      assert.equal(cancelledTask.cleanup, "verified"); assert.equal(cancelledTask.tool_calls, 0); assert.equal(cancelledTask.model.observed, null); assert.equal(cancelledTask.result, null);
+      await expect(taskPanel.getByText("Görev iptal edildi", {exact: true})).toBeVisible();
+      checks.push("signed_out_native_ui_task_cancel_has_verified_cleanup_zero_tools_and_no_observed_model");
+      stage = "signed_out_status_after_cancel";
+      await sessionStatusUi(page, "unauthenticated");
+      await verifyBinding(profileId);
+      checks.push("official_signed_out_profile_status_after_task_cancel_with_retained_public_binding");
+    }
+  }
+  if (realAccount) {
     stage = "authenticated_task"; authenticatedTask = "pending";
     console.log(`Running one approved controlled task with ${requestedModel}; no model fallback…`);
     inferenceAttempted = true;
     await startTaskUi(page);
-    const result = (await waitTask(page, status => status.operation?.phase === "finished", 1_300_000, unbound.request_id)).operation!;
+    const result = (await waitTask(page, status => status.operation?.phase === "finished", 1_300_000, previousTaskRequest)).operation!;
     evidence("authenticated_task", result);
     if (result.outcome !== "passed") throw new SmokeFailure(`task_${result.error_code ?? result.outcome}`);
     assert.equal(result.profile_id, profileId); assert.equal(result.model.requested, requestedModel);
@@ -375,35 +467,6 @@ try {
     await sessionStatusUi(page, "authenticated");
     await verifyBinding(profileId);
     checks.push("task_cleanup_retains_isolated_official_session_and_followup_authenticated_status");
-  } else {
-    waiting.challenge = null; stage = "cancel_login";
-    console.log("Cancelling the undisclosed authorization challenge without authorizing an account…");
-    await sessionPanel.getByRole("button", {name: "Bağlantı işlemini iptal et", exact: true}).click();
-    const cancelled = (await waitSession(page, status => status.operation?.phase === "finished", 45_000)).operation!;
-    assert.equal(cancelled.request_id, waiting.request_id); assert.equal(cancelled.outcome, "cancelled");
-    assert.equal(cancelled.cleanup, "verified"); assert.equal(cancelled.challenge, null);
-    await expect(sessionPanel.getByTestId("profile-session-code")).toHaveCount(0);
-    await expect(sessionPanel.getByLabel("Claude geçici giriş kodu", {exact: true})).toHaveCount(0);
-    await verifyBinding(profileId);
-    await sessionStatusUi(page, "unauthenticated");
-    checks.push("undisclosed_login_cancel_verifies_cleanup_and_official_signed_out_profile_status");
-    stage = "signed_out_task_cancel";
-    console.log("Starting and cancelling a signed-out task before any model can be authorized…");
-    await startTaskUi(page);
-    const started = (await waitTask(page, status => !!status.operation, 10_000, unbound.request_id)).operation!;
-    assert.ok(started.phase === "starting" || started.phase === "preparing", "native_task_smoke_cancel_window_missed");
-    assert.equal(started.model.observed, null); assert.equal(started.tool_calls, 0);
-    await taskPanel.getByRole("button", {name: "İptal", exact: true}).click();
-    const cancelledTask = (await waitTask(page, status => status.operation?.phase === "finished", 60_000)).operation!;
-    evidence("signed_out_cancel", cancelledTask);
-    assert.equal(cancelledTask.request_id, started.request_id); assert.equal(cancelledTask.outcome, "cancelled"); assert.equal(cancelledTask.error_code, "cancelled");
-    assert.equal(cancelledTask.cleanup, "verified"); assert.equal(cancelledTask.tool_calls, 0); assert.equal(cancelledTask.model.observed, null); assert.equal(cancelledTask.result, null);
-    await expect(taskPanel.getByText("Görev iptal edildi", {exact: true})).toBeVisible();
-    checks.push("signed_out_native_ui_task_cancel_has_verified_cleanup_zero_tools_and_no_observed_model");
-    stage = "signed_out_status_after_cancel";
-    await sessionStatusUi(page, "unauthenticated");
-    await verifyBinding(profileId);
-    checks.push("official_signed_out_profile_status_after_task_cancel_with_retained_public_binding");
   }
   stage = "independent_managed_cleanup";
   await verifyIndependentManagedCleanup(profileId);
@@ -438,7 +501,8 @@ try {
   process.off("SIGINT", onInterrupt); process.off("SIGTERM", onInterrupt);
   const passed = success && processCleanup.status === "termination_reported";
   const report = {
-    schema_version: "1.0", checked_at: new Date().toISOString(), purpose: "real_native_windows_controlled_task_acceptance", provider, mode: realAccount ? "real_account" : "signed_out",
+    schema_version: "1.0", checked_at: new Date().toISOString(), purpose: "real_native_windows_controlled_task_acceptance", provider, mode: sourceSessionRunId ? "reuse_authenticated_session" : realAccount ? "real_account" : "signed_out",
+    source_session_run_id: sourceSessionRunId, authentication_method: sourceSessionRunId ? "existing_isolated_session" : realAccount ? "official_user_authorization" : "not_requested",
     success: passed, status: passed ? "passed" : "failed", stage, failure_code: failureCode ?? (passed ? null : "process_cleanup_unconfirmed"), checks,
     real_native_ipc: realNativeIpc, mocked_native_ipc: false, device_challenge_seen: provider === "codex" && challengeSeen,
     claude_oauth_challenge_seen: provider === "claude" && challengeSeen, authorization_url_recorded: false, claude_login_code_recorded: false,
@@ -447,19 +511,23 @@ try {
     authenticated_task: authenticatedTask, requested_model: requestedModel, real_model_inference_attempted: inferenceAttempted,
     user_account_imported: false, paid_api_fallback: false, default_user_app_store_accessed: false,
     task_evidence: taskEvidence, verified_result: verified, independent_managed_cleanup: independentManagedCleanup,
+    independent_managed_cleanup_journal_scope: sourceSessionRunId ? "cumulative_source_isolated_store_public_journals" : "current_isolated_store_public_journals",
     last_session_metadata: nativeUiTrace.report().last_session_metadata,
     ...(observeClaudeUi ? {native_ui_diagnostics: {...nativeUiTrace.report(), failure_category: uiFailureCategory}} : {}),
     build_cleanup: buildCleanup, process_cleanup: processCleanup,
     isolated_store_retained: true, official_profile_volumes_retained: true,
-    browser_open_requested_by_harness: false, user_browser_action_required: provider === "claude" && realAccount,
+    browser_open_requested_by_harness: false, user_browser_action_required: provider === "claude" && realAccount && !sourceSessionRunId,
     scope_limits: [
       "Only --real-account requests inference; signed-out mode never reveals its authorization challenge and checks a fresh official signed-out profile.",
-      provider === "claude"
+      sourceSessionRunId
+        ? "Existing isolated session reuse verifies exactly one matching selected profile and official authenticated status before one approved cheap task; no login, account import, browser interaction, fallback or automatic retry. Reports, config and artifacts use a separate new run directory."
+        : provider === "claude"
         ? "Claude authenticated acceptance requires --real-account --show and manual user authorization via the native app browser button and masked code field; the harness neither opens nor inspects the official browser or private auth."
         : "Authenticated acceptance requires user completion of the official Codex device authorization; auth is never copied from the host.",
       `Exactly one authenticated controlled task is requested with fixed ${requestedModel}; an unavailable model or exhausted quota stops without fallback or retry.`,
       "Verified task cleanup is native supervisor evidence; owned application termination does not independently prove absence of every WebView descendant.",
       "Independent read-only journal and Docker absence checks cover the isolated managed profile containers and claims; separate random-owner task, exporter and verifier resources remain native supervisor evidence.",
+      ...(sourceSessionRunId ? ["Independent cleanup reads cumulative public journals from the source isolated store, including earlier operations; it does not claim those operations occurred in this report run."] : []),
       "The isolated app store and official session volumes are retained for review; this harness performs no broad Docker deletion.",
     ],
   };

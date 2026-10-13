@@ -1,0 +1,75 @@
+{
+  "schema_version": "1.0",
+  "checked_at": "2026-10-13T14:02:48.250Z",
+  "source_commit": "3e2ed70cf3bab72178d3e8b36e7abde544ebacab",
+  "purpose": "real_native_claude_authentication_with_unaccepted_controlled_task",
+  "provider": "claude",
+  "official_authentication": "passed",
+  "real_account_authorized": true,
+  "authentication_checks": [
+    "real_native_ui_creates_and_selects_fresh_isolated_claude_profile",
+    "native_ui_requires_per_run_approval_and_reports_unbound_profile_with_verified_cleanup",
+    "official_claude_authorization_challenge_reaches_real_native_profile_masked_code_ui",
+    "official_user_authorization_and_followup_status_verify_fresh_isolated_authenticated_profile"
+  ],
+  "task_acceptance": "failed",
+  "task_failure_code": "task_model_unavailable",
+  "task_evidence": [
+    {
+      "purpose": "unbound",
+      "outcome": "failed",
+      "error_code": "profile_unbound",
+      "cleanup": "verified",
+      "tool_calls": 0,
+      "model": {
+        "requested": "haiku",
+        "observed": null
+      }
+    },
+    {
+      "purpose": "authenticated_task",
+      "outcome": "failed",
+      "error_code": "model_unavailable",
+      "cleanup": "verified",
+      "tool_calls": 0,
+      "model": {
+        "requested": "haiku",
+        "observed": "claude-haiku-5-5"
+      }
+    }
+  ],
+  "verified_result": null,
+  "real_native_ipc": true,
+  "mocked_native_ipc": false,
+  "host_account_imported": false,
+  "paid_api_fallback": false,
+  "login_code_recorded": false,
+  "authorization_url_recorded": false,
+  "process_cleanup": {
+    "method": "windows_taskkill",
+    "status": "termination_reported",
+    "helperExitCode": 0
+  },
+  "independent_managed_cleanup": {
+    "status": "not_checked",
+    "journal_operations": 0,
+    "namespace_ids_checked": 0,
+    "lease_ids_checked": 0,
+    "managed_containers_absent": false,
+    "profile_claims_absent": false
+  },
+  "scope_limits": [
+    "Official app login and follow-up authenticated CLI status passed.",
+    "Requested Haiku initialized as claude-haiku-5-5; the initial task stopped before tools and was reported as model_unavailable. The underlying provider/API error details were not retained; its precise cause remains unknown.",
+    "Commit d77d57b classifies official synthetic API diagnostics before model evidence. The separate later existing-session task passed; this original failed task result is unchanged.",
+    "No fallback or automatic retry in the initial run; its task acceptance and 34-case verification did not pass.",
+    "The harness closed its owned native window after the task failure; the ordinary app does not exit merely because a task fails. The earlier 2026-10-12 login cancellation cause remains unknown."
+  ],
+  "post_login_official_authenticated_status": "passed",
+  "subsequent_evidence": {
+    "classifier_fix_commit": "d77d57b1acb904752e518b72904e8b5a763ddcae",
+    "accepted_task_record": "native-task-haiku-windows-2026-10-13.json",
+    "accepted_task_checked_at": "2026-10-13T14:28:52.226Z",
+    "initial_task_failure_preserved": true
+  }
+}
