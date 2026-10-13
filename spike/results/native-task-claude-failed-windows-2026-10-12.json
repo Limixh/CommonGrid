@@ -1,0 +1,78 @@
+{
+  "schema_version": "1.0",
+  "checked_at": "2026-10-12T14:30:19.720Z",
+  "purpose": "real_native_windows_controlled_task_acceptance",
+  "provider": "claude",
+  "mode": "real_account",
+  "success": false,
+  "status": "failed",
+  "stage": "await_official_authorization",
+  "failure_code": "session_cancelled",
+  "checks": [
+    "real_native_ui_creates_and_selects_fresh_isolated_claude_profile",
+    "native_ui_requires_per_run_approval_and_reports_unbound_profile_with_verified_cleanup",
+    "official_claude_authorization_challenge_reaches_real_native_profile_masked_code_ui"
+  ],
+  "real_native_ipc": true,
+  "mocked_native_ipc": false,
+  "device_challenge_seen": false,
+  "claude_oauth_challenge_seen": true,
+  "authorization_url_recorded": false,
+  "claude_login_code_recorded": false,
+  "device_code_printed_once_for_explicit_real_account": false,
+  "device_code_recorded_in_files": false,
+  "official_authentication": "failed",
+  "real_account_authorized": false,
+  "authenticated_task": "not_requested",
+  "requested_model": "haiku",
+  "real_model_inference_attempted": false,
+  "user_account_imported": false,
+  "paid_api_fallback": false,
+  "default_user_app_store_accessed": false,
+  "task_evidence": [
+    {
+      "purpose": "unbound",
+      "outcome": "failed",
+      "error_code": "profile_unbound",
+      "cleanup": "verified",
+      "tool_calls": 0,
+      "model": {
+        "requested": "haiku",
+        "observed": null
+      }
+    }
+  ],
+  "verified_result": null,
+  "independent_managed_cleanup": {
+    "status": "not_checked",
+    "journal_operations": 0,
+    "namespace_ids_checked": 0,
+    "lease_ids_checked": 0,
+    "managed_containers_absent": false,
+    "profile_claims_absent": false
+  },
+  "build_cleanup": {
+    "method": "none",
+    "status": "not_started"
+  },
+  "process_cleanup": {
+    "method": "windows_taskkill",
+    "status": "termination_reported",
+    "helperExitCode": 0
+  },
+  "isolated_store_retained": true,
+  "official_profile_volumes_retained": true,
+  "browser_open_requested_by_harness": false,
+  "user_browser_action_required": true,
+  "scope_limits": [
+    "Only --real-account requests inference; signed-out mode never reveals its authorization challenge and checks a fresh official signed-out profile.",
+    "Claude authenticated acceptance requires --real-account --show and manual user authorization via the native app browser button and masked code field; the harness neither opens nor inspects the official browser or private auth.",
+    "Exactly one authenticated controlled task is requested with fixed haiku; an unavailable model or exhausted quota stops without fallback or retry.",
+    "Verified task cleanup is native supervisor evidence; owned application termination does not independently prove absence of every WebView descendant.",
+    "Independent read-only journal and Docker absence checks cover the isolated managed profile containers and claims; separate random-owner task, exporter and verifier resources remain native supervisor evidence.",
+    "The isolated app store and official session volumes are retained for review; this harness performs no broad Docker deletion."
+  ],
+  "source_commit": "5408dbbd0b4044cab00c1e6ef5e6f6d41b405736",
+  "user_observation": "Official Claude page opened after pressing the app browser button; the native window subsequently closed.",
+  "diagnosis": "Terminal login cancellation was observed before harness teardown. The harness then terminated its owned app; the cancellation origin is not established."
+}

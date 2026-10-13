@@ -29,7 +29,7 @@ type Call = {command: string; args: any};
 type Mock = {
   profiles: ManagedProfilesStatus; value: unknown; calls: Call[]; rejected: boolean;
   deferredRead: number; deferStart: boolean; deferCancel: boolean; pending: ((value: unknown) => void)[];
-  openResult: unknown; cancelConflictValue: unknown | null; deferSubmit: boolean;
+  openResult: unknown; cancelConflictValue: unknown | null; deferSubmit: boolean; deferOpen: boolean;
 };
 type MockWindow = Window & {isTauri: boolean; __sessionMock: Mock; __TAURI_INTERNALS__: {invoke: (command: string, args: any) => Promise<unknown>}};
 async function freezeClock(page: Page) {
@@ -39,7 +39,7 @@ async function freezeClock(page: Page) {
 async function mockNative(page: Page, value: unknown = empty, profileState = profiles) {
   await page.addInitScript(({value, profiles, claudeUrl}) => {
     const target = window as MockWindow; target.isTauri = true;
-    target.__sessionMock = {value, profiles, calls: [], rejected: false, deferredRead: 0, deferStart: false, deferCancel: false, deferSubmit: false, pending: [], openResult: true, cancelConflictValue: null};
+    target.__sessionMock = {value, profiles, calls: [], rejected: false, deferredRead: 0, deferStart: false, deferCancel: false, deferSubmit: false, deferOpen: false, pending: [], openResult: true, cancelConflictValue: null};
     target.__TAURI_INTERNALS__ = {invoke: (command, args) => {
       const mock = target.__sessionMock;
       if (command === "local_managed_profiles_status") return Promise.resolve(mock.profiles);
@@ -52,7 +52,10 @@ async function mockNative(page: Page, value: unknown = empty, profileState = pro
       if (!command.startsWith("local_profile_session_")) return Promise.reject(new Error("unexpected_fixture_command"));
       mock.calls.push({command, args});
       if (mock.rejected) return Promise.reject(new Error("PRIVATE_AUTH_DETAIL"));
-      if (command === "local_profile_session_open_device" || command === "local_profile_session_open_claude") return Promise.resolve(mock.openResult);
+      if (command === "local_profile_session_open_device" || command === "local_profile_session_open_claude") {
+        if (mock.deferOpen) return new Promise(resolve => mock.pending.push(resolve));
+        return Promise.resolve(mock.openResult);
+      }
       if (command === "local_profile_session_submit_code") {
         const state = mock.value as ProfileSessionStatus;
         mock.value = {...state, operation: {...state.operation!, revision: args.request.expected_revision + 1, challenge: null}};
@@ -90,6 +93,15 @@ async function open(page: Page) {
 async function setValue(page: Page, value: unknown) { await page.evaluate(value => { (window as MockWindow).__sessionMock.value = value; }, value); }
 async function refresh(page: Page, language: "tr" | "en" = "tr") { await page.getByRole("button", {name: language === "en" ? "Refresh connection status" : "Bağlantı durumunu yenile", exact: true}).click(); }
 async function calls(page: Page) { return page.evaluate(() => (window as MockWindow).__sessionMock.calls); }
+async function browserFocus(page: Page, hidden: boolean) {
+  // Model the external browser's focus transition without opening a real authentication page.
+  await page.evaluate(hidden => {
+    Object.defineProperty(document, "visibilityState", {configurable: true, value: hidden ? "hidden" : "visible"});
+    Object.defineProperty(document, "hidden", {configurable: true, value: hidden});
+    window.dispatchEvent(new Event(hidden ? "blur" : "focus"));
+    document.dispatchEvent(new Event("visibilitychange"));
+  }, hidden);
+}
 
 test("profile selection is not authentication and Codex login sends only native profile identity", async ({page}) => {
   await freezeClock(page); await mockNative(page); const panel = await open(page);
@@ -174,6 +186,61 @@ for (const language of ["tr", "en"] as const) {
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   });
 }
+
+test("Claude browser opening preserves the active login across live polls and browser focus changes", async ({page}) => {
+  await freezeClock(page); await mockNative(page, empty, {...profiles, selected_profile_id: secondId}); const panel = await open(page);
+  await panel.getByRole("button", {name: "Claude hesabını bağla", exact: true}).click();
+  const start = (await calls(page)).find(call => call.command === "local_profile_session_start")!;
+  const input = panel.getByLabel("Claude geçici giriş kodu", {exact: true});
+  await input.fill("FIXTURE_CODE");
+  await panel.getByRole("button", {name: "Claude giriş sayfasını aç", exact: true}).click();
+  const beforeReads = (await calls(page)).filter(call => call.command === "local_profile_session_status").length;
+  await browserFocus(page, true); await page.clock.resume();
+  for (let poll = 1; poll <= 3; poll++) {
+    await expect.poll(async () => (await calls(page)).filter(call => call.command === "local_profile_session_status").length).toBeGreaterThanOrEqual(beforeReads + poll);
+    await expect(panel).toHaveAttribute("aria-busy", "false");
+    await expect(input).toBeEnabled(); await expect(input).toHaveValue("FIXTURE_CODE");
+  }
+  await browserFocus(page, false);
+  await expect(panel).toContainText("Tarayıcıda giriş yapman bekleniyor");
+  await expect(panel.getByRole("alert")).toHaveCount(0);
+  await expect(panel).not.toContainText("Otomatik güncelleme durdu");
+  const observedCalls = await calls(page);
+  expect(observedCalls.filter(call => call.command === "local_profile_session_open_claude")).toEqual([
+    {command: "local_profile_session_open_claude", args: {request: {schema_version: "1.0", request_id: start.args.request.request_id, expected_revision: 0}}},
+  ]);
+  expect(observedCalls.filter(call => call.command === "local_profile_session_start")).toHaveLength(1);
+  expect(observedCalls.filter(call => call.command === "local_profile_session_cancel")).toHaveLength(0);
+  await input.press("End"); await input.pressSequentially("#" + claudeState); await input.press("Enter");
+  await expect(input).toHaveCount(0);
+  expect((await calls(page)).filter(call => call.command === "local_profile_session_submit_code")).toEqual([
+    {command: "local_profile_session_submit_code", args: {request: {schema_version: "1.0", request_id: start.args.request.request_id, expected_revision: 0, code: claudeCode}}},
+  ]);
+  expect((await calls(page)).filter(call => call.command === "local_profile_session_cancel")).toHaveLength(0);
+});
+
+test("Claude delayed browser opener keeps the same code entry usable during automatic observation", async ({page}) => {
+  await freezeClock(page); await mockNative(page, envelope(claudeWaiting), {...profiles, selected_profile_id: secondId}); const panel = await open(page);
+  await page.evaluate(() => { (window as MockWindow).__sessionMock.deferOpen = true; });
+  const input = panel.getByLabel("Claude geçici giriş kodu", {exact: true});
+  const opener = panel.getByRole("button", {name: "Claude giriş sayfasını aç", exact: true});
+  await opener.click(); await expect(opener).toBeDisabled();
+  await input.fill("FIXTURE_CODE"); await browserFocus(page, true);
+  const beforeReads = (await calls(page)).filter(call => call.command === "local_profile_session_status").length;
+  for (let poll = 1; poll <= 2; poll++) {
+    await page.clock.runFor(1100);
+    expect((await calls(page)).filter(call => call.command === "local_profile_session_status").length).toBeGreaterThanOrEqual(beforeReads + poll);
+    await expect(panel).toHaveAttribute("aria-busy", "false");
+    await expect(input).toHaveValue("FIXTURE_CODE"); await expect(input).toBeEnabled(); await expect(opener).toBeDisabled();
+  }
+  await page.evaluate(() => { (window as MockWindow).__sessionMock.pending.splice(0).forEach(resolve => resolve(true)); });
+  await browserFocus(page, false); await expect(opener).toBeEnabled();
+  await input.fill(claudeCode); await input.press("Enter"); await expect(input).toHaveCount(0);
+  expect((await calls(page)).filter(call => call.command === "local_profile_session_submit_code")).toEqual([
+    {command: "local_profile_session_submit_code", args: {request: {schema_version: "1.0", request_id: requestId, expected_revision: 3, code: claudeCode}}},
+  ]);
+  expect((await calls(page)).filter(call => call.command === "local_profile_session_cancel")).toHaveLength(0);
+});
 
 test("Claude code entry rejects another login state and clears the input without native submission", async ({page}) => {
   await freezeClock(page); await mockNative(page, envelope(claudeWaiting), {...profiles, selected_profile_id: secondId}); const panel = await open(page);

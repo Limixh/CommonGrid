@@ -9,23 +9,32 @@ import { CommandError, runOwnedCommand, type CommandCleanup } from "../packages/
 import { validateManagedProfilesStatus } from "../packages/agent-adapters/src/managed-profile-protocol.ts";
 import { validateClaudeAuthorizationUrl, validateProfileSessionStatus, type ProfileSessionStatus } from "../packages/agent-adapters/src/profile-session-protocol.ts";
 import { root } from "./go.mjs";
+import { createNativeUiTrace, safeNativeUiErrorCategory } from "./native-ui-trace.mts";
 
 // Real official CLI login is cancelled without authorizing an account.
-// No model inference, user account import, API fallback or browser opening.
-// Device codes never enter screenshots, files, reports or console output.
+// No model inference, user account import or API fallback. Browser opening is
+// opt-in for Claude only; the external browser is never inspected or controlled.
+// Challenges never enter screenshots, files, reports or console output.
 if (process.platform !== "win32") throw new Error("native_session_smoke_requires_windows_webview2");
 const arguments_ = process.argv.slice(2);
-assert.ok(arguments_.length === 0 || arguments_.length === 2 && arguments_[0] === "--provider" && ["codex", "claude"].includes(arguments_[1]), "native_session_smoke_unknown_arguments");
-const provider = arguments_[1] ?? "codex";
+const exerciseBrowser = arguments_.includes("--exercise-browser");
+const providerArguments = arguments_.filter(argument => argument !== "--exercise-browser");
+assert.ok(arguments_.filter(argument => argument === "--exercise-browser").length <= 1 &&
+  (providerArguments.length === 0 || providerArguments.length === 2 && providerArguments[0] === "--provider" && ["codex", "claude"].includes(providerArguments[1])) &&
+  (!exerciseBrowser || providerArguments[1] === "claude"), "native_session_smoke_unknown_arguments");
+const provider = providerArguments[1] ?? "codex";
 const profileName = provider === "claude" ? "Claude session smoke" : "Codex session smoke";
 const directory = path.resolve(root, ".local/native-session-smoke", randomUUID()), appdata = path.join(directory, "appdata");
 await mkdir(directory, {recursive: true});
 const config = path.join(directory, "tauri-smoke.json");
-await writeFile(config, JSON.stringify({app: {appDirectoriesOverride: appdata, windows: [{label: "main", title: "CommonGrid native session smoke", visible: false, width: 1380, height: 1080}]}}) + "\n");
+await writeFile(config, JSON.stringify({app: {appDirectoriesOverride: appdata, windows: [{label: "main", title: exerciseBrowser ? "CommonGrid Claude browser smoke" : "CommonGrid native session smoke", visible: exerciseBrowser, width: 1380, height: 1080}]}}) + "\n");
 const checks: string[] = [];
 let success = false, stage = "build", deviceChallengeSeen = false, realNativeIpc = false, browser: Browser | undefined;
 let cleanup: CommandCleanup = {method: "none", status: "not_started"};
 let activePage: Page | undefined;
+let browserOpenRequested = false, browserWaitingObservedMs = 0, browserExerciseFailed = false;
+let browserFailureCode: string | null = null;
+const nativeUiTrace = createNativeUiTrace(() => stage);
 const controller = new AbortController();
 let completion: Promise<{result?: unknown; error?: unknown}> | undefined;
 type Command = "local_managed_profiles_status" | "local_managed_profile_select" | "local_profile_session_status" | "local_profile_session_start" | "local_profile_session_cancel";
@@ -35,6 +44,7 @@ async function invoke(page: Page, command: Command, args: unknown = {}) {
 async function session(page: Page): Promise<ProfileSessionStatus> {
   const value = validateProfileSessionStatus(await invoke(page, "local_profile_session_status"));
   realNativeIpc = value.availability === "available";
+  if (exerciseBrowser) nativeUiTrace.observeSession(value);
   return value;
 }
 async function until(page: Page, predicate: (value: ProfileSessionStatus) => boolean, timeoutMs: number, previousRequest?: string) {
@@ -78,6 +88,7 @@ try {
   await page.waitForURL(url => url.hostname === "tauri.localhost" || url.protocol === "tauri:", {timeout: 15_000});
   await page.reload({waitUntil: "domcontentloaded", timeout: 15_000});
   assert.equal(await page.evaluate(() => (globalThis as any).isTauri), true);
+  if (exerciseBrowser) { stage = "install_passive_ui_observer"; await nativeUiTrace.install(page); stage = "open_agents"; }
   await page.getByRole("button", {name: "Ajanlar ve ortam", exact: true}).click();
   const profiles = page.locator(".managed-profiles-panel");
   await expect(profiles).toHaveAttribute("aria-busy", "false");
@@ -118,6 +129,37 @@ try {
   waiting.operation.challenge = null;
   if (provider === "codex") await expect(panel.getByTestId("profile-session-code")).toBeVisible();
   checks.push(provider === "claude" ? "real_official_claude_oauth_challenge_reaches_native_profile_ui" : "real_official_codex_device_challenge_reaches_native_profile_ui");
+  if (exerciseBrowser) {
+    stage = "browser_open";
+    console.log("Opening the official Claude sign-in page through the native app; observing only the isolated app…");
+    await panel.getByRole("button", {name: "Claude giriş sayfasını aç", exact: true}).click();
+    browserOpenRequested = true;
+    stage = "browser_waiting_continuity";
+    const started = Date.now(), requestId = waiting.operation.request_id;
+    while (Date.now() - started < 30_000) {
+      const observed = (await session(page)).operation;
+      const challenged = !!observed?.challenge && "authorization_url" in observed.challenge;
+      // Validation happens in session(); discard transient URL before assertions.
+      if (observed) observed.challenge = null;
+      assert.equal(observed?.request_id, requestId, "native_session_smoke_browser_request_changed");
+      assert.equal(observed?.phase, "waiting_for_login", "native_session_smoke_browser_login_interrupted");
+      assert.equal(observed?.session_state, "unknown", "native_session_smoke_browser_claimed_authorization");
+      assert.equal(challenged, true, "native_session_smoke_browser_challenge_lost");
+      // Return booleans only. No password value is ever transported or logged.
+      const ui = await page.evaluate(() => {
+        const panel = document.querySelector(".profile-session-panel");
+        const input = panel?.querySelector<HTMLInputElement>("#claude-login-code");
+        return {panelPresent: !!panel, challengePresent: !!panel?.querySelector(".profile-session-challenge"),
+          passwordInput: input?.type === "password", codeEmpty: input?.value === ""};
+      });
+      assert.equal(ui.panelPresent && ui.challengePresent && ui.passwordInput && ui.codeEmpty, true, "native_session_smoke_browser_ui_not_preserved");
+      assert.equal(await panel.getByRole("button", {name: "Claude giriş sayfasını aç", exact: true}).isVisible(), true, "native_session_smoke_browser_opener_ui_lost");
+      browserWaitingObservedMs = Date.now() - started;
+      await delay(500);
+    }
+    browserWaitingObservedMs = Date.now() - started;
+    checks.push("real_native_claude_browser_open_preserves_same_waiting_login_and_empty_password_ui_for_30_seconds");
+  }
   stage = "cancel";
   console.log("Device challenge observed; cancelling without account authorization…");
   await panel.getByRole("button", {name: "Bağlantı işlemini iptal et", exact: true}).click();
@@ -154,7 +196,16 @@ try {
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   checks.push("native_account_panel_is_readable_after_cleanup_without_device_code");
   success = true;
+} catch (error) {
+  if (!exerciseBrowser) throw error;
+  // Playwright failures can carry DOM/value snapshots. New browser mode emits
+  // only the safe diagnostics selected above, never the caught error object.
+  browserExerciseFailed = true;
+  browserFailureCode = safeNativeUiErrorCategory(error);
+  console.error("Native Claude browser exercise failed; see safe phase/UI metadata in report.");
 } finally {
+  const completedStage = stage;
+  if (exerciseBrowser) stage = success ? "process_cleanup" : "failure_cleanup";
   if (!success && activePage && !activePage.isClosed()) {
     // Give the native supervisor its independent cleanup window before the
     // test terminates its owned application. Never cancel a replacement.
@@ -169,11 +220,14 @@ try {
   controller.abort("smoke_finished");
   if (completion) { const finished = await completion; if (finished.error instanceof CommandError) cleanup = await finished.error.cleanup; }
   if (browser) await browser.close().catch(() => {});
-  const report = {schema_version: "1.0", checked_at: new Date().toISOString(), purpose: provider === "claude" ? "real_native_claude_oauth_login_cancel_and_official_session_status" : "real_native_codex_device_login_cancel_and_official_session_status", provider, success: success && cleanup.status === "termination_reported", stage, checks,
+  const report = {schema_version: "1.0", checked_at: new Date().toISOString(), purpose: provider === "claude" ? "real_native_claude_oauth_login_cancel_and_official_session_status" : "real_native_codex_device_login_cancel_and_official_session_status", provider, success: success && cleanup.status === "termination_reported", stage: completedStage, checks,
     device_challenge_seen: provider === "codex" && deviceChallengeSeen, claude_oauth_challenge_seen: provider === "claude" && deviceChallengeSeen, device_code_recorded: false, authorization_url_recorded: false, real_native_ipc: realNativeIpc, mocked_native_ipc: false,
     real_account_authorized: false, real_model_inference: false, user_account_imported: false, default_user_app_store_accessed: false,
-    browser_open_requested: false, process_cleanup: cleanup,
-    scope_limits: ["Isolated app directories and a fresh public profile; no user authorization or model inference", "Official device-login cancellation and signed-out status/logout only; authenticated completion requires user approval in the official provider flow", "Owned process termination report does not independently prove every WebView descendant is absent"]};
+    browser_open_requested: browserOpenRequested, process_cleanup: cleanup,
+    ...(exerciseBrowser ? {browser_exercise: {requested: true, failed: browserExerciseFailed, failure_code: browserFailureCode, waiting_observed_ms: browserWaitingObservedMs,
+      external_browser_inspected: false, ...nativeUiTrace.report()}} : {}),
+    scope_limits: ["Isolated app directories and a fresh public profile; no user authorization or model inference", "Official device-login cancellation and signed-out status/logout only; authenticated completion requires user approval in the official provider flow", "Owned process termination report does not independently prove every WebView descendant is absent",
+      ...(exerciseBrowser ? ["Native app opener requested the official Claude page; external browser launch success and external browser/auth content are not inspected"] : [])]};
   await writeFile(path.join(directory, "report.json"), JSON.stringify(report, null, 2) + "\n");
   console.log(`Report: ${path.join(directory, "report.json")}`);
 }

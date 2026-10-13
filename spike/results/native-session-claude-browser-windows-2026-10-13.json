@@ -1,0 +1,420 @@
+{
+  "schema_version": "1.0",
+  "checked_at": "2026-10-13T13:53:06.439Z",
+  "purpose": "real_native_claude_oauth_login_cancel_and_official_session_status",
+  "provider": "claude",
+  "success": true,
+  "stage": "logout",
+  "checks": [
+    "real_native_ui_checks_unmaterialized_selected_profile_without_claiming_authentication",
+    "real_official_claude_oauth_challenge_reaches_native_profile_ui",
+    "real_native_claude_browser_open_preserves_same_waiting_login_and_empty_password_ui_for_30_seconds",
+    "cancel_hides_device_code_and_verifies_owned_session_cleanup",
+    "runtime_binding_persists_only_public_owner_metadata_distinct_from_profile_id",
+    "official_cli_status_reuses_materialized_profile_after_cancel_and_retains_no_login_claim",
+    "official_cli_logout_has_verified_unauthenticated_postcondition",
+    "native_account_panel_is_readable_after_cleanup_without_device_code"
+  ],
+  "device_challenge_seen": false,
+  "claude_oauth_challenge_seen": true,
+  "device_code_recorded": false,
+  "authorization_url_recorded": false,
+  "real_native_ipc": true,
+  "mocked_native_ipc": false,
+  "real_account_authorized": false,
+  "real_model_inference": false,
+  "user_account_imported": false,
+  "default_user_app_store_accessed": false,
+  "browser_open_requested": true,
+  "process_cleanup": {
+    "method": "windows_taskkill",
+    "status": "termination_reported",
+    "helperExitCode": 0
+  },
+  "browser_exercise": {
+    "requested": true,
+    "failed": false,
+    "failure_code": null,
+    "waiting_observed_ms": 30085,
+    "external_browser_inspected": false,
+    "native_invoke_observer": "unavailable",
+    "diagnostic_limit": 120,
+    "ui_events": [
+      {
+        "at_ms": 74620,
+        "stage": "install_passive_ui_observer",
+        "event": "panel_absent"
+      },
+      {
+        "at_ms": 74906,
+        "stage": "open_agents",
+        "event": "nav_agents_click"
+      },
+      {
+        "at_ms": 75424,
+        "stage": "empty_profile",
+        "event": "panel_present"
+      },
+      {
+        "at_ms": 214154,
+        "stage": "browser_open",
+        "event": "claude_open_click"
+      },
+      {
+        "at_ms": 244313,
+        "stage": "cancel",
+        "event": "cancel_click"
+      },
+      {
+        "at_ms": 332049,
+        "stage": "process_cleanup",
+        "event": "page_closed"
+      }
+    ],
+    "phase_transitions": [
+      {
+        "at_ms": 75510,
+        "stage": "empty_profile",
+        "operation": null
+      },
+      {
+        "at_ms": 75573,
+        "stage": "empty_profile",
+        "operation": {
+          "request_id": "ac28c876-a623-4070-a396-5aad5b586639",
+          "profile_id": "bd4c66ff-8617-4dd7-82e4-a3c64e69b83a",
+          "provider": "claude",
+          "action": "status",
+          "revision": 0,
+          "phase": "starting",
+          "outcome": null,
+          "session_state": "unknown",
+          "error_code": null,
+          "cleanup": "pending"
+        }
+      },
+      {
+        "at_ms": 79953,
+        "stage": "empty_profile",
+        "operation": {
+          "request_id": "ac28c876-a623-4070-a396-5aad5b586639",
+          "profile_id": "bd4c66ff-8617-4dd7-82e4-a3c64e69b83a",
+          "provider": "claude",
+          "action": "status",
+          "revision": 3,
+          "phase": "finished",
+          "outcome": "passed",
+          "session_state": "unauthenticated",
+          "error_code": null,
+          "cleanup": "verified"
+        }
+      },
+      {
+        "at_ms": 80945,
+        "stage": "device_login",
+        "operation": {
+          "request_id": "631b8c76-e12c-4e1f-b36f-dce51550efc0",
+          "profile_id": "bd4c66ff-8617-4dd7-82e4-a3c64e69b83a",
+          "provider": "claude",
+          "action": "login",
+          "revision": 0,
+          "phase": "starting",
+          "outcome": null,
+          "session_state": "unknown",
+          "error_code": null,
+          "cleanup": "pending"
+        }
+      },
+      {
+        "at_ms": 82046,
+        "stage": "device_login",
+        "operation": {
+          "request_id": "631b8c76-e12c-4e1f-b36f-dce51550efc0",
+          "profile_id": "bd4c66ff-8617-4dd7-82e4-a3c64e69b83a",
+          "provider": "claude",
+          "action": "login",
+          "revision": 1,
+          "phase": "preparing",
+          "outcome": null,
+          "session_state": "unknown",
+          "error_code": null,
+          "cleanup": "pending"
+        }
+      },
+      {
+        "at_ms": 208678,
+        "stage": "device_login",
+        "operation": {
+          "request_id": "631b8c76-e12c-4e1f-b36f-dce51550efc0",
+          "profile_id": "bd4c66ff-8617-4dd7-82e4-a3c64e69b83a",
+          "provider": "claude",
+          "action": "login",
+          "revision": 2,
+          "phase": "checking",
+          "outcome": null,
+          "session_state": "unknown",
+          "error_code": null,
+          "cleanup": "pending"
+        }
+      },
+      {
+        "at_ms": 213928,
+        "stage": "device_login",
+        "operation": {
+          "request_id": "631b8c76-e12c-4e1f-b36f-dce51550efc0",
+          "profile_id": "bd4c66ff-8617-4dd7-82e4-a3c64e69b83a",
+          "provider": "claude",
+          "action": "login",
+          "revision": 3,
+          "phase": "waiting_for_login",
+          "outcome": null,
+          "session_state": "unknown",
+          "error_code": null,
+          "cleanup": "pending"
+        }
+      },
+      {
+        "at_ms": 244366,
+        "stage": "cancel",
+        "operation": {
+          "request_id": "631b8c76-e12c-4e1f-b36f-dce51550efc0",
+          "profile_id": "bd4c66ff-8617-4dd7-82e4-a3c64e69b83a",
+          "provider": "claude",
+          "action": "login",
+          "revision": 5,
+          "phase": "cleaning",
+          "outcome": null,
+          "session_state": "unknown",
+          "error_code": null,
+          "cleanup": "pending"
+        }
+      },
+      {
+        "at_ms": 250383,
+        "stage": "cancel",
+        "operation": {
+          "request_id": "631b8c76-e12c-4e1f-b36f-dce51550efc0",
+          "profile_id": "bd4c66ff-8617-4dd7-82e4-a3c64e69b83a",
+          "provider": "claude",
+          "action": "login",
+          "revision": 6,
+          "phase": "finished",
+          "outcome": "cancelled",
+          "session_state": "unknown",
+          "error_code": "cancelled",
+          "cleanup": "verified"
+        }
+      },
+      {
+        "at_ms": 250461,
+        "stage": "check_after_cancel",
+        "operation": {
+          "request_id": "fcaf17d3-8450-4b5b-9682-669b61545d43",
+          "profile_id": "bd4c66ff-8617-4dd7-82e4-a3c64e69b83a",
+          "provider": "claude",
+          "action": "status",
+          "revision": 0,
+          "phase": "starting",
+          "outcome": null,
+          "session_state": "unknown",
+          "error_code": null,
+          "cleanup": "pending"
+        }
+      },
+      {
+        "at_ms": 252968,
+        "stage": "check_after_cancel",
+        "operation": {
+          "request_id": "fcaf17d3-8450-4b5b-9682-669b61545d43",
+          "profile_id": "bd4c66ff-8617-4dd7-82e4-a3c64e69b83a",
+          "provider": "claude",
+          "action": "status",
+          "revision": 1,
+          "phase": "preparing",
+          "outcome": null,
+          "session_state": "unknown",
+          "error_code": null,
+          "cleanup": "pending"
+        }
+      },
+      {
+        "at_ms": 281265,
+        "stage": "check_after_cancel",
+        "operation": {
+          "request_id": "fcaf17d3-8450-4b5b-9682-669b61545d43",
+          "profile_id": "bd4c66ff-8617-4dd7-82e4-a3c64e69b83a",
+          "provider": "claude",
+          "action": "status",
+          "revision": 2,
+          "phase": "checking",
+          "outcome": null,
+          "session_state": "unknown",
+          "error_code": null,
+          "cleanup": "pending"
+        }
+      },
+      {
+        "at_ms": 284979,
+        "stage": "check_after_cancel",
+        "operation": {
+          "request_id": "fcaf17d3-8450-4b5b-9682-669b61545d43",
+          "profile_id": "bd4c66ff-8617-4dd7-82e4-a3c64e69b83a",
+          "provider": "claude",
+          "action": "status",
+          "revision": 3,
+          "phase": "cleaning",
+          "outcome": null,
+          "session_state": "unknown",
+          "error_code": null,
+          "cleanup": "pending"
+        }
+      },
+      {
+        "at_ms": 297276,
+        "stage": "check_after_cancel",
+        "operation": {
+          "request_id": "fcaf17d3-8450-4b5b-9682-669b61545d43",
+          "profile_id": "bd4c66ff-8617-4dd7-82e4-a3c64e69b83a",
+          "provider": "claude",
+          "action": "status",
+          "revision": 4,
+          "phase": "finished",
+          "outcome": "passed",
+          "session_state": "unauthenticated",
+          "error_code": null,
+          "cleanup": "verified"
+        }
+      },
+      {
+        "at_ms": 297389,
+        "stage": "logout",
+        "operation": {
+          "request_id": "aa0bf7d7-7779-4f94-aba8-057ed01335b0",
+          "profile_id": "bd4c66ff-8617-4dd7-82e4-a3c64e69b83a",
+          "provider": "claude",
+          "action": "logout",
+          "revision": 0,
+          "phase": "starting",
+          "outcome": null,
+          "session_state": "unknown",
+          "error_code": null,
+          "cleanup": "pending"
+        }
+      },
+      {
+        "at_ms": 299376,
+        "stage": "logout",
+        "operation": {
+          "request_id": "aa0bf7d7-7779-4f94-aba8-057ed01335b0",
+          "profile_id": "bd4c66ff-8617-4dd7-82e4-a3c64e69b83a",
+          "provider": "claude",
+          "action": "logout",
+          "revision": 1,
+          "phase": "preparing",
+          "outcome": null,
+          "session_state": "unknown",
+          "error_code": null,
+          "cleanup": "pending"
+        }
+      },
+      {
+        "at_ms": 320235,
+        "stage": "logout",
+        "operation": {
+          "request_id": "aa0bf7d7-7779-4f94-aba8-057ed01335b0",
+          "profile_id": "bd4c66ff-8617-4dd7-82e4-a3c64e69b83a",
+          "provider": "claude",
+          "action": "logout",
+          "revision": 2,
+          "phase": "checking",
+          "outcome": null,
+          "session_state": "unknown",
+          "error_code": null,
+          "cleanup": "pending"
+        }
+      },
+      {
+        "at_ms": 325254,
+        "stage": "logout",
+        "operation": {
+          "request_id": "aa0bf7d7-7779-4f94-aba8-057ed01335b0",
+          "profile_id": "bd4c66ff-8617-4dd7-82e4-a3c64e69b83a",
+          "provider": "claude",
+          "action": "logout",
+          "revision": 3,
+          "phase": "cleaning",
+          "outcome": null,
+          "session_state": "unknown",
+          "error_code": null,
+          "cleanup": "pending"
+        }
+      },
+      {
+        "at_ms": 330962,
+        "stage": "logout",
+        "operation": {
+          "request_id": "aa0bf7d7-7779-4f94-aba8-057ed01335b0",
+          "profile_id": "bd4c66ff-8617-4dd7-82e4-a3c64e69b83a",
+          "provider": "claude",
+          "action": "logout",
+          "revision": 4,
+          "phase": "finished",
+          "outcome": "passed",
+          "session_state": "unauthenticated",
+          "error_code": null,
+          "cleanup": "verified"
+        }
+      }
+    ],
+    "last_session_metadata": {
+      "at_ms": 330962,
+      "stage": "logout",
+      "schema_version": "1.0",
+      "availability": "available",
+      "operation": {
+        "request_id": "aa0bf7d7-7779-4f94-aba8-057ed01335b0",
+        "profile_id": "bd4c66ff-8617-4dd7-82e4-a3c64e69b83a",
+        "provider": "claude",
+        "action": "logout",
+        "revision": 4,
+        "phase": "finished",
+        "outcome": "passed",
+        "session_state": "unauthenticated",
+        "error_code": null,
+        "cleanup": "verified"
+      }
+    }
+  },
+  "scope_limits": [
+    "Isolated app directories and a fresh public profile; no user authorization or model inference",
+    "Official device-login cancellation and signed-out status/logout only; authenticated completion requires user approval in the official provider flow",
+    "Owned process termination report does not independently prove every WebView descendant is absent",
+    "Native app opener requested the official Claude page; external browser launch success and external browser/auth content are not inspected"
+  ],
+  "source_runtime_commit": "bfdfd06",
+  "source_harness_state": "validated_working_tree_before_diagnostic_commit",
+  "validation": {
+    "general_check": "passed",
+    "claude_ui_tests": {
+      "passed": 15,
+      "failed": 0
+    },
+    "diagnostic_vm_tests": {
+      "passed": 5,
+      "failed": 0
+    }
+  },
+  "previous_attempts": [
+    {
+      "stage": "launch",
+      "success": false,
+      "diagnosis": "The actual cached tsx evaluate callback reproduced missing __name in VM; fixed by using literal JavaScript source."
+    },
+    {
+      "stage": "device_login",
+      "success": false,
+      "error_code": "image_missing",
+      "diagnosis": "Pinned image exists by repository and digest; tagged lookup failed. Canonical digest reference now used for inspection and runtime."
+    }
+  ]
+}

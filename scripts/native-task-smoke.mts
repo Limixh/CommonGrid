@@ -14,13 +14,15 @@ import { readOperationJournals } from "../packages/agent-adapters/src/operation-
 import { operationLeaseLabels } from "../packages/agent-adapters/src/operation-lease.ts";
 import { ProfileBindings } from "../apps/desktop/native-worker/profile-bindings.ts";
 import { root } from "./go.mjs";
+import { createNativeUiTrace, safeNativeUiErrorCategory } from "./native-ui-trace.mts";
 
 // Real packaged Windows/WebView2 acceptance. Native IPC is never replaced.
 // Default: a fresh signed-out profile, no account import and no inference.
 // --real-account is explicit consent to one cheap-model task after the user
 // authorizes the official flow. Only Codex's device challenge goes to stdout;
 // Claude requires a visible app and manual entry in its masked code field.
-// No DOM dumps, raw errors, traces, videos or challenge screenshots.
+// No DOM dumps, raw errors, videos or challenge screenshots. Claude real-account
+// mode collects only bounded allowlisted UI/IPC events and safe session metadata.
 const arguments_ = process.argv.slice(2);
 const usage = "Usage: npm run test:native-task-smoke -- [--provider codex|claude] [--real-account] [--show]\nDefault: Codex signed-out task failure and cancellation without model inference.\n--real-account: wait for official user authorization; run one gpt-6-luna (Codex) or haiku (Claude) task.\nCodex prints its official device URL/code once. Claude requires --real-account --show: use the app's official browser button and paste the code only into its masked field. Claude URL/code/state are never printed.\n--show: show the isolated native window (requires --real-account).\nThe isolated app store and official profile volumes are retained; host auth is never copied.";
 if (arguments_.includes("--help")) { console.log(usage); process.exit(0); }
@@ -54,7 +56,7 @@ await mkdir(directory, {recursive: true});
 const config = withinRun(path.join(directory, "tauri-smoke.json"));
 await writeFile(config, JSON.stringify({app: {
   appDirectoriesOverride: withinRun(appdata),
-  windows: [{label: "main", title: "CommonGrid native task smoke", visible: show, width: 1380, height: 1200}],
+  windows: [{label: "main", title: provider === "claude" && realAccount ? "CommonGrid — Claude hesabını bağla" : "CommonGrid native task smoke", visible: show, width: 1380, height: 1200}],
 }}, null, 2) + "\n");
 
 const checks: string[] = [];
@@ -64,12 +66,16 @@ const taskEvidence: Array<{
   cleanup: TaskRunOperation["cleanup"]; tool_calls: number; model: TaskRunOperation["model"];
 }> = [];
 let stage = "build", success = false, realNativeIpc = false, challengeSeen = false, challengePrinted = false;
+let diagnosticStage: string | null = null;
+const nativeUiTrace = createNativeUiTrace(() => diagnosticStage ?? stage);
+const observeClaudeUi = provider === "claude" && realAccount;
 let accountAuthorized = false, inferenceAttempted = false;
 let authentication: "not_requested" | "pending" | "passed" | "failed" = "not_requested";
 let authenticatedTask: "not_requested" | "pending" | "passed" | "failed" = "not_requested";
 let processCleanup: CommandCleanup = {method: "none", status: "not_started"};
 let buildCleanup: CommandCleanup = {method: "none", status: "not_started"};
 let failureCode: string | null = null;
+let uiFailureCategory: string | null = null;
 let browser: Browser | undefined, activePage: Page | undefined;
 let taskSnapshot: TaskRunStatus | null = null, sessionSnapshot: ProfileSessionStatus | null = null;
 let verified: {cases: number; candidate_sha256: string; patch_sha256: string; applied_candidate_sha256: string} | null = null;
@@ -102,6 +108,7 @@ async function invoke(page: Page, command: Command, args: unknown = {}) {
 }
 async function session(page: Page) {
   const current = validateProfileSessionStatus(await invoke(page, "local_profile_session_status"));
+  nativeUiTrace.observeSession(current);
   assert.equal(current.availability, "available"); realNativeIpc = true;
   sessionSnapshot = acceptProfileSessionUpdate(sessionSnapshot, current);
   return sessionSnapshot;
@@ -267,6 +274,7 @@ try {
   await page.waitForURL(url => url.hostname === "tauri.localhost" || url.protocol === "tauri:", {timeout: 15_000});
   await page.reload({waitUntil: "domcontentloaded", timeout: 15_000});
   assert.equal(await page.evaluate(() => (globalThis as any).isTauri), true);
+  if (observeClaudeUi) { stage = "install_passive_ui_observer"; await nativeUiTrace.install(page); stage = "open_agents"; }
   await page.getByRole("button", {name: "Ajanlar ve ortam", exact: true}).click();
   const profiles = page.locator(".managed-profiles-panel"), sessionPanel = page.locator(".profile-session-panel");
   await expect(profiles).toHaveAttribute("aria-busy", "false"); stage = "fresh_profile";
@@ -321,6 +329,7 @@ try {
       // The user opens the browser using the actual native app button and
       // submits the code only in its masked field. Never read that field,
       // automate browser auth, print the URL/state, or copy private auth.
+      await sessionPanel.getByLabel("Claude geçici giriş kodu", {exact: true}).scrollIntoViewIfNeeded();
       console.log("Waiting for user: in the visible CommonGrid window, click 'Claude giriş sayfasını aç', complete official login, paste the returned code only into 'Claude geçici giriş kodu', and click 'Giriş kodunu gönder'.");
     } else {
       assert.ok("user_code" in waiting.challenge);
@@ -410,9 +419,11 @@ try {
   // Playwright failures can quote the DOM (including a transient challenge).
   // Report only a locally constructed code or a fixed stage-specific failure.
   failureCode = error instanceof SmokeFailure ? error.code : `${stage}_assertion_failed`;
+  if (observeClaudeUi) uiFailureCategory = safeNativeUiErrorCategory(error);
   if (authentication === "pending") authentication = "failed";
   if (authenticatedTask === "pending") authenticatedTask = "failed";
 } finally {
+  diagnosticStage = success ? "process_cleanup" : "failure_cleanup";
   if (!success && activePage && !activePage.isClosed()) {
     try { await cancelOwnedOperation(activePage, "task"); } catch { /* No independent cleanup claim. */ }
     try { await cancelOwnedOperation(activePage, "session"); } catch { /* No independent cleanup claim. */ }
@@ -436,6 +447,8 @@ try {
     authenticated_task: authenticatedTask, requested_model: requestedModel, real_model_inference_attempted: inferenceAttempted,
     user_account_imported: false, paid_api_fallback: false, default_user_app_store_accessed: false,
     task_evidence: taskEvidence, verified_result: verified, independent_managed_cleanup: independentManagedCleanup,
+    last_session_metadata: nativeUiTrace.report().last_session_metadata,
+    ...(observeClaudeUi ? {native_ui_diagnostics: {...nativeUiTrace.report(), failure_category: uiFailureCategory}} : {}),
     build_cleanup: buildCleanup, process_cleanup: processCleanup,
     isolated_store_retained: true, official_profile_volumes_retained: true,
     browser_open_requested_by_harness: false, user_browser_action_required: provider === "claude" && realAccount,
