@@ -321,6 +321,49 @@ func TestBundleClientGolden(t *testing.T) {
 	}
 }
 
+// The software-result bundle is built by the worker-side package builder from a
+// verified patch of the real pinned software-bounds baseline. Only local text
+// inspection ran on the client; the server validation (and its scan) is separate.
+func TestBundleSoftwareResultGolden(t *testing.T) {
+	read := func(name string) []byte {
+		raw, err := os.ReadFile("testdata/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return raw
+	}
+	var binding Binding
+	if err := json.Unmarshal(read("software-result-binding.json"), &binding); err != nil {
+		t.Fatal(err)
+	}
+	var task contract.TaskContract
+	if err := json.Unmarshal(read("client-task.json"), &task); err != nil {
+		t.Fatal(err)
+	}
+	raw := read("software-result-bundle.zip")
+	got, err := Validate(raw, task, binding)
+	if err != nil {
+		t.Fatalf("software result bundle rejected: %v", err)
+	}
+	if binding.Purpose != "result" || binding.StrategyID != "invariant" || binding.LeaseID != "lease-client-fixture" || task.Id != "software-bounds" {
+		t.Fatalf("unexpected golden binding: %+v", binding)
+	}
+	if len(got.Files) != 1 || got.Files[0].Path != "src/search.ts" {
+		t.Fatalf("unexpected inventory: %v", got.Files)
+	}
+	source := string(got.Files[0].Bytes)
+	if strings.Contains(source, "values.length - 1") || !strings.Contains(source, "values.length") {
+		t.Fatal("golden candidate is not the reference fix")
+	}
+	// A different lease or strategy binding must not validate the same bytes.
+	other := binding
+	other.LeaseID = "lease-other"
+	requireRejection(t, raw, task, other)
+	other = binding
+	other.StrategyID = "boundary-first"
+	requireRejection(t, raw, task, other)
+}
+
 func TestBundleRejectsAncestorCollisionsAndEmptyInventory(t *testing.T) {
 	b, task := bundleFixture()
 	for _, paths := range [][]string{{"src/a", "src/a/b.ts"}, {"src/A", "src/a/b.ts"}, {"src/A/b.ts", "src/a"}} {

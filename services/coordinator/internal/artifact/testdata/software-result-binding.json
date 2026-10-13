@@ -1,0 +1,9 @@
+{
+  "purpose": "result",
+  "task_id": "software-bounds",
+  "task_version": 1,
+  "contract_hash": "4823a3908e60b9bdeebf737c4f1d8c71a53c86981f5a4c6845877ba815f1216d",
+  "lease_id": "lease-client-fixture",
+  "base_commit": "7a06a3ea1880fec11033104223474b8f297cab6c",
+  "strategy_id": "invariant"
+}

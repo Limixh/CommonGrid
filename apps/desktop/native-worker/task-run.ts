@@ -3,6 +3,7 @@ import path from "node:path";
 import type { TaskContract } from "@commongrid/task-schema";
 import { ControlledTaskCleanupError, controlledTaskId, createControlledPatch, seedControlledTask, snapshotControlledCandidate, verifyControlledCandidate, type ControlledPatch, type ControlledVerifierResult } from "../../../packages/agent-adapters/src/controlled-task.ts";
 import { findSoftwareStrategy, type SoftwareStrategy, seedSoftwareTask, snapshotSoftwareCandidate, softwareTaskPrompt, softwareTaskSpecFor, softwareTaskSpecs, type SoftwareTaskSpec, verifyCatalogSoftwareBundle, verifySoftwareCandidate, type SoftwareVerifierResult } from "../../../packages/agent-adapters/src/software-task.ts";
+import { assertSoftwareResultDeliverable } from "../../../packages/agent-adapters/src/software-result.ts";
 import { TaskToolLimitError, runControlledProviderTurn, type ProviderTurnOptions } from "../../../packages/agent-adapters/src/controlled-task-session.ts";
 import { ManagedCliRuntime, startBridge, type ManagedRuntimeAssets } from "../../../packages/agent-adapters/src/managed-runtime.ts";
 import { assertBridgeHealthy, ProviderFailure } from "../../../packages/agent-adapters/src/session-protocol.ts";
@@ -70,6 +71,8 @@ interface TaskSteps {
   snapshot(sandbox: TaskRunSandbox, image: string): Promise<string>;
   verify(source: string, image: string, signal: AbortSignal): Promise<Verdict>;
   patch(source: string): ControlledPatch;
+  /** Proves a passed catalog result can become a result package the coordinator accepts (no lease, bytes discarded). */
+  deliverable?(evidence: ControlledPatch): Promise<void>;
   verifier(verdict: Verdict): TaskRunVerifier;
 }
 type StepsFactory = (deps: TaskRunDependencies, contract: TaskContract | undefined, strategy: SoftwareStrategy | undefined) => TaskSteps;
@@ -77,6 +80,7 @@ const softwareSteps = (spec: SoftwareTaskSpec): StepsFactory => (deps, contract,
   seed: sandbox => seedSoftwareTask(sandbox, undefined, spec), prompt: softwareTaskPrompt(contract!, strategy!, spec),
   snapshot: (sandbox, image) => deps.softwareSnapshot(sandbox, image, spec), verify: (source, image, signal) => deps.softwareVerify(source, image, signal, spec),
   patch: source => createControlledPatch(source, spec.baseline, spec.id),
+  deliverable: evidence => assertSoftwareResultDeliverable(contract!, {baseline: spec.baseline, strategyId: strategy!.id, patch: evidence.patch, candidateSha256: evidence.candidate_sha256}),
   verifier: verdict => { const {passed, cases, visible_tests_passed, hidden_cases_passed} = verdict as SoftwareVerifierResult; return {passed, cases, visible_tests_passed, hidden_cases_passed}; },
 });
 const taskSteps: Record<TaskRunTaskId, StepsFactory> = {
@@ -187,6 +191,11 @@ export async function runTaskRun(boot: TaskRunBoot, signal: AbortSignal, emit: (
     else {
       let evidence: ControlledPatch;
       try { evidence = steps.patch(source); } catch { throw new TaskRunFailure("candidate_invalid"); }
+      // A verifier pass is not enough: the candidate must also satisfy the artifact
+      // text policy. Contract/binding failures are not the candidate's fault.
+      if (steps.deliverable) await steps.deliverable(evidence).catch(error => {
+        throw new TaskRunFailure(error instanceof Error && /^candidate_/.test(error.message) ? "candidate_invalid" : "asset_invalid");
+      });
       result = validateTaskRunResult({verifier, candidate_sha256: verdict.candidate_sha256, patch_sha256: evidence.patch_sha256, patch: evidence.patch}, "passed", boot.task_id);
     }
   } catch (failure) {

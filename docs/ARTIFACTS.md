@@ -6,6 +6,8 @@
 
 İstemci izin verilen kaynakları `buildArtifactBundle` ile paketler. Güvenilir yerel scanner verilmeden paket üretilmez; scanner ve çağıran kod özel kopyalar alır. İstemci taramasının sunucuda yetkisi yoktur.
 
+Yazılım görevi sonuç paketi (ADR 0022): `packages/agent-adapters/src/software-result.ts`, doğrulanmış diff'i sabitlenmiş başlangıç dosyasına yeniden uygulayıp tek dosyalı `result` paketi üretir; `assertSoftwareResultDeliverable` worker kapısı olarak paketi atar (artifact metin politikası aday politikasından sıkıdır: C1, U+061C, U+200E/F). Yalnız yerel metin denetimi çalışır, tarama başarısı iddia edilmez; yükleme, IPC ve arayüz yoktur çünkü lease uçları kapalıdır. Go golden: `internal/artifact/testdata/software-result-bundle.zip` (`spike/artifact-delivery/create-client-fixture.mts` üretir).
+
 Sunucu kullanıcıyı oturumdan, görev/version/hash/lease/base/strategy bağlamını mevcut kayıtlardan bulur. Paket yapısı ve metin doğrulamasının ardından zorunlu bağımsız scanner çalışır. Eksik veya başarısız scanner kullanılabilir kayıt üretemez. İstemcinin bildirdiği dosya kimliği ya da test sonucu kabul için yeterli değildir.
 
 Migration 0006 depolama kotasını byte yazılmadan `pending` kayıtla ayırır. Vault dosyayı sync edip hash/boyut kontrolünü bitirince kayıt `ready` olur. Public sonuç/checkpoint, aynı transaction içinde ready kayıt, sahip, lease, amaç, görev bağlamı ve digest/boyut kontrolü yapar. Exact retry aynı kayıtla devam eder; bağlam değişirse conflict. Pending dahil kullanıcı başına 100 retained kayıt / 256 MiB sınırı vardır. Bir süreçte en çok dört upload, upload başına 30 saniye uygulanır; byte limiti gövde okunurken denetlenir. Production rate-limit ve parasal maliyet modeli ayrı kalır.

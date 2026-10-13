@@ -605,7 +605,17 @@ for (const task of softwareIds) {
     const unchanged = fixture({task}); unchanged.deps.softwareSnapshot = async () => baselineFor(task); unchanged.deps.softwareVerify = async source => ({passed: true, cases: 40, visible_tests_passed: true, hidden_cases_passed: true, candidate_sha256: sha256(source)});
     await unchanged.run(); assert.equal(result(unchanged.frames).error_code, "candidate_invalid"); assert.equal(result(unchanged.frames).result, null);
   });
-
+  test(`${task}: a verifier pass whose candidate the artifact policy rejects is candidate_invalid, never passed`, async () => {
+    // U+200E passes the snapshot policy but not the coordinator's artifact text policy.
+    for (const mark of ["‎", "‏", "؜", "\u0085"]) {
+      const f = fixture({task}), candidate = fixedFor(task).replace("\n", `// ${mark}\n`);
+      f.deps.softwareSnapshot = async () => candidate;
+      f.deps.softwareVerify = async source => ({passed: true, cases: 40, visible_tests_passed: true, hidden_cases_passed: true, candidate_sha256: sha256(source)});
+      await f.run();
+      assert.deepEqual(result(f.frames), {type: "result", outcome: "failed", error_code: "candidate_invalid", cleanup: "verified", result: null}, JSON.stringify(mark));
+      supervise(f.boot, f.frames);
+    }
+  });
 
   // ---- Approved strategy -----------------------------------------------------
 
