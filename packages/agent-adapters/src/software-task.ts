@@ -137,13 +137,13 @@ export function softwareHiddenCases(random: Uint8Array = randomBytes(2048)): Sof
 // stdin before the candidate is imported; the real stdout writer and JSON are
 // captured first and the candidate's own output is discarded, so only this
 // script can print the nonce-bearing result line. Inputs are frozen.
-export const softwareHiddenDriver = "const write=process.stdout.write.bind(process.stdout),stringify=JSON.stringify,parse=JSON.parse,exit=process.exit.bind(process),concat=Buffer.concat;" +
+export const softwareHiddenDriver = "const write=process.stdout.write.bind(process.stdout),stringify=JSON.stringify,parse=JSON.parse,exit=process.exit.bind(process),concat=Buffer.concat,setPrototypeOf=Object.setPrototypeOf;" +
   "const chunks=[];for await(const chunk of process.stdin)chunks[chunks.length]=chunk;" +
   "const {nonce,cases}=parse(concat(chunks).toString('utf8'));" +
   "process.stdout.write=()=>true;process.stderr.write=()=>true;" +
   "for(const item of cases)Object.freeze(item.values);" +
   "const {lowerBound}=await import('/task/src/search.ts');" +
-  "const results=[];let at=0;" +
+  "const results=setPrototypeOf([],null);let at=0;" +
   "for(const item of cases){let value=null;try{const found=lowerBound(item.values,item.target);if(typeof found==='number')value=found}catch{}results[at++]=value}" +
   "write('CGR '+nonce+' '+stringify(results)+'\\n',()=>exit(0));";
 
@@ -194,17 +194,18 @@ export function softwareIntervalsHiddenCases(random: Uint8Array = randomBytes(20
 // and every pair) are deep-frozen, so a candidate that sorts or edits them in
 // place throws. The answer is accepted only if it is an array of 2-element
 // arrays of numbers that is no longer than the input; it is copied into plain
-// arrays before stringify, so toJSON, getters and proxies cannot reach the result line.
-export const softwareIntervalsHiddenDriver = "const write=process.stdout.write.bind(process.stdout),stringify=JSON.stringify,parse=JSON.parse,exit=process.exit.bind(process),concat=Buffer.concat,isArray=Array.isArray,freeze=Object.freeze;" +
+// null-prototype arrays before stringify, so inherited toJSON hooks cannot
+// change the copied numeric results.
+export const softwareIntervalsHiddenDriver = "const write=process.stdout.write.bind(process.stdout),stringify=JSON.stringify,parse=JSON.parse,exit=process.exit.bind(process),concat=Buffer.concat,isArray=Array.isArray,freeze=Object.freeze,setPrototypeOf=Object.setPrototypeOf;" +
   "const chunks=[];for await(const chunk of process.stdin)chunks[chunks.length]=chunk;" +
   "const {nonce,cases}=parse(concat(chunks).toString('utf8'));" +
   "process.stdout.write=()=>true;process.stderr.write=()=>true;" +
   "for(const item of cases){for(const pair of item.intervals)freeze(pair);freeze(item.intervals)}" +
   "const {mergeIntervals}=await import('/task/src/intervals.ts');" +
-  "const results=[];let at=0;" +
+  "const results=setPrototypeOf([],null);let at=0;" +
   "for(const item of cases){let value=null;try{const found=mergeIntervals(item.intervals);" +
-  "if(isArray(found)){const size=found.length,copy=[];let valid=size<=item.intervals.length;" +
-  "for(let index=0;valid&&index<size;index++){const pair=found[index];if(isArray(pair)&&pair.length===2){const start=pair[0],end=pair[1];if(typeof start==='number'&&typeof end==='number')copy[index]=[start,end];else valid=false}else valid=false}" +
+  "if(isArray(found)){const size=found.length,copy=setPrototypeOf([],null);let valid=size<=item.intervals.length;" +
+  "for(let index=0;valid&&index<size;index++){const pair=found[index];if(isArray(pair)&&pair.length===2){const start=pair[0],end=pair[1];if(typeof start==='number'&&typeof end==='number')copy[index]=setPrototypeOf([start,end],null);else valid=false}else valid=false}" +
   "if(valid)value=copy}}catch{}results[at++]=value}" +
   "write('CGR '+nonce+' '+stringify(results)+'\\n',()=>exit(0));";
 

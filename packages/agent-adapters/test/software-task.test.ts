@@ -809,6 +809,27 @@ test("software-intervals: toJSON, getter and proxy results are copied into plain
   const huge = ivFixture(), inflated = await ivVerify(ivFixed.replace("return merged;", "return new Proxy(merged, {get: (target, key) => key === 'length' ? 1e9 : (target as never)[key]});"), huge);
   assert.equal(inflated.hidden_cases_passed, false);
 });
+
+for (const spec of [softwareBoundsSpec, ivSpec]) {
+  test(`${spec.id}: inherited serialization hooks cannot change hidden numeric results`, async () => {
+    const reference = spec === ivSpec ? ivFixed : fixed;
+    for (const prototype of ["Array.prototype", "Object.prototype"]) {
+      // Also replace the public setter: the driver must use the reference
+      // captured before candidate import for every result, answer and pair.
+      const hook = `${prototype}.toJSON = () => 'spoofed';\nObject.setPrototypeOf = value => value;\n`;
+      for (const [source, expected] of [[reference, true], [spec.baseline, false]] as const) {
+        let output = "";
+        const f = verifierFixture({spec, hiddenOverride: stdout => { output = stdout; return stdout; }});
+        const result = await verifySoftwareCandidate(hook + source, image, f.deps, undefined, spec);
+        assert.equal(result.hidden_cases_passed, expected, `${prototype}/${expected}`);
+        const input = JSON.parse(f.state.stdin);
+        assert.ok(output.startsWith(`CGR ${input.nonce} [`), "the trusted result remains an array");
+        if (expected) assert.deepEqual(JSON.parse(output.slice(`CGR ${input.nonce} `.length)), input.cases.map((item: unknown) => spec.hidden.oracle(item)));
+        assert.deepEqual(f.calls, happyCalls);
+      }
+    }
+  });
+}
 test("software-intervals: a result line of a different run or a duplicated line is not accepted", async () => {
   for (const hiddenOverride of [(stdout: string) => stdout.replace(/CGR [0-9a-f]{32}/, "CGR " + "0".repeat(32)), (stdout: string) => stdout + stdout]) {
     const f = ivFixture({hiddenOverride}), result = await ivVerify(ivFixed, f);
