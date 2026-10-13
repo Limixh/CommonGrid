@@ -22,18 +22,19 @@ import { acceptTaskRunUpdate, taskRunMaxFrameBytes, taskRunMaxToolCalls, taskRun
 import pins from "../runtime-assets/native-cli-assets.lock.json";
 
 const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
+const expectedStrategy = (id: string | null) => (softwareBoundsTask as {strategies: Array<{id: string; instructions: string}>}).strategies.find(item => item.id === id)!;
 const correct = "export function sumIntegers(values) {\n  if (!Array.isArray(values)) throw new TypeError('Expected an array');\n  let total = 0;\n  for (const value of values) {\n    if (!Number.isSafeInteger(value)) throw new TypeError('Expected safe integers');\n    total += value;\n    if (!Number.isSafeInteger(total)) throw new RangeError('Unsafe sum');\n  }\n  return total;\n}\n";
 const fixedSoftware = softwareBaseline.replace("values.length - 1", "values.length");
 const softwareImage = "node@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392";
-const bootFor = (provider: TaskRunProvider, task: TaskRunTaskId = "controlled-sum-integers-v1"): TaskRunBoot => ({type: "task_run_boot", schema_version: "1.0", request_id: randomUUID(), profile_id: randomUUID(), provider, task_id: task,
+const bootFor = (provider: TaskRunProvider, task: TaskRunTaskId = "controlled-sum-integers-v1", strategy: string | null = task === softwareBoundsTaskId ? "invariant" : null): TaskRunBoot => ({type: "task_run_boot", schema_version: "1.0", request_id: randomUUID(), profile_id: randomUUID(), provider, task_id: task, strategy_id: strategy,
   journal_root: path.resolve("fixture-journal"), assets_root: path.resolve("fixture-assets"), profile_registry_root: path.resolve("fixture-appdata", "managed-profiles")});
 const assetsFor = (boot: TaskRunBoot, catalog = true): ManagedRuntimeAssets => ({baseImage: boot.task_id === softwareBoundsTaskId ? softwareImage : "node@sha256:" + "0".repeat(64), journalRoot: boot.journal_root, bridgeRoot: boot.assets_root,
   binaries: {claude: {binaryPath: path.resolve("fixture-claude"), sha256: "0".repeat(64)}, codex: {binaryPath: path.resolve("fixture-codex"), sha256: "1".repeat(64)}},
   ...(catalog ? {codexCatalog: {filePath: path.resolve("fixture-assets", "codex-coding-catalog.json"), sha256: pins.codex_catalog.sha256}} : {})});
 
-interface Options { provider?: TaskRunProvider; binding?: ProfileBinding | null; catalog?: boolean; task?: TaskRunTaskId }
+interface Options { provider?: TaskRunProvider; binding?: ProfileBinding | null; catalog?: boolean; task?: TaskRunTaskId; strategy?: string | null }
 function fixture(options: Options = {}) {
-  const provider = options.provider ?? "codex", boot = bootFor(provider, options.task), calls: string[] = [], frames: TaskRunFrame[] = [], stats = {control_failure: false, task_calls: 2};
+  const provider = options.provider ?? "codex", boot = options.strategy === undefined ? bootFor(provider, options.task) : bootFor(provider, options.task, options.strategy), calls: string[] = [], frames: TaskRunFrame[] = [], stats = {control_failure: false, task_calls: 2};
   const owner = randomUUID();
   const binding: ProfileBinding | undefined = options.binding === null ? undefined : options.binding ?? {schema_version: "1.0", profile_id: boot.profile_id, provider, owner, state: "ready"};
   const assets = assetsFor(boot, options.catalog ?? true);
@@ -62,7 +63,7 @@ function fixture(options: Options = {}) {
     async bridge() { calls.push("bridge"); return {stats, close() { calls.push("bridge-close"); }}; },
     async provider(turn: ProviderTurnOptions) {
       calls.push("provider"); assert.equal(turn.provider, provider);
-      assert.equal(turn.prompt, boot.task_id === softwareBoundsTaskId ? softwareTaskPrompt(softwareBoundsTask as {prompt: string}) : undefined); assert.equal(retained, 1); assert.equal(turn.runtime, runtime); assert.equal(turn.bridgeStats, stats);
+      assert.equal(turn.prompt, boot.task_id === softwareBoundsTaskId ? softwareTaskPrompt(softwareBoundsTask as {prompt: string}, expectedStrategy(boot.strategy_id)) : undefined); assert.equal(retained, 1); assert.equal(turn.runtime, runtime); assert.equal(turn.bridgeStats, stats);
       turn.observer.model(taskRunObservedModels[provider][0]); turn.observer.toolCall(1); turn.observer.toolCall(2); turn.trace.quiescent = true;
     },
     async softwareBundle(actual) {
@@ -113,7 +114,7 @@ function supervise(boot: TaskRunBoot, frames: TaskRunFrame[]): TaskRunStatus {
     if (frame.type === "progress") phase = frame.phase; else if (frame.type === "activity") tools = frame.tool_calls; else if (frame.type === "model") observed = frame.observed; else phase = "finished";
     assert.ok(Buffer.byteLength(JSON.stringify(frame)) <= taskRunMaxFrameBytes);
     const final = frame.type === "result";
-    previous = acceptTaskRunUpdate(previous, {schema_version: "1.0", availability: "available", operation: {request_id: boot.request_id, profile_id: boot.profile_id, provider: boot.provider, task_id: boot.task_id,
+    previous = acceptTaskRunUpdate(previous, {schema_version: "1.0", availability: "available", operation: {request_id: boot.request_id, profile_id: boot.profile_id, provider: boot.provider, task_id: boot.task_id, strategy_id: boot.strategy_id,
       revision, phase, outcome: final ? frame.outcome : null, error_code: final ? frame.error_code : null, cleanup: final ? frame.cleanup : "pending", tool_calls: tools,
       model: {requested: taskRunRequestedModels[boot.provider], observed}, result: final ? frame.result : null}});
   }
@@ -126,7 +127,7 @@ test("boot accepts only the exact trusted fixed shape with absolute native paths
   assert.deepEqual(parseTaskRunBoot(boot), boot);
   assert.equal(taskRunBindingRoot(boot), path.resolve("fixture-appdata", "managed-profile-sessions"));
   const {journal_root: _journal, ...missing} = boot;
-  for (const value of [{...boot, argv: []}, missing, {...boot, profile_id: "../x"}, {...boot, request_id: "x"}, {...boot, provider: "api"}, {...boot, task_id: "other-task"}, {...boot, task_id: undefined},
+  for (const value of [{...boot, argv: []}, missing, {...boot, profile_id: "../x"}, {...boot, request_id: "x"}, {...boot, provider: "api"}, {...boot, task_id: "other-task"}, {...boot, task_id: undefined}, {...boot, strategy_id: "invariant"}, {...boot, strategy_id: undefined}, {...boot, strategy_id: ""},
     {...boot, assets_root: "relative"}, {...boot, journal_root: path.resolve("x") + "\n"}, {...boot, profile_registry_root: path.resolve("foreign-profile-store")}, {...boot, type: "profile_session_boot"},
     {...boot, model: "gpt-5"}, {...boot, prompt: "x"}, null, [], "boot"]) assert.throws(() => parseTaskRunBoot(value));
 });
@@ -576,4 +577,56 @@ test("software candidate policy failures become candidate_invalid and verifier c
   assert.ok(!leaked.calls.includes("finish")); supervise(leaked.boot, leaked.frames);
   const failing = fixture({task: "software-bounds"}); failing.deps.softwareVerify = async () => { throw new Error("docker exploded"); }; await failing.run();
   assert.equal(result(failing.frames).error_code, "verifier_failed");
+});
+
+// ---- Approved strategy -------------------------------------------------------
+
+const strategyText = {
+  invariant: "Yarı açık [lo, hi) aralığının invariantını koru; önce en küçük karşı örneği bul.",
+  "boundary-first": "Önce boş dizi ve uç değerleri incele, ardından tekrar eden değerleri ele al.",
+} as const;
+test("boot carries the strategy id only: null for the controlled task, an approved id for software-bounds", () => {
+  assert.equal(parseTaskRunBoot(bootFor("claude")).strategy_id, null);
+  for (const id of ["invariant", "boundary-first"]) assert.equal(parseTaskRunBoot(bootFor("codex", "software-bounds", id)).strategy_id, id);
+  for (const value of ["invariant", "boundary-first", "", 0]) assert.throws(() => parseTaskRunBoot({...bootFor("codex"), strategy_id: value}), /worker_failed/, `controlled with ${JSON.stringify(value)}`);
+  for (const value of [null, undefined, "", "Invariant", "invariant ", "unknown", "lean-plan", ["invariant"], {id: "invariant"}, 1])
+    assert.throws(() => parseTaskRunBoot({...bootFor("codex", "software-bounds"), strategy_id: value}), /worker_failed/, `software with ${JSON.stringify(value)}`);
+  const {strategy_id: _strategy, ...missing} = bootFor("claude", "software-bounds");
+  assert.throws(() => parseTaskRunBoot(missing), /worker_failed/);
+  assert.throws(() => parseTaskRunBoot({...bootFor("claude", "software-bounds"), instructions: "free text"}), /worker_failed/);
+});
+test("each approved strategy reaches the provider as its contract instructions inside the fixed prompt", async () => {
+  const task = softwareBoundsTask as {prompt: string};
+  for (const provider of ["codex", "claude"] as const) for (const strategy of ["invariant", "boundary-first"] as const) {
+    const f = fixture({provider, task: "software-bounds", strategy, catalog: provider === "codex"});
+    let prompt: string | undefined; const original = f.deps.provider;
+    f.deps.provider = async turn => { prompt = turn.prompt; await original(turn); };
+    await f.run();
+    assert.equal(result(f.frames).outcome, "passed", `${provider}/${strategy}`);
+    assert.ok(prompt!.startsWith(task.prompt + "\n\nApproved strategy (" + strategy + "): " + strategyText[strategy] + "\nThis strategy only guides your approach; it does not change the task or its acceptance criteria.\n\n"), `${provider}/${strategy}`);
+    const other = strategy === "invariant" ? "boundary-first" : "invariant";
+    assert.ok(!prompt!.includes(strategyText[other]) && !prompt!.includes(`(${other})`));
+    assert.equal(supervise(f.boot, f.frames).operation?.strategy_id, strategy);
+    // The strategy id never appears in a worker frame; only the supervisor's public projection carries it.
+    assert.ok(!JSON.stringify(f.frames).includes(strategy) && !JSON.stringify(f.frames).includes("Approved strategy"));
+  }
+  // The controlled task keeps the provider's default instructions and no strategy.
+  const controlled = fixture(); await controlled.run(); assert.equal(supervise(controlled.boot, controlled.frames).operation?.strategy_id, null);
+});
+test("a strategy missing from, or a strategy list differing in, the verified contract is asset_invalid before any Docker call", async () => {
+  const task = softwareBoundsTask as Record<string, any>;
+  const rehash = async (change: (value: any) => void) => { const value = structuredClone(task); change(value); value.contract_hash = await contractHash(value as never); return value; };
+  const variants: Array<[string, string, (f: ReturnType<typeof fixture>) => Promise<void> | void]> = [
+    ["verified contract lacks the requested strategy", "invariant", f => { f.deps.softwareBundle = async actual => { f.calls.push("bundle"); const verified = await verifySoftwareBundle(task, {task_version: 1, contract_hash: task.contract_hash, image: actual.baseImage}); return {...verified, strategies: verified.strategies.filter(item => item.id !== "invariant")}; }; }],
+    ["contract renames a strategy id", "boundary-first", async f => { const value = await rehash(v => { v.strategies[1].id = "edges"; }); f.deps.softwareBundle = async actual => { f.calls.push("bundle"); return verifySoftwareBundle(value, {task_version: 1, contract_hash: value.contract_hash, image: actual.baseImage}); }; }],
+    ["contract reorders strategies", "invariant", async f => { const value = await rehash(v => { v.strategies.reverse(); }); f.deps.softwareBundle = async actual => { f.calls.push("bundle"); return verifySoftwareBundle(value, {task_version: 1, contract_hash: value.contract_hash, image: actual.baseImage}); }; }],
+    ["contract adds a strategy", "invariant", async f => { const value = await rehash(v => { v.strategies.push({id: "extra", instructions: "Ek."}); }); f.deps.softwareBundle = async actual => { f.calls.push("bundle"); return verifySoftwareBundle(value, {task_version: 1, contract_hash: value.contract_hash, image: actual.baseImage}); }; }],
+  ];
+  for (const [name, strategy, setup] of variants) {
+    const f = fixture({task: "software-bounds", strategy}); await setup(f); await f.run();
+    assert.deepEqual(f.calls, ["read", "assets", "bundle"], name);
+    assert.deepEqual(types(f.frames), ["preparing", "cleaning", "result"], name);
+    assert.deepEqual(result(f.frames), {type: "result", outcome: "failed", error_code: "asset_invalid", cleanup: "verified", result: null}, name);
+    supervise(f.boot, f.frames);
+  }
 });

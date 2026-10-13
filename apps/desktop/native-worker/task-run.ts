@@ -2,25 +2,25 @@ import { createHash } from "node:crypto";
 import path from "node:path";
 import type { TaskContract } from "@commongrid/task-schema";
 import { ControlledTaskCleanupError, controlledTaskId, createControlledPatch, seedControlledTask, snapshotControlledCandidate, verifyControlledCandidate, type ControlledPatch, type ControlledVerifierResult } from "../../../packages/agent-adapters/src/controlled-task.ts";
-import { seedSoftwareTask, snapshotSoftwareCandidate, softwareBaseline, softwareBoundsTaskId, softwareTaskPrompt, verifyCatalogSoftwareBundle, verifySoftwareCandidate, type SoftwareVerifierResult } from "../../../packages/agent-adapters/src/software-task.ts";
+import { findSoftwareStrategy, type SoftwareStrategy, seedSoftwareTask, snapshotSoftwareCandidate, softwareBaseline, softwareBoundsTaskId, softwareTaskPrompt, verifyCatalogSoftwareBundle, verifySoftwareCandidate, type SoftwareVerifierResult } from "../../../packages/agent-adapters/src/software-task.ts";
 import { TaskToolLimitError, runControlledProviderTurn, type ProviderTurnOptions } from "../../../packages/agent-adapters/src/controlled-task-session.ts";
 import { ManagedCliRuntime, startBridge, type ManagedRuntimeAssets } from "../../../packages/agent-adapters/src/managed-runtime.ts";
 import { assertBridgeHealthy, ProviderFailure } from "../../../packages/agent-adapters/src/session-protocol.ts";
 import { executeTaskTool } from "../../../packages/agent-adapters/src/task-tool.ts";
 import { TaskToolsRuntime } from "../../../packages/agent-adapters/src/task-runtime.ts";
-import { taskRunMaxFrameBytes, taskRunMaxToolCalls, taskRunObservedModels, taskRunRequestedModels, taskRunTaskIds, validateTaskRunResult, validateTaskRunStatus,
+import { taskRunMaxFrameBytes, taskRunMaxToolCalls, taskRunObservedModels, taskRunRequestedModels, taskRunTaskIds, validTaskRunStrategy, validateTaskRunResult, validateTaskRunStatus,
   type TaskRunBoot, type TaskRunError, type TaskRunFrame, type TaskRunOutcome, type TaskRunResult, type TaskRunTaskId, type TaskRunVerifier } from "../../../packages/agent-adapters/src/task-run-protocol.ts";
 import { verifyAssets, verifyDockerPrerequisite } from "./cli-check.ts";
 import { BindingFailure, ProfileBindings, uuid, type ProfileBinding } from "./profile-bindings.ts";
 
 export type { TaskRunBoot, TaskRunFrame };
 class TaskRunFailure extends Error { constructor(readonly code: TaskRunError) { super(code); } }
-const bootKeys = ["type", "schema_version", "request_id", "profile_id", "provider", "task_id", "journal_root", "assets_root", "profile_registry_root"].sort().join();
+const bootKeys = ["type", "schema_version", "request_id", "profile_id", "provider", "task_id", "strategy_id", "journal_root", "assets_root", "profile_registry_root"].sort().join();
 export function parseTaskRunBoot(value: unknown): TaskRunBoot {
   const boot = value as TaskRunBoot;
   if (!boot || typeof boot !== "object" || Array.isArray(boot) || Object.keys(boot).sort().join() !== bootKeys ||
     boot.type !== "task_run_boot" || boot.schema_version !== "1.0" || typeof boot.request_id !== "string" || !uuid.test(boot.request_id) ||
-    typeof boot.profile_id !== "string" || !uuid.test(boot.profile_id) || !["codex", "claude"].includes(boot.provider) || !(taskRunTaskIds as readonly unknown[]).includes(boot.task_id) ||
+    typeof boot.profile_id !== "string" || !uuid.test(boot.profile_id) || !["codex", "claude"].includes(boot.provider) || !(taskRunTaskIds as readonly unknown[]).includes(boot.task_id) || !validTaskRunStrategy(boot.task_id, boot.strategy_id) ||
     ![boot.journal_root, boot.assets_root, boot.profile_registry_root].every(root => typeof root === "string" && root.length < 4096 && !/[\x00\r\n]/.test(root) && path.isAbsolute(root)) ||
     path.basename(boot.profile_registry_root) !== "managed-profiles") throw new TaskRunFailure("worker_failed");
   return boot;
@@ -72,10 +72,10 @@ interface TaskSteps {
   patch(source: string): ControlledPatch;
   verifier(verdict: Verdict): TaskRunVerifier;
 }
-const taskSteps: Record<TaskRunTaskId, (deps: TaskRunDependencies, contract: TaskContract | undefined) => TaskSteps> = {
+const taskSteps: Record<TaskRunTaskId, (deps: TaskRunDependencies, contract: TaskContract | undefined, strategy: SoftwareStrategy | undefined) => TaskSteps> = {
   [controlledTaskId]: deps => ({seed: seedControlledTask, prompt: undefined, snapshot: deps.snapshot, verify: deps.verify, patch: source => createControlledPatch(source),
     verifier: verdict => { const {passed, cases, json_cases_passed, sparse_cases_passed} = verdict as ControlledVerifierResult; return {passed, cases, json_cases_passed, sparse_cases_passed}; }}),
-  [softwareBoundsTaskId]: (deps, contract) => ({seed: sandbox => seedSoftwareTask(sandbox), prompt: softwareTaskPrompt(contract!), snapshot: deps.softwareSnapshot, verify: deps.softwareVerify,
+  [softwareBoundsTaskId]: (deps, contract, strategy) => ({seed: sandbox => seedSoftwareTask(sandbox), prompt: softwareTaskPrompt(contract!, strategy!), snapshot: deps.softwareSnapshot, verify: deps.softwareVerify,
     patch: source => createControlledPatch(source, softwareBaseline, softwareBoundsTaskId),
     verifier: verdict => { const {passed, cases, visible_tests_passed, hidden_cases_passed} = verdict as SoftwareVerifierResult; return {passed, cases, visible_tests_passed, hidden_cases_passed}; }}),
 };
@@ -113,7 +113,7 @@ function terminalFrame(boot: TaskRunBoot, outcome: TaskRunOutcome, error: TaskRu
   const frame = {type: "result", outcome, error_code: error, cleanup: unverified ? "unknown" : "verified", result} as const;
   // The supervisor projects this frame into the public status; refuse anything
   // that projection would reject, and keep the line bounded.
-  validateTaskRunStatus({schema_version: "1.0", availability: "available", operation: {request_id: boot.request_id, profile_id: boot.profile_id, provider: boot.provider, task_id: boot.task_id,
+  validateTaskRunStatus({schema_version: "1.0", availability: "available", operation: {request_id: boot.request_id, profile_id: boot.profile_id, provider: boot.provider, task_id: boot.task_id, strategy_id: boot.strategy_id,
     revision: 1, phase: "finished", outcome, error_code: error, cleanup: frame.cleanup, tool_calls: toolCalls, model: {requested: taskRunRequestedModels[boot.provider], observed}, result}});
   if (Buffer.byteLength(JSON.stringify(frame)) > taskRunMaxFrameBytes) throw new Error("task_run_frame_too_large");
   return frame;
@@ -136,8 +136,11 @@ export async function runTaskRun(boot: TaskRunBoot, signal: AbortSignal, emit: (
     signal.throwIfAborted();
     // A catalog task must match its pinned contract and bundle before anything touches Docker.
     const contract = boot.task_id === softwareBoundsTaskId ? await deps.softwareBundle(assets).catch(() => { throw new TaskRunFailure("asset_invalid"); }) : undefined;
+    // Only the strategy id came from the boot; its instructions are read from the verified contract.
+    const strategy = contract && findSoftwareStrategy(contract, boot.strategy_id);
+    if (contract && !strategy) throw new TaskRunFailure("asset_invalid");
     signal.throwIfAborted();
-    const steps = taskSteps[boot.task_id](deps, contract);
+    const steps = taskSteps[boot.task_id](deps, contract, strategy);
     // Codex needs the pinned catalog; a build without its public source reports it missing.
     if (boot.provider === "codex" && !assets.codexCatalog) throw new TaskRunFailure("asset_missing");
     await deps.prerequisite(assets, signal); signal.throwIfAborted();

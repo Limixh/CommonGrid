@@ -1,5 +1,5 @@
 import type { TaskContract } from "@commongrid/task-schema";
-import { taskRunCatalogPins, taskRunTaskIds, type TaskRunTaskId } from "@commongrid/agent-adapters/task-run";
+import { taskRunCatalogPins, taskRunStrategyIds, taskRunTaskIds, type TaskRunTaskId } from "@commongrid/agent-adapters/task-run";
 
 export type CatalogExecutionSelection = Readonly<{
   kind: "catalog";
@@ -27,9 +27,15 @@ export function executionSelectionKey(selection: ExecutionSelection): string {
 }
 // The task a selection may start natively, or null. A catalog task qualifies only
 // when its id, version and contract hash equal the runner's pinned contract.
-export function runnableTaskId(selection: ExecutionSelection): TaskRunTaskId | null {
-  if (selection.kind === "controlled") return selection.task_id;
+// The strategy must also be one of the approved ids of that pinned contract.
+export type RunnableSelection = Readonly<{task_id: TaskRunTaskId; strategy_id: string | null}>;
+export function runnableSelection(selection: ExecutionSelection): RunnableSelection | null {
+  if (selection.kind === "controlled") return {task_id: selection.task_id, strategy_id: null};
   const task = selection.task, id = taskRunTaskIds.find(candidate => candidate === task.id);
   const pin = id ? taskRunCatalogPins[id] : undefined;
-  return id && pin && pin.task_version === task.task_version && pin.contract_hash === task.contract_hash ? id : null;
+  return id && pin && pin.task_version === task.task_version && pin.contract_hash === task.contract_hash &&
+    taskRunStrategyIds[id].includes(task.strategy_id) ? {task_id: id, strategy_id: task.strategy_id} : null;
+}
+export function runnableTaskId(selection: ExecutionSelection): TaskRunTaskId | null {
+  return runnableSelection(selection)?.task_id ?? null;
 }

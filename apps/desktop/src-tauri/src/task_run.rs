@@ -77,6 +77,24 @@ enum Cleanup {
 fn task_id(value: &str) -> Option<&'static str> {
     TASK_IDS.iter().copied().find(|id| *id == value)
 }
+// Mirrors taskRunStrategyIds: the approved strategy ids of each task. The
+// controlled task has none; a catalog task run names exactly one of its own.
+const SOFTWARE_STRATEGIES: [&str; 2] = ["invariant", "boundary-first"];
+fn task_strategies(task: &str) -> &'static [&'static str] {
+    match task {
+        SOFTWARE_TASK => &SOFTWARE_STRATEGIES,
+        _ => &[],
+    }
+}
+// Maps a caller-supplied strategy onto the allowlisted one of this task. The
+// outer None is a denial; Some(None) is the strategy-less controlled task.
+fn strategy_id(task: &str, value: Option<&str>) -> Option<Option<&'static str>> {
+    let allowed = task_strategies(task);
+    match value {
+        None => allowed.is_empty().then_some(None),
+        Some(value) => allowed.iter().copied().find(|id| *id == value).map(Some),
+    }
+}
 // The single writable file of each task, as in taskRunPatchPaths.
 fn patch_path(task: &str) -> Option<&'static str> {
     match task {
@@ -206,6 +224,8 @@ pub(crate) struct Operation {
     profile_id: String,
     provider: Provider,
     task_id: &'static str,
+    // Fixed for the lifetime of the request.
+    strategy_id: Option<&'static str>,
     revision: u32,
     phase: Phase,
     outcome: Option<Outcome>,
@@ -250,6 +270,7 @@ fn code(value: &str) -> bool {
 fn valid_operation(op: &Operation) -> bool {
     if !uuid(&op.request_id)
         || !uuid(&op.profile_id)
+        || strategy_id(op.task_id, op.strategy_id) != Some(op.strategy_id)
         || op.revision > MAX_REVISION
         || op.tool_calls > MAX_TOOL_CALLS
         || op.model.requested != requested_model(op.provider)
@@ -387,6 +408,9 @@ struct Start {
     request_id: String,
     profile_id: String,
     task_id: String,
+    // Required but nullable: only the strategy-less controlled task takes null.
+    #[serde(deserialize_with = "nullable")]
+    strategy_id: Option<String>,
     approved: bool,
 }
 #[derive(Deserialize)]
@@ -488,6 +512,7 @@ impl TaskRun {
             return Err(DENIED);
         }
         let task = task_id(&request.task_id).ok_or(DENIED)?;
+        let strategy = strategy_id(task, request.strategy_id.as_deref()).ok_or(DENIED)?;
         let provider =
             profile_store::selected_provider(&store.join("managed-profiles"), &request.profile_id)
                 .map_err(|_| DENIED)?;
@@ -500,6 +525,7 @@ impl TaskRun {
                 return if operation.profile_id == request.profile_id
                     && operation.provider == provider
                     && operation.task_id == task
+                    && operation.strategy_id == strategy
                 {
                     Ok(inner.status.clone())
                 } else {
@@ -528,6 +554,7 @@ impl TaskRun {
             profile_id: request.profile_id,
             provider,
             task_id: task,
+            strategy_id: strategy,
             revision: 0,
             phase: Phase::Starting,
             outcome: None,
@@ -788,7 +815,7 @@ impl TaskRun {
                 }
             };
         let mut input = worker.child.stdin.take().unwrap();
-        let boot = serde_json::json!({"type":"task_run_boot", "schema_version":"1.0", "request_id":operation.request_id, "profile_id":operation.profile_id, "provider":operation.provider, "task_id":operation.task_id, "journal_root":journal, "assets_root":assets, "profile_registry_root":registry});
+        let boot = serde_json::json!({"type":"task_run_boot", "schema_version":"1.0", "request_id":operation.request_id, "profile_id":operation.profile_id, "provider":operation.provider, "task_id":operation.task_id, "strategy_id":operation.strategy_id, "journal_root":journal, "assets_root":assets, "profile_registry_root":registry});
         if writeln!(input, "{}", boot).is_err() {
             worker.terminate();
             self.finish(id, End::review("worker_failed"));
@@ -945,6 +972,7 @@ fn preflight(value: &serde_json::Value, shape: Shape) -> bool {
             "request_id",
             "profile_id",
             "task_id",
+            "strategy_id",
             "approved",
         ],
         Shape::Cancel => &["schema_version", "request_id", "expected_revision"],
@@ -958,7 +986,16 @@ fn preflight(value: &serde_json::Value, shape: Shape) -> bool {
         && match shape {
             Shape::Start => {
                 request["profile_id"].as_str().is_some_and(uuid)
-                    && request["task_id"].as_str().and_then(task_id).is_some()
+                    && request["task_id"]
+                        .as_str()
+                        .and_then(task_id)
+                        .is_some_and(|task| match &request["strategy_id"] {
+                            serde_json::Value::Null => strategy_id(task, None).is_some(),
+                            serde_json::Value::String(value) => {
+                                strategy_id(task, Some(value)).is_some()
+                            }
+                            _ => false,
+                        })
                     && request["approved"].as_bool() == Some(true)
             }
             Shape::Cancel => request["expected_revision"]

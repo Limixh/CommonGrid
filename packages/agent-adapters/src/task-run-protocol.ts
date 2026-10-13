@@ -17,6 +17,18 @@ export const taskRunPatchPaths: Readonly<Record<TaskRunTaskId, string>> = Object
 export const taskRunCatalogPins: Readonly<Partial<Record<TaskRunTaskId, Readonly<{task_version: number; contract_hash: string}>>>> = Object.freeze({
   "software-bounds": Object.freeze({task_version: 1, contract_hash: "4823a3908e60b9bdeebf737c4f1d8c71a53c86981f5a4c6845877ba815f1216d"}),
 });
+// Approved strategy ids of each pinned contract, in contract order. A catalog
+// task run names exactly one; the controlled task has none (strategy_id null).
+// Only the id crosses this boundary: the worker reads the instructions from the
+// hash-verified contract, never from the UI.
+export const taskRunStrategyIds: Readonly<Record<TaskRunTaskId, readonly string[]>> = Object.freeze({
+  "controlled-sum-integers-v1": Object.freeze([] as string[]),
+  "software-bounds": Object.freeze(["invariant", "boundary-first"]),
+});
+export function validTaskRunStrategy(taskId: TaskRunTaskId, strategyId: unknown): strategyId is string | null {
+  const allowed = taskRunStrategyIds[taskId];
+  return allowed.length === 0 ? strategyId === null : typeof strategyId === "string" && allowed.includes(strategyId);
+}
 export const taskRunPhases = ["starting", "preparing", "running", "verifying", "cleaning", "finished"] as const;
 export type TaskRunPhase = typeof taskRunPhases[number];
 export const taskRunErrors = [
@@ -46,13 +58,14 @@ export const taskRunVerifierChecks: Readonly<Record<TaskRunTaskId, readonly [str
 });
 export interface TaskRunResult { verifier: TaskRunVerifier; candidate_sha256: string; patch_sha256: string | null; patch: string | null }
 export interface TaskRunModel { requested: string; observed: string | null }
-export interface TaskRunStartRequest { schema_version: "1.0"; request_id: string; profile_id: string; task_id: TaskRunTaskId; approved: true }
+export interface TaskRunStartRequest { schema_version: "1.0"; request_id: string; profile_id: string; task_id: TaskRunTaskId; strategy_id: string | null; approved: true }
 export interface TaskRunCancelRequest { schema_version: "1.0"; request_id: string; expected_revision: number }
 export interface TaskRunOperation {
   request_id: string;
   profile_id: string;
   provider: TaskRunProvider;
   task_id: TaskRunTaskId;
+  strategy_id: string | null;
   revision: number;
   phase: TaskRunPhase;
   outcome: null | TaskRunOutcome;
@@ -67,7 +80,7 @@ export interface TaskRunStatus { schema_version: "1.0"; availability: "available
 // Native worker wire (worker stdout → native supervisor). One JSON object per
 // line; the supervisor owns revisions, cancellation and the public projection.
 export interface TaskRunBoot {
-  type: "task_run_boot"; schema_version: "1.0"; request_id: string; profile_id: string; provider: TaskRunProvider; task_id: TaskRunTaskId;
+  type: "task_run_boot"; schema_version: "1.0"; request_id: string; profile_id: string; provider: TaskRunProvider; task_id: TaskRunTaskId; strategy_id: string | null;
   journal_root: string; assets_root: string; profile_registry_root: string;
 }
 export type TaskRunFrame =
@@ -121,8 +134,9 @@ function validModel(value: unknown, provider: TaskRunProvider): value is TaskRun
     (value.observed === null || (typeof value.observed === "string" && taskRunObservedModels[provider].includes(value.observed)));
 }
 export function validateTaskRunStart(value: unknown): TaskRunStartRequest {
-  if (!exact(value, ["schema_version", "request_id", "profile_id", "task_id", "approved"]) || value.schema_version !== "1.0" ||
-    !identity(value.request_id) || !identity(value.profile_id) || !oneOf(value.task_id, taskRunTaskIds) || value.approved !== true) invalid();
+  if (!exact(value, ["schema_version", "request_id", "profile_id", "task_id", "strategy_id", "approved"]) || value.schema_version !== "1.0" ||
+    !identity(value.request_id) || !identity(value.profile_id) || !oneOf(value.task_id, taskRunTaskIds) ||
+    !validTaskRunStrategy(value.task_id, value.strategy_id) || value.approved !== true) invalid();
   return structuredClone(value) as unknown as TaskRunStartRequest;
 }
 export function validateTaskRunCancel(value: unknown): TaskRunCancelRequest {
@@ -136,8 +150,9 @@ export function validateTaskRunStatus(value: unknown): TaskRunStatus {
   const op = value.operation;
   if (value.availability === "unavailable" && op !== null) invalid();
   if (op !== null) {
-    if (!exact(op, ["request_id", "profile_id", "provider", "task_id", "revision", "phase", "outcome", "error_code", "cleanup", "tool_calls", "model", "result"]) ||
+    if (!exact(op, ["request_id", "profile_id", "provider", "task_id", "strategy_id", "revision", "phase", "outcome", "error_code", "cleanup", "tool_calls", "model", "result"]) ||
       !identity(op.request_id) || !identity(op.profile_id) || !oneOf(op.provider, ["claude", "codex"]) || !oneOf(op.task_id, taskRunTaskIds) ||
+      !validTaskRunStrategy(op.task_id, op.strategy_id) ||
       !revision(op.revision) || !oneOf(op.phase, taskRunPhases) || !count(op.tool_calls) || !validModel(op.model, op.provider) ||
       !oneOf(op.cleanup, ["pending", "verified", "unknown"]) || (op.error_code !== null && !oneOf(op.error_code, taskRunErrors))) invalid();
     if (op.phase !== "finished") {
@@ -177,7 +192,7 @@ export function acceptTaskRunUpdate(previous: TaskRunStatus | null, incoming: un
   if (!before) return next;
   if (before.phase === "finished" && after?.request_id !== before.request_id) return next;
   if (!after || after.request_id !== before.request_id || after.profile_id !== before.profile_id || after.provider !== before.provider ||
-    after.task_id !== before.task_id || after.revision < before.revision ||
+    after.task_id !== before.task_id || after.strategy_id !== before.strategy_id || after.revision < before.revision ||
     ((after.revision === before.revision || before.phase === "finished") && !sameOperation(before, after)) ||
     taskRunPhases.indexOf(after.phase) < taskRunPhases.indexOf(before.phase) || after.tool_calls < before.tool_calls ||
     (before.model.observed !== null && after.model.observed !== before.model.observed)) throw new Error("task_run_status_stale");

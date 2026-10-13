@@ -12,11 +12,11 @@ import { ControlledTaskCleanupError, applyControlledPatch, buildControlledPatch,
 import { taskCandidateSnapshotScript } from "../src/controlled-task-artifact.ts";
 import { gitFixtureEpoch, gitFixtureIdentity, gitFixtureIds, gitFixtureMessage } from "../src/git-object-ids.mjs";
 import { SoftwareBundleError, assertSoftwareCandidate, lowerBoundOracle, seedSoftwareTask, snapshotSoftwareCandidate, softwareBaseline, softwareBoundsTask, softwareBoundsTaskId, softwareEntryFiles,
-  softwareForbiddenPatterns, softwareHarnessInstructions, softwareHiddenCases, softwareSnapshotScript, softwareSnapshotSpec, softwareTaskPrompt, softwareTestArgv, softwareVerifierCases,
+  findSoftwareStrategy, softwareForbiddenPatterns, softwareHarnessInstructions, softwareStrategyNotice, softwareHiddenCases, softwareSnapshotScript, softwareSnapshotSpec, softwareTaskPrompt, softwareTestArgv, softwareVerifierCases,
   softwareVisibleTestCount, verifyCatalogSoftwareBundle, verifySoftwareBundle, verifySoftwareCandidate, type SoftwareBundlePin } from "../src/software-task.ts";
 import { softwareBoundsBundle } from "../src/software-bounds-bundle.generated.ts";
 import { DockerCommandError } from "../src/task-runtime.ts";
-import { taskRunCatalogPins, validTaskRunPatch } from "../src/task-run-protocol.ts";
+import { taskRunCatalogPins, taskRunStrategyIds, validTaskRunPatch } from "../src/task-run-protocol.ts";
 
 const catalog = JSON.parse(readFileSync(new URL("../../task-schema/fixtures/catalog.json", import.meta.url), "utf8"));
 const catalogTask = catalog.tasks.find((task: {id: string}) => task.id === softwareBoundsTaskId);
@@ -85,6 +85,10 @@ test("every contract or bundle mismatch is a coded asset_invalid error", async (
     ["paths", task => { task.workspace.entry_files = ["src/search.ts"]; }],
     ["paths", task => { task.workspace.writable_paths = ["src/search.ts", "tests/search.test.ts"]; }],
     ["paths", task => { task.workspace.writable_paths = ["tests/search.test.ts"]; }],
+    ["strategies", task => { task.strategies = [task.strategies[0]]; }],
+    ["strategies", task => { task.strategies[1].id = "edges"; }],
+    ["strategies", task => { task.strategies.reverse(); }],
+    ["strategies", task => { task.strategies.push({id: "extra", instructions: "Extra."}); }],
     ["forbidden_patterns", task => { task.verification.forbidden_patterns = []; }],
     ["forbidden_patterns", task => { task.verification.forbidden_patterns = [...softwareForbiddenPatterns, "eval"]; }],
     ["command", task => { task.verification.server_command = "npm test"; }],
@@ -113,12 +117,33 @@ test("the runner pin equals the catalog contract (fails until the orchestrator f
   t.diagnostic(`pinned ${pin.contract_hash}`);
 });
 
-test("prompt is the catalog prompt followed by the fixed harness description", () => {
-  const prompt = softwareTaskPrompt({prompt: "CATALOG PROMPT"});
-  assert.equal(prompt, "CATALOG PROMPT\n\n" + softwareHarnessInstructions + "\n\nTask tool contract: " + controlledTaskExecDescription);
-  assert.equal(softwareHarnessInstructions, 'Workspace: the working directory is /task. Edit only /task/src/search.ts, using only task_exec. The visible tests in /task/tests/search.test.ts and /task/package.json must not be edited, and no other file may be created. Run the visible tests with argv ["node","--experimental-strip-types","--test","tests/search.test.ts"] (Node strips types, so use erasable TypeScript syntax only). Additional independent checks run elsewhere. Report a short completion.');
-  const real = softwareTaskPrompt(catalogTask);
-  assert.ok(real.startsWith(catalogTask.prompt) && real.length < 4000 && !real.includes("\0"));
+const harness = 'Workspace: the working directory is /task. Edit only /task/src/search.ts, using only task_exec. The visible tests in /task/tests/search.test.ts and /task/package.json must not be edited, and no other file may be created. Run the visible tests with argv ["node","--experimental-strip-types","--test","tests/search.test.ts"] (Node strips types, so use erasable TypeScript syntax only). Additional independent checks run elsewhere. Report a short completion.';
+const notice = "This strategy only guides your approach; it does not change the task or its acceptance criteria.";
+const strategyLines = {
+  invariant: "Approved strategy (invariant): Yarı açık [lo, hi) aralığının invariantını koru; önce en küçük karşı örneği bul.\n" + notice,
+  "boundary-first": "Approved strategy (boundary-first): Önce boş dizi ve uç değerleri incele, ardından tekrar eden değerleri ele al.\n" + notice,
+} as const;
+test("prompt is the catalog prompt, the delimited contract strategy, then the fixed harness description", () => {
+  const prompt = softwareTaskPrompt({prompt: "CATALOG PROMPT"}, {id: "s-1", instructions: "STRATEGY TEXT"});
+  assert.equal(prompt, "CATALOG PROMPT\n\nApproved strategy (s-1): STRATEGY TEXT\n" + notice + "\n\n" + softwareHarnessInstructions + "\n\nTask tool contract: " + controlledTaskExecDescription);
+  assert.equal(softwareStrategyNotice, notice);
+  assert.equal(softwareHarnessInstructions, harness);
+});
+test("each approved strategy yields its own fixed prompt from the verified contract", async () => {
+  const contract = await verifySoftwareBundle(softwareBoundsTask, pinFor());
+  assert.deepEqual(contract.strategies.map(item => item.id), [...taskRunStrategyIds[softwareBoundsTaskId]]);
+  const prompts = new Set<string>();
+  for (const id of ["invariant", "boundary-first"] as const) {
+    const strategy = findSoftwareStrategy(contract, id)!, real = softwareTaskPrompt(contract, strategy);
+    assert.equal(strategy.id, id);
+    assert.equal(real, catalogTask.prompt + "\n\n" + strategyLines[id] + "\n\n" + harness + "\n\nTask tool contract: " + controlledTaskExecDescription);
+    assert.ok(real.startsWith(catalogTask.prompt) && real.endsWith(controlledTaskExecDescription) && real.length < 4000 && !real.includes("\0"));
+    // Strategy guidance never touches the fixed tool contract or the acceptance wording of the catalog prompt.
+    assert.equal(real.split(strategyLines[id]).length, 2); assert.ok(real.includes(harness));
+    prompts.add(real);
+  }
+  assert.equal(prompts.size, 2);
+  assert.equal(findSoftwareStrategy(contract, "unknown"), undefined); assert.equal(findSoftwareStrategy(contract, null), undefined);
 });
 
 // ---- Seeding and patch -----------------------------------------------------

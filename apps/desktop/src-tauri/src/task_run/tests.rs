@@ -116,6 +116,7 @@ fn start(id: &str) -> Start {
         request_id: id.into(),
         profile_id: PROFILE.into(),
         task_id: TASK_ID.into(),
+        strategy_id: None,
         approved: true,
     }
 }
@@ -222,12 +223,17 @@ const RUN=()=>{P('preparing');P('running');M(MODEL);A(1);A(3);P('verifying');P('
 const CANCELLED=()=>new Promise(r=>{onCancel=r;});
 let onCancel=()=>process.exit(3),booted=false;
 async function main(){__BODY__}
-lines.on('line',line=>{if(booted){if(line==='{"type":"cancel"}')onCancel();else process.exit(3);return;}booted=true;const b=JSON.parse(line);const keys=['type','schema_version','request_id','profile_id','provider','task_id','journal_root','assets_root','profile_registry_root'];if(Object.keys(b).sort().join()!==keys.sort().join()||b.type!=='task_run_boot'||b.schema_version!=='1.0'||b.provider!==PROVIDER||b.task_id!=='__TASK__'||path.basename(b.profile_registry_root)!=='managed-profiles'||path.basename(b.journal_root)!=='managed-operation-journal'||path.basename(b.assets_root)!=='assets'||path.basename(path.dirname(b.assets_root))!=='launcher')process.exit(2);main().then(()=>{lines.close();process.stdin.destroy();},()=>process.exit(4));});"##;
+lines.on('line',line=>{if(booted){if(line==='{"type":"cancel"}')onCancel();else process.exit(3);return;}booted=true;const b=JSON.parse(line);const keys=['type','schema_version','request_id','profile_id','provider','task_id','strategy_id','journal_root','assets_root','profile_registry_root'];if(Object.keys(b).sort().join()!==keys.sort().join()||b.type!=='task_run_boot'||b.schema_version!=='1.0'||b.provider!==PROVIDER||b.task_id!=='__TASK__'||b.strategy_id!==__STRATEGY__||path.basename(b.profile_registry_root)!=='managed-profiles'||path.basename(b.journal_root)!=='managed-operation-journal'||path.basename(b.assets_root)!=='assets'||path.basename(path.dirname(b.assets_root))!=='launcher')process.exit(2);main().then(()=>{lines.close();process.stdin.destroy();},()=>process.exit(4));});"##;
 fn worker(provider: &str, body: &str) -> String {
     worker_for(provider, TASK_ID, body)
 }
 // The boot check inside the worker pins the task id the supervisor sends.
 fn worker_for(provider: &str, task: &str, body: &str) -> String {
+    worker_with(provider, task, task_strategies(task).first().copied(), body)
+}
+// The boot check also pins the strategy id (null for the controlled task).
+fn worker_with(provider: &str, task: &str, strategy: Option<&str>, body: &str) -> String {
+    let literal = strategy.map_or("null".to_string(), |id| format!("'{id}'"));
     let model = if provider == "codex" {
         "gpt-6-luna"
     } else {
@@ -235,6 +241,7 @@ fn worker_for(provider: &str, task: &str, body: &str) -> String {
     };
     TEMPLATE
         .replace("__TASK__", task)
+        .replace("__STRATEGY__", &literal)
         .replace("__PROVIDER__", provider)
         .replace("__MODEL__", model)
         .replace("__BODY__", body)
@@ -262,6 +269,7 @@ fn operation(provider: Provider, phase: Phase) -> Operation {
         profile_id: PROFILE.into(),
         provider,
         task_id: TASK_ID,
+        strategy_id: None,
         revision: 10,
         phase,
         outcome: None,
@@ -368,9 +376,22 @@ fn go_task(
     id: &str,
     task: &str,
 ) -> Result<Status, &'static str> {
+    // The first approved strategy of the task (none for the controlled task).
+    let strategy = task_strategies(task).first().map(|id| (*id).to_string());
+    go_strategy(owner, fixture, root, id, task, strategy)
+}
+fn go_strategy(
+    owner: &Arc<TaskRun>,
+    fixture: &Fixture,
+    root: &Path,
+    id: &str,
+    task: &str,
+    strategy: Option<String>,
+) -> Result<Status, &'static str> {
     owner.start(
         Start {
             task_id: task.into(),
+            strategy_id: strategy,
             ..start(id)
         },
         root.to_path_buf(),
@@ -380,15 +401,12 @@ fn go_task(
 // One result frame against a Cleaning-phase software task snapshot.
 fn soft_cleaning(frame: Value, accepted: bool) {
     let (owner, _rx) = primed(Provider::Codex, Phase::Cleaning, 3, Some("gpt-6-luna"));
-    owner
-        .inner
-        .lock()
-        .unwrap()
-        .status
-        .operation
-        .as_mut()
-        .unwrap()
-        .task_id = SOFTWARE_TASK;
+    {
+        let mut inner = owner.inner.lock().unwrap();
+        let operation = inner.status.operation.as_mut().unwrap();
+        operation.task_id = SOFTWARE_TASK;
+        operation.strategy_id = Some("invariant");
+    }
     let mut result = None;
     assert_eq!(feed(&owner, &frame, &mut result), accepted, "{frame}");
     assert_eq!(result.is_some(), accepted, "{frame}");
@@ -396,7 +414,7 @@ fn soft_cleaning(frame: Value, accepted: bool) {
 
 #[test]
 fn exact_preflight_rejects_nested_large_and_caller_owned_inputs() {
-    let valid = json!({"request":{"schema_version":"1.0","request_id":ID,"profile_id":PROFILE,"task_id":TASK_ID,"approved":true}});
+    let valid = json!({"request":{"schema_version":"1.0","request_id":ID,"profile_id":PROFILE,"task_id":TASK_ID,"strategy_id":null,"approved":true}});
     assert!(preflight(&valid, Shape::Start));
     assert!(preflight(&json!({}), Shape::Status));
     let with = |field: &str, replacement: Value| {
@@ -420,7 +438,8 @@ fn exact_preflight_rejects_nested_large_and_caller_owned_inputs() {
         with("model", json!("opus")),
         with("provider", json!("codex")),
         with("path", json!("C:/private")),
-        json!({"request":{"schema_version":"1.0","request_id":ID,"profile_id":PROFILE,"task_id":TASK_ID}}),
+        json!({"request":{"schema_version":"1.0","request_id":ID,"profile_id":PROFILE,"task_id":TASK_ID,"strategy_id":null}}),
+        json!({"request":{"schema_version":"1.0","request_id":ID,"profile_id":PROFILE,"task_id":TASK_ID,"approved":true}}),
         json!({"request":valid,"path":"private"}),
         json!({"request":null}),
         json!(null),
@@ -1549,14 +1568,14 @@ fn owned_fixture_boot_resolves_saved_provider_and_truthful_status() {
     let admitted = go(&owner, &fixture, &root, ID).unwrap();
     assert_eq!(
         value(&admitted),
-        json!({"schema_version":"1.0","availability":"available","operation":{"request_id":ID,"profile_id":PROFILE,"provider":"codex","task_id":"controlled-sum-integers-v1","revision":0,"phase":"starting","outcome":null,"error_code":null,"cleanup":"pending","tool_calls":0,"model":{"requested":"gpt-6-luna","observed":null},"result":null}})
+        json!({"schema_version":"1.0","availability":"available","operation":{"request_id":ID,"profile_id":PROFILE,"provider":"codex","task_id":"controlled-sum-integers-v1","strategy_id":null,"revision":0,"phase":"starting","outcome":null,"error_code":null,"cleanup":"pending","tool_calls":0,"model":{"requested":"gpt-6-luna","observed":null},"result":null}})
     );
     assert!(valid_status(&admitted));
     let sampler = sample(&owner);
     let result = wait(&owner, Phase::Finished);
     assert_eq!(
         value(&owner.status()),
-        json!({"schema_version":"1.0","availability":"available","operation":{"request_id":ID,"profile_id":PROFILE,"provider":"codex","task_id":"controlled-sum-integers-v1","revision":8,"phase":"finished","outcome":"passed","error_code":null,"cleanup":"verified","tool_calls":3,"model":{"requested":"gpt-6-luna","observed":"gpt-6-luna"},"result":{"verifier":{"passed":true,"cases":34,"json_cases_passed":true,"sparse_cases_passed":true},"candidate_sha256":H,"patch_sha256":H2,"patch":PATCH}}})
+        json!({"schema_version":"1.0","availability":"available","operation":{"request_id":ID,"profile_id":PROFILE,"provider":"codex","task_id":"controlled-sum-integers-v1","strategy_id":null,"revision":8,"phase":"finished","outcome":"passed","error_code":null,"cleanup":"verified","tool_calls":3,"model":{"requested":"gpt-6-luna","observed":"gpt-6-luna"},"result":{"verifier":{"passed":true,"cases":34,"json_cases_passed":true,"sparse_cases_passed":true},"candidate_sha256":H,"patch_sha256":H2,"patch":PATCH}}})
     );
     let seen = sampler.join().unwrap();
     assert_monotone(&seen);
@@ -1603,7 +1622,7 @@ fn claude_rejection_hides_the_diff_and_keeps_requested_model_separate() {
     wait(&owner, Phase::Finished);
     assert_eq!(
         value(&owner.status().operation),
-        json!({"request_id":ID,"profile_id":PROFILE,"provider":"claude","task_id":"controlled-sum-integers-v1","revision":7,"phase":"finished","outcome":"rejected","error_code":"candidate_rejected","cleanup":"verified","tool_calls":2,"model":{"requested":"haiku","observed":"claude-haiku-5-5"},"result":{"verifier":{"passed":false,"cases":34,"json_cases_passed":true,"sparse_cases_passed":false},"candidate_sha256":H,"patch_sha256":null,"patch":null}})
+        json!({"request_id":ID,"profile_id":PROFILE,"provider":"claude","task_id":"controlled-sum-integers-v1","strategy_id":null,"revision":7,"phase":"finished","outcome":"rejected","error_code":"candidate_rejected","cleanup":"verified","tool_calls":2,"model":{"requested":"haiku","observed":"claude-haiku-5-5"},"result":{"verifier":{"passed":false,"cases":34,"json_cases_passed":true,"sparse_cases_passed":false},"candidate_sha256":H,"patch_sha256":null,"patch":null}})
     );
 }
 
@@ -2146,7 +2165,7 @@ fn task_ids_and_patch_headers_follow_the_browser_contract() {
         Some("diff --git a/src/search.ts b/src/search.ts\n")
     );
     assert_eq!(patch_header("other"), None);
-    let request = |task: &str| json!({"request":{"schema_version":"1.0","request_id":ID,"profile_id":PROFILE,"task_id":task,"approved":true}});
+    let request = |task: &str| json!({"request":{"schema_version":"1.0","request_id":ID,"profile_id":PROFILE,"task_id":task,"strategy_id":"invariant","approved":true}});
     assert!(preflight(&request(SOFTWARE_TASK), Shape::Start));
     for unknown in ["software-bounds-v2", "SOFTWARE-BOUNDS", ""] {
         assert!(!preflight(&request(unknown), Shape::Start), "{unknown:?}");
@@ -2329,7 +2348,7 @@ fn software_task_boots_with_its_id_and_publishes_the_software_verifier() {
     let end = wait(&owner, Phase::Finished);
     assert_eq!(
         value(&owner.status()),
-        json!({"schema_version":"1.0","availability":"available","operation":{"request_id":ID,"profile_id":PROFILE,"provider":"codex","task_id":"software-bounds","revision":8,"phase":"finished","outcome":"passed","error_code":null,"cleanup":"verified","tool_calls":3,"model":{"requested":"gpt-6-luna","observed":"gpt-6-luna"},"result":{"verifier":{"passed":true,"cases":21,"visible_tests_passed":true,"hidden_cases_passed":true},"candidate_sha256":H,"patch_sha256":H2,"patch":SOFT_PATCH}}})
+        json!({"schema_version":"1.0","availability":"available","operation":{"request_id":ID,"profile_id":PROFILE,"provider":"codex","task_id":"software-bounds","strategy_id":"invariant","revision":8,"phase":"finished","outcome":"passed","error_code":null,"cleanup":"verified","tool_calls":3,"model":{"requested":"gpt-6-luna","observed":"gpt-6-luna"},"result":{"verifier":{"passed":true,"cases":21,"visible_tests_passed":true,"hidden_cases_passed":true},"candidate_sha256":H,"patch_sha256":H2,"patch":SOFT_PATCH}}})
     );
     assert!(valid_operation(&end) && end.task_id == SOFTWARE_TASK);
     // The controlled worker contract is unchanged on the same fixture.
@@ -2435,6 +2454,290 @@ fn unknown_tasks_and_task_changes_on_a_request_are_denied() {
     wait(&other, Phase::Finished);
     assert!(go_task(&other, &fixture, &root, OTHER, SOFTWARE_TASK).is_err());
     assert_eq!(current(&other).task_id, CONTROLLED_TASK);
+}
+
+#[test]
+fn strategy_ids_follow_the_browser_contract() {
+    assert_eq!(SOFTWARE_STRATEGIES, ["invariant", "boundary-first"]);
+    assert!(task_strategies(CONTROLLED_TASK).is_empty());
+    assert_eq!(task_strategies(SOFTWARE_TASK), SOFTWARE_STRATEGIES);
+    assert!(task_strategies("other").is_empty());
+    // The controlled task takes exactly null; the software task exactly one id.
+    assert_eq!(strategy_id(CONTROLLED_TASK, None), Some(None));
+    assert_eq!(strategy_id(CONTROLLED_TASK, Some("invariant")), None);
+    assert_eq!(strategy_id(CONTROLLED_TASK, Some("")), None);
+    assert_eq!(
+        strategy_id(SOFTWARE_TASK, Some("invariant")),
+        Some(Some("invariant"))
+    );
+    assert_eq!(
+        strategy_id(SOFTWARE_TASK, Some("boundary-first")),
+        Some(Some("boundary-first"))
+    );
+    assert_eq!(strategy_id(SOFTWARE_TASK, None), None);
+    for unknown in ["", "Invariant", "invariant ", "boundary_first", "other"] {
+        assert_eq!(
+            strategy_id(SOFTWARE_TASK, Some(unknown)),
+            None,
+            "{unknown:?}"
+        );
+    }
+    let request = |task: &str, strategy: Value| json!({"request":{"schema_version":"1.0","request_id":ID,"profile_id":PROFILE,"task_id":task,"strategy_id":strategy,"approved":true}});
+    for (task, strategy) in [
+        (CONTROLLED_TASK, json!(null)),
+        (SOFTWARE_TASK, json!("invariant")),
+        (SOFTWARE_TASK, json!("boundary-first")),
+    ] {
+        let value = request(task, strategy);
+        assert!(preflight(&value, Shape::Start), "{value}");
+        assert!(serde_json::from_value::<Wrapper<Start>>(value).is_ok());
+    }
+    for (task, strategy) in [
+        (CONTROLLED_TASK, json!("invariant")),
+        (CONTROLLED_TASK, json!("")),
+        (CONTROLLED_TASK, json!(0)),
+        (SOFTWARE_TASK, json!(null)),
+        (SOFTWARE_TASK, json!("")),
+        (SOFTWARE_TASK, json!("unknown")),
+        (SOFTWARE_TASK, json!("INVARIANT")),
+        (SOFTWARE_TASK, json!(1)),
+        (SOFTWARE_TASK, json!(true)),
+        (SOFTWARE_TASK, json!(["invariant"])),
+        (SOFTWARE_TASK, json!({"id":"invariant"})),
+    ] {
+        let value = request(task, strategy);
+        assert!(!preflight(&value, Shape::Start), "{value}");
+    }
+    // The strategy field is required and nothing else may ride along.
+    let software = |extra: Value| {
+        let mut body = request(SOFTWARE_TASK, json!("invariant"));
+        if let Value::Object(fields) = extra {
+            body["request"].as_object_mut().unwrap().extend(fields);
+        }
+        body
+    };
+    assert!(!preflight(
+        &json!({"request":{"schema_version":"1.0","request_id":ID,"profile_id":PROFILE,"task_id":SOFTWARE_TASK,"approved":true}}),
+        Shape::Start
+    ));
+    for extra in [
+        json!({"strategy":"invariant"}),
+        json!({"prompt":"write code"}),
+        json!({"instructions":"x"}),
+    ] {
+        assert!(!preflight(&software(extra), Shape::Start));
+    }
+    // Deserialization is strict on its own too: no missing, extra or typed-wrong field.
+    let raw = |body: Value| serde_json::from_value::<Start>(body).is_ok();
+    let base = json!({"schema_version":"1.0","request_id":ID,"profile_id":PROFILE,"task_id":SOFTWARE_TASK,"strategy_id":"invariant","approved":true});
+    assert!(raw(base.clone()));
+    assert!(raw(
+        json!({"schema_version":"1.0","request_id":ID,"profile_id":PROFILE,"task_id":TASK_ID,"strategy_id":null,"approved":true})
+    ));
+    assert!(!raw(
+        json!({"schema_version":"1.0","request_id":ID,"profile_id":PROFILE,"task_id":TASK_ID,"approved":true})
+    ));
+    assert!(!raw(
+        json!({"schema_version":"1.0","request_id":ID,"profile_id":PROFILE,"task_id":SOFTWARE_TASK,"strategy_id":7,"approved":true})
+    ));
+    let mut extra = base;
+    extra["strategy"] = json!("invariant");
+    assert!(!raw(extra));
+}
+
+#[test]
+fn software_strategies_boot_into_the_worker_and_project_on_the_operation() {
+    let fixture = Fixture::new();
+    fixture.registry("codex");
+    let body = "RUN();R('passed',null,'verified',SOK);";
+    let root = fixture.resources(&worker_with(
+        "codex",
+        SOFTWARE_TASK,
+        Some("invariant"),
+        body,
+    ));
+    for strategy in SOFTWARE_STRATEGIES {
+        // The worker exits on any boot whose strategy_id differs, so a passed
+        // result proves the boot message carried exactly the admitted one.
+        fixture.swap(
+            &root,
+            &worker_with("codex", SOFTWARE_TASK, Some(strategy), body),
+        );
+        let owner = Owner::new();
+        let admitted = go_strategy(
+            &owner,
+            &fixture,
+            &root,
+            ID,
+            SOFTWARE_TASK,
+            Some(strategy.into()),
+        )
+        .unwrap();
+        assert_eq!(
+            value(&admitted)["operation"]["strategy_id"],
+            json!(strategy)
+        );
+        assert!(valid_status(&admitted));
+        let end = wait(&owner, Phase::Finished);
+        assert_eq!(
+            (end.outcome, end.task_id, end.strategy_id),
+            (Some(Outcome::Passed), SOFTWARE_TASK, Some(strategy))
+        );
+        assert!(valid_operation(&end));
+        let published = value(&owner.status());
+        assert_eq!(published["operation"]["strategy_id"], json!(strategy));
+        let keys: Vec<&String> = published["operation"].as_object().unwrap().keys().collect();
+        assert!(keys.contains(&&"strategy_id".to_string()));
+    }
+    // A worker pinned to the other strategy refuses the boot.
+    fixture.swap(
+        &root,
+        &worker_with("codex", SOFTWARE_TASK, Some("boundary-first"), body),
+    );
+    let owner = Owner::new();
+    go_strategy(
+        &owner,
+        &fixture,
+        &root,
+        ID,
+        SOFTWARE_TASK,
+        Some("invariant".into()),
+    )
+    .unwrap();
+    let mismatch = wait(&owner, Phase::Finished);
+    assert_eq!(
+        (mismatch.outcome, mismatch.error_code.as_deref()),
+        (Some(Outcome::NeedsReview), Some("worker_failed"))
+    );
+    // The controlled task still boots and projects a null strategy.
+    drop(owner);
+    fixture.swap(&root, &worker("codex", PASS));
+    let owner = Owner::new();
+    let admitted = go(&owner, &fixture, &root, ID).unwrap();
+    assert_eq!(value(&admitted)["operation"]["strategy_id"], json!(null));
+    assert_eq!(wait(&owner, Phase::Finished).outcome, Some(Outcome::Passed));
+}
+
+#[test]
+fn invalid_strategies_and_strategy_changes_on_a_request_are_denied() {
+    let fixture = Fixture::new();
+    fixture.registry("codex");
+    let absent = fixture.directory.join("absent");
+    let owner = Owner::new();
+    let admit = |task: &str, strategy: Option<&str>| {
+        go_strategy(
+            &owner,
+            &fixture,
+            &absent,
+            ID,
+            task,
+            strategy.map(String::from),
+        )
+    };
+    for (task, strategy) in [
+        (CONTROLLED_TASK, Some("invariant")),
+        (CONTROLLED_TASK, Some("")),
+        (SOFTWARE_TASK, None),
+        (SOFTWARE_TASK, Some("")),
+        (SOFTWARE_TASK, Some("unknown")),
+        (SOFTWARE_TASK, Some("Boundary-First")),
+    ] {
+        assert!(admit(task, strategy).is_err(), "{task} {strategy:?}");
+    }
+    assert!(owner.status().operation.is_none() && !owner.active());
+    assert!(!fixture.home().exists());
+    // The same request id with another strategy is not the same request.
+    let root = fixture.resources(&worker_with(
+        "codex",
+        SOFTWARE_TASK,
+        Some("invariant"),
+        "P('preparing');P('running');await CANCELLED();P('cleaning');R('cancelled','cancelled','verified',null);",
+    ));
+    let go_as = |strategy: Option<&str>| {
+        go_strategy(
+            &owner,
+            &fixture,
+            &root,
+            ID,
+            SOFTWARE_TASK,
+            strategy.map(String::from),
+        )
+    };
+    let first = go_as(Some("invariant")).unwrap();
+    assert_eq!(
+        value(&first)["operation"]["strategy_id"],
+        json!("invariant")
+    );
+    let before = value(&owner.status());
+    assert!(go_as(Some("boundary-first")).is_err());
+    assert!(go_as(None).is_err());
+    assert!(go_as(Some("unknown")).is_err());
+    assert_eq!(current(&owner).strategy_id, Some("invariant"));
+    assert_eq!(value(&owner.status())["operation"]["request_id"], json!(ID));
+    // Repeating the identical request stays idempotent and unchanged.
+    let again = go_as(Some("invariant")).unwrap();
+    assert_eq!(
+        value(&again)["operation"]["strategy_id"],
+        json!("invariant")
+    );
+    assert_eq!(
+        value(&owner.status())["operation"]["strategy_id"],
+        before["operation"]["strategy_id"]
+    );
+    owner.shutdown();
+    wait(&owner, Phase::Finished);
+    // On a finished operation the strategy of the request id is still fixed.
+    let other = Owner::new();
+    fixture.swap(
+        &root,
+        &worker_with(
+            "codex",
+            SOFTWARE_TASK,
+            Some("boundary-first"),
+            "RUN();R('passed',null,'verified',SOK);",
+        ),
+    );
+    go_strategy(
+        &other,
+        &fixture,
+        &root,
+        OTHER,
+        SOFTWARE_TASK,
+        Some("boundary-first".into()),
+    )
+    .unwrap();
+    wait(&other, Phase::Finished);
+    assert!(go_strategy(
+        &other,
+        &fixture,
+        &root,
+        OTHER,
+        SOFTWARE_TASK,
+        Some("invariant".into())
+    )
+    .is_err());
+    assert_eq!(current(&other).strategy_id, Some("boundary-first"));
+}
+
+#[test]
+fn operations_must_pair_their_task_with_a_matching_strategy() {
+    let controlled = operation(Provider::Codex, Phase::Running);
+    assert!(valid_operation(&controlled));
+    let mut crossed = controlled.clone();
+    crossed.strategy_id = Some("invariant");
+    assert!(!valid_operation(&crossed));
+    let mut software = controlled.clone();
+    software.task_id = SOFTWARE_TASK;
+    assert!(!valid_operation(&software));
+    software.strategy_id = Some("boundary-first");
+    assert!(valid_operation(&software));
+    software.strategy_id = Some("unknown");
+    assert!(!valid_operation(&software));
+    // The projection places strategy_id right after task_id.
+    let text = serde_json::to_string(&controlled).unwrap();
+    assert!(
+        text.contains(r#""task_id":"controlled-sum-integers-v1","strategy_id":null,"revision""#)
+    );
 }
 
 fn universal_worker() -> String {
@@ -2606,7 +2909,7 @@ fn main_only_acl_and_wrappers_reject_remote_extra_raw_and_url_payloads() {
     for (command, body) in [
         (
             "local_task_run_start",
-            json!({"request":{"schema_version":"1.0","request_id":ID,"profile_id":PROFILE,"task_id":TASK_ID,"approved":true}}),
+            json!({"request":{"schema_version":"1.0","request_id":ID,"profile_id":PROFILE,"task_id":TASK_ID,"strategy_id":null,"approved":true}}),
         ),
         ("local_task_run_status", json!({})),
         (
@@ -2635,9 +2938,9 @@ fn main_only_acl_and_wrappers_reject_remote_extra_raw_and_url_payloads() {
     }
     // Caller-owned execution inputs never reach admission, even from main.
     for request in [
-        json!({"schema_version":"1.0","request_id":ID,"profile_id":PROFILE,"task_id":TASK_ID,"approved":false}),
-        json!({"schema_version":"1.0","request_id":ID,"profile_id":PROFILE,"task_id":TASK_ID,"approved":true,"model":"opus"}),
-        json!({"schema_version":"1.0","request_id":ID,"profile_id":PROFILE,"task_id":"other-task","approved":true}),
+        json!({"schema_version":"1.0","request_id":ID,"profile_id":PROFILE,"task_id":TASK_ID,"strategy_id":null,"approved":false}),
+        json!({"schema_version":"1.0","request_id":ID,"profile_id":PROFILE,"task_id":TASK_ID,"strategy_id":null,"approved":true,"model":"opus"}),
+        json!({"schema_version":"1.0","request_id":ID,"profile_id":PROFILE,"task_id":"other-task","strategy_id":null,"approved":true}),
     ] {
         assert_eq!(
             invoke(

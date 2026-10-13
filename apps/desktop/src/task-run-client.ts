@@ -31,7 +31,8 @@ export async function startTaskRun(request: TaskRunStartRequest, signal: AbortSi
   const checked = validateTaskRunStart(request);
   const status = await checkedInvoke("local_task_run_start", {request: checked}, signal);
   if (status.availability === "available" && (!status.operation || status.operation.request_id !== checked.request_id ||
-    status.operation.profile_id !== checked.profile_id || status.operation.task_id !== checked.task_id)) throw new Error("task_run_contract_invalid");
+    status.operation.profile_id !== checked.profile_id || status.operation.task_id !== checked.task_id ||
+    status.operation.strategy_id !== checked.strategy_id)) throw new Error("task_run_contract_invalid");
   return status;
 }
 export async function cancelTaskRun(request: TaskRunCancelRequest, signal: AbortSignal) {

@@ -7,7 +7,7 @@ import { createManagedProfile, managedProfilesNative, readManagedProfiles, selec
 import { ProfileSessionPanel } from "./ProfileSessionPanel";
 import { TaskRunPanel } from "./TaskRunPanel";
 import { ExecutionSelectionPanel } from "./ExecutionSelectionPanel";
-import { controlledExecutionSelection, executionSelectionKey, runnableTaskId, type ExecutionSelection } from "./execution-selection";
+import { controlledExecutionSelection, executionSelectionKey, runnableSelection, type ExecutionSelection } from "./execution-selection";
 
 const words = {
   tr: {
@@ -109,6 +109,7 @@ export function ManagedProfilesPanel({language, selection, onSelectControlled}: 
     </li>)}</ul>}
     {selectedProfile && <ProfileSessionPanel key={selectedProfile.profile_id} language={language} profile={selectedProfile} />}
     {selectedProfile && <TaskRunPanel key={"task-" + selectedProfile.profile_id + executionSelectionKey(selection)} language={language} profile={selectedProfile}
-      taskId={runnableTaskId(selection) ?? controlledExecutionSelection.task_id} allowStart={runnableTaskId(selection) !== null} />}
+      taskId={runnableSelection(selection)?.task_id ?? controlledExecutionSelection.task_id}
+      strategyId={runnableSelection(selection)?.strategy_id ?? null} allowStart={runnableSelection(selection) !== null} />}
   </section>;
 }

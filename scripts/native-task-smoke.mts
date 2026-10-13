@@ -8,7 +8,7 @@ import { chromium, expect, type Browser, type Page } from "@playwright/test";
 import { CommandError, runOwnedCommand, type CommandCleanup } from "../packages/agent-adapters/src/owned-process.ts";
 import { validateManagedProfilesStatus } from "../packages/agent-adapters/src/managed-profile-protocol.ts";
 import { acceptProfileSessionUpdate, validateClaudeAuthorizationUrl, validateProfileSessionStatus, type ProfileSessionStatus } from "../packages/agent-adapters/src/profile-session-protocol.ts";
-import { acceptTaskRunUpdate, taskRunObservedModels, taskRunRequestedModels, validateTaskRunStatus, type TaskRunOperation, type TaskRunProvider, type TaskRunStatus, type TaskRunTaskId } from "../packages/agent-adapters/src/task-run-protocol.ts";
+import { acceptTaskRunUpdate, taskRunObservedModels, taskRunRequestedModels, validateTaskRunStatus, type TaskRunOperation, type TaskRunProvider, type TaskRunStatus, type TaskRunTaskId, taskRunStrategyIds } from "../packages/agent-adapters/src/task-run-protocol.ts";
 import { applyControlledPatch, controlledBaseline, controlledVerifierCases } from "../packages/agent-adapters/src/controlled-task.ts";
 import { softwareBaseline, softwareBoundsTask, softwareVerifierCases } from "../packages/agent-adapters/src/software-task.ts";
 import { readOperationJournals } from "../packages/agent-adapters/src/operation-journal.ts";
@@ -26,19 +26,23 @@ import { createNativeUiTrace, safeNativeUiErrorCategory } from "./native-ui-trac
 // No DOM dumps, raw errors, videos or challenge screenshots. Claude real-account
 // mode collects only bounded allowlisted UI/IPC events and safe session metadata.
 const arguments_ = process.argv.slice(2);
-const usage = "Usage: npm run test:native-task-smoke -- [--provider codex|claude] [--task controlled|software-bounds] [--real-account] [--show] [--reuse-session <v4 UUID>]\nDefault: Codex signed-out task failure and cancellation without model inference.\n--task software-bounds: select the catalog task from the workspace (served by a local fixture-mode coordinator on 127.0.0.1:8787) instead of the controlled sum.mjs task.\n--real-account: wait for official user authorization; run one gpt-6-luna (Codex) or haiku (Claude) task.\nCodex prints its official device URL/code once. Fresh Claude login requires --real-account --show: use the app's official browser button and paste the code only into its masked field. Claude URL/code/state are never printed.\n--reuse-session: use only an already authenticated .local/native-task-smoke/<UUID>/appdata store; requires --real-account. Official CLI status must verify authentication before one cheap task. No login, fallback or automatic retry; --show is optional for reuse. New reports/config/artifacts go into a separate run directory.\n--show: show the isolated native window (requires --real-account).\nThe isolated app store and official profile volumes are retained; host auth is never copied.";
+const usage = "Usage: npm run test:native-task-smoke -- [--provider codex|claude] [--task controlled|software-bounds [--strategy <approved id>]] [--real-account] [--show] [--reuse-session <v4 UUID>]\nDefault: Codex signed-out task failure and cancellation without model inference.\n--task software-bounds: select the catalog task from the workspace (served by a local fixture-mode coordinator on 127.0.0.1:8787) instead of the controlled sum.mjs task; --strategy picks one of its approved strategies in the workspace (default: the first).\n--real-account: wait for official user authorization; run one gpt-6-luna (Codex) or haiku (Claude) task.\nCodex prints its official device URL/code once. Fresh Claude login requires --real-account --show: use the app's official browser button and paste the code only into its masked field. Claude URL/code/state are never printed.\n--reuse-session: use only an already authenticated .local/native-task-smoke/<UUID>/appdata store; requires --real-account. Official CLI status must verify authentication before one cheap task. No login, fallback or automatic retry; --show is optional for reuse. New reports/config/artifacts go into a separate run directory.\n--show: show the isolated native window (requires --real-account).\nThe isolated app store and official profile volumes are retained; host auth is never copied.";
 if (arguments_.includes("--help")) { console.log(usage); process.exit(0); }
 let provider: TaskRunProvider = "codex", realAccount = false, show = false;
 let sourceSessionRunId: string | null = null;
 let taskId: TaskRunTaskId = "controlled-sum-integers-v1";
+let requestedStrategy: string | null = null;
 const seenArguments = new Set<string>();
 for (let index = 0; index < arguments_.length; index++) {
   const argument = arguments_[index];
-  assert.ok(["--provider", "--task", "--real-account", "--show", "--reuse-session"].includes(argument), "native_task_smoke_unknown_argument");
+  assert.ok(["--provider", "--task", "--strategy", "--real-account", "--show", "--reuse-session"].includes(argument), "native_task_smoke_unknown_argument");
   assert.ok(!seenArguments.has(argument), "native_task_smoke_duplicate_argument"); seenArguments.add(argument);
   if (argument === "--provider") {
     const value = arguments_[++index];
     assert.ok(value === "codex" || value === "claude", "native_task_smoke_invalid_provider"); provider = value;
+  } else if (argument === "--strategy") {
+    const value = arguments_[++index];
+    assert.ok(typeof value === "string" && taskRunStrategyIds["software-bounds"].includes(value), "native_task_smoke_invalid_strategy"); requestedStrategy = value;
   } else if (argument === "--task") {
     const value = arguments_[++index];
     assert.ok(value === "controlled" || value === "software-bounds", "native_task_smoke_invalid_task");
@@ -58,6 +62,9 @@ assert.equal(taskRunRequestedModels.codex, "gpt-6-luna", "native_task_smoke_chea
 assert.equal(taskRunRequestedModels.claude, "haiku", "native_task_smoke_cheap_model_policy_changed");
 const requestedModel = taskRunRequestedModels[provider];
 const software = taskId === "software-bounds";
+assert.ok(software || requestedStrategy === null, "native_task_smoke_strategy_requires_software_task");
+// The UI sends only the id; the worker reads the instructions from the verified contract.
+const strategyId: string | null = software ? requestedStrategy ?? taskRunStrategyIds["software-bounds"][0] : null;
 const expectedCases = software ? softwareVerifierCases : controlledVerifierCases;
 const taskBaseline = software ? softwareBaseline : controlledBaseline;
 const softwareTitle = (softwareBoundsTask as {title: string}).title;
@@ -98,7 +105,7 @@ await writeFile(config, JSON.stringify({app: {
 
 const checks: string[] = [];
 const taskEvidence: Array<{
-  purpose: "unbound" | "signed_out_cancel" | "authenticated_task"; task_id: TaskRunTaskId;
+  purpose: "unbound" | "signed_out_cancel" | "authenticated_task"; task_id: TaskRunTaskId; strategy_id: string | null;
   outcome: TaskRunOperation["outcome"]; error_code: TaskRunOperation["error_code"];
   cleanup: TaskRunOperation["cleanup"]; tool_calls: number; model: TaskRunOperation["model"];
 }> = [];
@@ -191,8 +198,8 @@ async function waitTask(page: Page, predicate: (status: TaskRunStatus) => boolea
 }
 function evidence(purpose: typeof taskEvidence[number]["purpose"], operation: TaskRunOperation) {
   assert.equal(operation.phase, "finished");
-  assert.equal(operation.provider, provider); assert.equal(operation.model.requested, requestedModel); assert.equal(operation.task_id, taskId);
-  taskEvidence.push({purpose, task_id: operation.task_id, outcome: operation.outcome, error_code: operation.error_code,
+  assert.equal(operation.provider, provider); assert.equal(operation.model.requested, requestedModel); assert.equal(operation.task_id, taskId); assert.equal(operation.strategy_id, strategyId);
+  taskEvidence.push({purpose, task_id: operation.task_id, strategy_id: operation.strategy_id, outcome: operation.outcome, error_code: operation.error_code,
     cleanup: operation.cleanup, tool_calls: operation.tool_calls, model: {...operation.model}});
 }
 async function startTaskUi(page: Page) {
@@ -367,6 +374,7 @@ try {
   if (software) {
     stage = "select_catalog_task";
     await page.locator(".task-card").filter({hasText: softwareTitle}).click();
+    await page.locator("#strategy").selectOption(strategyId!);
     await page.getByRole("button", {name: "Profil seçimini hazırla", exact: true}).click();
     const selection = page.locator(".execution-selection-panel");
     await expect(selection).toHaveAttribute("data-selection-kind", "catalog");
@@ -520,7 +528,7 @@ try {
     const result = (await waitTask(page, status => status.operation?.phase === "finished", 1_300_000, previousTaskRequest)).operation!;
     evidence("authenticated_task", result);
     if (result.outcome !== "passed") throw new SmokeFailure(`task_${result.error_code ?? result.outcome}`);
-    assert.equal(result.profile_id, profileId); assert.equal(result.task_id, taskId); assert.equal(result.model.requested, requestedModel);
+    assert.equal(result.profile_id, profileId); assert.equal(result.task_id, taskId); assert.equal(result.strategy_id, strategyId); assert.equal(result.model.requested, requestedModel);
     assert.ok(result.model.observed && taskRunObservedModels[provider].includes(result.model.observed));
     assert.equal(result.cleanup, "verified"); assert.ok(result.tool_calls > 0 && result.tool_calls <= 16);
     assert.ok(result.result?.patch && result.result.patch_sha256);
@@ -585,7 +593,7 @@ try {
   const passed = success && processCleanup.status === "termination_reported" && (!software || coordinatorCleanup.status === "termination_reported");
   const report = {
     schema_version: "1.0", checked_at: new Date().toISOString(),
-    purpose: software ? "real_native_windows_catalog_software_task_acceptance" : "real_native_windows_controlled_task_acceptance", task_id: taskId, provider, mode: sourceSessionRunId ? "reuse_authenticated_session" : realAccount ? "real_account" : "signed_out",
+    purpose: software ? "real_native_windows_catalog_software_task_acceptance" : "real_native_windows_controlled_task_acceptance", task_id: taskId, strategy_id: strategyId, provider, mode: sourceSessionRunId ? "reuse_authenticated_session" : realAccount ? "real_account" : "signed_out",
     source_session_run_id: sourceSessionRunId, authentication_method: sourceSessionRunId ? "existing_isolated_session" : realAccount ? "official_user_authorization" : "not_requested",
     success: passed, status: passed ? "passed" : "failed", stage, failure_code: failureCode ?? (passed ? null : "process_cleanup_unconfirmed"), checks,
     real_native_ipc: realNativeIpc, mocked_native_ipc: false, device_challenge_seen: provider === "codex" && challengeSeen,
@@ -610,7 +618,7 @@ try {
         ? "Claude authenticated acceptance requires --real-account --show and manual user authorization via the native app browser button and masked code field; the harness neither opens nor inspects the official browser or private auth."
         : "Authenticated acceptance requires user completion of the official Codex device authorization; auth is never copied from the host.",
       `Exactly one authenticated ${taskId} task is requested with fixed ${requestedModel}; an unavailable model or exhausted quota stops without fallback or retry.`,
-      ...(software ? ["The catalog is read from a local fixture-mode coordinator through a read-only test binding; the task files come from the pinned local bundle and nothing is cloned. The selected strategy is not applied."] : []),
+      ...(software ? ["The catalog is read from a local fixture-mode coordinator through a read-only test binding; the task files come from the pinned local bundle and nothing is cloned. Only the selected approved strategy id crosses the UI/native boundary; its instructions come from the hash-verified contract."] : []),
       "Verified task cleanup is native supervisor evidence; owned application termination does not independently prove absence of every WebView descendant.",
       "Independent read-only journal and Docker absence checks cover the isolated managed profile containers and claims; separate random-owner task, exporter and verifier resources remain native supervisor evidence.",
       ...(sourceSessionRunId ? ["Independent cleanup reads cumulative public journals from the source isolated store, including earlier operations; it does not claim those operations occurred in this report run."] : []),

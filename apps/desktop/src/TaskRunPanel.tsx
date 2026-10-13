@@ -9,7 +9,7 @@ import { cancelTaskRun, readTaskRun, startTaskRun, taskRunNative } from "./task-
 type TaskWords = {title: string; text: string; limits: string[]; checks: readonly [string, string]};
 type Words = {
   title: string; description: string; refresh: string; tasks: Record<TaskRunTaskId, TaskWords>; model: string; observed: string; limitsTitle: string;
-  quota: string; approve: string; start: string; cancel: string; unavailable: string; loading: string; submitting: string;
+  quota: string; strategy: string; strategyNote: string; approve: string; start: string; cancel: string; unavailable: string; loading: string; submitting: string;
   cancelPending: string; error: string; paused: string; otherProfile: string; otherReview: string; toolCalls: string; verifier: string;
   verifierPassed: (cases: number, detail: string) => string; verifierRejected: (cases: number, detail: string) => string;
   check: (label: string, passed: boolean) => string;
@@ -40,6 +40,7 @@ const words: Record<"tr" | "en", Words> = {
     },
     model: "Kullanılacak model", observed: "Gözlenen model", limitsTitle: "Sınırlar",
     quota: "Bu görev kendi Claude veya Codex aboneliğinin kotasını kullanır.",
+    strategy: "Uygulanan yaklaşım", strategyNote: "Yaklaşımın yönergeleri doğrulanmış görev sözleşmesinden okunur; arayüz yönerge göndermez.",
     approve: "Bu görevi seçili profilin hesabıyla çalıştırmayı onaylıyorum.", start: "Başlat", cancel: "İptal",
     unavailable: "Görev çalıştırma masaüstü uygulamasında kullanılabilir.", loading: "Görev durumu okunuyor…", submitting: "Görev başlatılıyor…", cancelPending: "İptal isteği gönderiliyor…",
     error: "Görev durumu doğrulanamadı. Son durumu yenileyip tekrar dene.", paused: "Otomatik güncelleme durdu. Son durumu yenileyebilirsin.",
@@ -89,6 +90,7 @@ const words: Record<"tr" | "en", Words> = {
     },
     model: "Model that will be used", observed: "Observed model", limitsTitle: "Limits",
     quota: "This task uses the quota of your own Claude or Codex subscription.",
+    strategy: "Applied strategy", strategyNote: "The strategy's instructions are read from the verified task contract; the interface sends no instructions.",
     approve: "I approve running this task with the selected profile's account.", start: "Start", cancel: "Cancel",
     unavailable: "Task runs are available in the desktop application.", loading: "Reading task status…", submitting: "Starting task…", cancelPending: "Sending cancellation…",
     error: "The task status could not be validated. Refresh the latest status and try again.", paused: "Automatic updates stopped. You can refresh the latest status.",
@@ -143,7 +145,7 @@ function DiffView({patch, label}: {patch: string; label: string}) {
 // The deadline of a run is 1200 s; observation stops slightly after it.
 const pollLimit = 1300;
 
-export function TaskRunPanel({language, profile, taskId, allowStart}: {language: "tr" | "en"; profile: ManagedProfile; taskId: TaskRunTaskId; allowStart: boolean}) {
+export function TaskRunPanel({language, profile, taskId, strategyId, allowStart}: {language: "tr" | "en"; profile: ManagedProfile; taskId: TaskRunTaskId; strategyId: string | null; allowStart: boolean}) {
   const t = words[language];
   const card = t.tasks[taskId];
   const requestedModel = taskRunRequestedModels[profile.provider];
@@ -188,7 +190,7 @@ export function TaskRunPanel({language, profile, taskId, allowStart}: {language:
     setPending(kind);
     try {
       const checked = kind === "start"
-        ? await startTaskRun({schema_version: "1.0", request_id: crypto.randomUUID(), profile_id: profile.profile_id, task_id: taskId, approved: true}, controller.signal)
+        ? await startTaskRun({schema_version: "1.0", request_id: crypto.randomUUID(), profile_id: profile.profile_id, task_id: taskId, strategy_id: strategyId, approved: true}, controller.signal)
         : kind === "cancel" ? await cancelWithResync(operation!, controller.signal)
           : await readTaskRun(controller.signal);
       if (waiting.current !== controller || controller.signal.aborted) return;
@@ -239,6 +241,7 @@ export function TaskRunPanel({language, profile, taskId, allowStart}: {language:
       <h4>{card.title}</h4>
       <p>{card.text}</p>
       <dl>
+        {strategyId && <div><dt>{t.strategy}</dt><dd><code>{strategyId}</code><p className="muted-note">{t.strategyNote}</p></dd></div>}
         <div><dt>{t.model}</dt><dd><code>{requestedModel}</code></dd></div>
         <div><dt>{t.limitsTitle}</dt><dd><ul>{card.limits.map(limit => <li key={limit}>{limit}</li>)}</ul></dd></div>
       </dl>
@@ -261,12 +264,14 @@ export function TaskRunPanel({language, profile, taskId, allowStart}: {language:
     {!ours && operation?.outcome === "needs_review" && <p role="status">{t.otherReview}</p>}
     {ours && active && <div className="task-run-progress" role="status">
       <span>{t.activeTask}: <code>{operation.task_id}</code> · {taskRunPatchPaths[operation.task_id]}</span>
+      {operation.strategy_id && <span>{t.strategy}: <code>{operation.strategy_id}</code></span>}
       <strong>{phaseText}</strong>
       <span>{t.toolCalls}: {operation.tool_calls} / {taskRunMaxToolCalls}</span>
       {operation.model.observed && <span>{t.observed}: <code>{operation.model.observed}</code></span>}
     </div>}
     {finished && <div className="cli-check-result task-run-result" role="status">
       <span>{t.lastTask}: <code>{finished.task_id}</code> · {taskRunPatchPaths[finished.task_id]}</span>
+      {finished.strategy_id && <span>{t.strategy}: <code>{finished.strategy_id}</code></span>}
       <strong>{t.outcomes[finished.outcome!]}</strong>
       {finished.error_code && finished.error_code !== "cancelled" && finished.error_code !== "candidate_rejected" && <p>{t.errors(requestedModel)[finished.error_code]}</p>}
       {finished.tool_calls > 0 && <span>{t.toolCalls}: {finished.tool_calls} / {taskRunMaxToolCalls}</span>}

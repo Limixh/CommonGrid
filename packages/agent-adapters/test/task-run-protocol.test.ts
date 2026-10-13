@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   acceptTaskRunUpdate, taskRunCatalogPins, taskRunControlledTaskId, taskRunObservedModels, taskRunPatchHeader, taskRunPatchPaths,
-  taskRunRequestedModels, taskRunTaskIds, unavailableTaskRun, validTaskRunPatch, validateTaskRunCancel, validateTaskRunResult,
+  taskRunRequestedModels, taskRunStrategyIds, taskRunTaskIds, unavailableTaskRun, validTaskRunStrategy, validTaskRunPatch, validateTaskRunCancel, validateTaskRunResult,
   validateTaskRunStart, validateTaskRunStatus, type TaskRunOperation, type TaskRunStatus,
 } from "../src/task-run-protocol.ts";
 import { claudeFunctionalTestModel, claudeFunctionalTestObservedModels, codexFunctionalTestModel } from "../testing/functional-test-models.ts";
@@ -11,7 +11,7 @@ const request = "10000000-0000-4000-8000-000000000001", profile = "20000000-0000
 const hash = "a".repeat(64), patchHash = "b".repeat(64);
 const patch = "diff --git a/sum.mjs b/sum.mjs\nindex 0000000..1111111 100644\n--- a/sum.mjs\n+++ b/sum.mjs\n@@ -1 +1,2 @@\n-old\n+new\n+line\n";
 const operation = (changes: Partial<TaskRunOperation> = {}): TaskRunOperation => ({
-  request_id: request, profile_id: profile, provider: "codex", task_id: "controlled-sum-integers-v1", revision: 0,
+  request_id: request, profile_id: profile, provider: "codex", task_id: "controlled-sum-integers-v1", strategy_id: null, revision: 0,
   phase: "starting", outcome: null, error_code: null, cleanup: "pending", tool_calls: 0, model: {requested: "gpt-6-luna", observed: null}, result: null, ...changes,
 });
 const status = (changes: Partial<TaskRunOperation> = {}): TaskRunStatus => ({schema_version: "1.0", availability: "available", operation: operation(changes)});
@@ -27,8 +27,10 @@ test("browser-safe model pins match the functional-test model policy", () => {
 });
 
 test("start grants only an explicitly approved controlled task; cancel is revision scoped", () => {
-  const start = {schema_version: "1.0", request_id: request, profile_id: profile, task_id: "controlled-sum-integers-v1", approved: true};
+  const start = {schema_version: "1.0", request_id: request, profile_id: profile, task_id: "controlled-sum-integers-v1", strategy_id: null, approved: true};
   assert.deepEqual(validateTaskRunStart(start), start);
+  const {strategy_id: _omitted, ...withoutStrategy} = start;
+  assert.throws(() => validateTaskRunStart(withoutStrategy), /contract_invalid/);
   for (const changes of [{approved: false}, {approved: "true"}, {task_id: "anything"}, {task_id: ["controlled-sum-integers-v1"]}, {request_id: "x"}, {schema_version: "2.0"}])
     assert.throws(() => validateTaskRunStart({...start, ...changes}), /contract_invalid/);
   for (const extra of [{prompt: "rm -rf"}, {model: "gpt-6"}, {provider: "claude"}, {workspace: "C:\\"}])
@@ -98,7 +100,7 @@ test("updates for one request only move forward", () => {
 const softwarePatch = "diff --git a/src/search.ts b/src/search.ts\n--- a/src/search.ts\n+++ b/src/search.ts\n@@ -1 +1 @@\n-  let hi = values.length - 1;\n+  let hi = values.length;\n";
 const softwareVerified = {verifier: {passed: true, cases: 40, visible_tests_passed: true, hidden_cases_passed: true}, candidate_sha256: hash, patch_sha256: patchHash, patch: softwarePatch};
 const softwareRejected = {verifier: {passed: false, cases: 40, visible_tests_passed: true, hidden_cases_passed: false}, candidate_sha256: hash, patch_sha256: null, patch: null};
-const software = (changes: Partial<TaskRunOperation> = {}) => passed({task_id: "software-bounds", result: softwareVerified, ...changes});
+const software = (changes: Partial<TaskRunOperation> = {}) => passed({task_id: "software-bounds", strategy_id: "invariant", result: softwareVerified, ...changes});
 
 test("each task has its own patch path, header and verifier checks", () => {
   assert.deepEqual({...taskRunPatchPaths}, {"controlled-sum-integers-v1": "sum.mjs", "software-bounds": "src/search.ts"});
@@ -108,7 +110,7 @@ test("each task has its own patch path, header and verifier checks", () => {
   assert.ok(validTaskRunPatch(patch) && !validTaskRunPatch(patch, "software-bounds"));
   assert.ok(taskRunCatalogPins["software-bounds"] && /^[0-9a-f]{64}$/.test(taskRunCatalogPins["software-bounds"].contract_hash));
   assert.equal(taskRunCatalogPins["controlled-sum-integers-v1"], undefined);
-  assert.deepEqual(validateTaskRunStart({schema_version: "1.0", request_id: request, profile_id: profile, task_id: "software-bounds", approved: true}).task_id, "software-bounds");
+  assert.deepEqual(validateTaskRunStart({schema_version: "1.0", request_id: request, profile_id: profile, task_id: "software-bounds", strategy_id: "invariant", approved: true}).task_id, "software-bounds");
 });
 
 test("software results are accepted for passed and rejected outcomes", () => {
@@ -162,5 +164,48 @@ test("same-revision equality ignores object key order and still detects real cha
   assert.throws(() => acceptTaskRunUpdate(done, passed()), /stale/);
   assert.throws(() => acceptTaskRunUpdate(running, status({phase: "running", revision: 3, tool_calls: 3, model: running.operation!.model})), /stale/);
   // A request never changes its task.
-  assert.throws(() => acceptTaskRunUpdate(running, status({task_id: "software-bounds", phase: "running", revision: 4, tool_calls: 2, model: running.operation!.model})), /stale/);
+  assert.throws(() => acceptTaskRunUpdate(running, status({task_id: "software-bounds", strategy_id: "invariant", phase: "running", revision: 4, tool_calls: 2, model: running.operation!.model})), /stale/);
+});
+
+test("strategy ids are fixed per task: null for the controlled task, the approved list for software-bounds", () => {
+  assert.deepEqual(taskRunStrategyIds["controlled-sum-integers-v1"], []);
+  assert.deepEqual(taskRunStrategyIds["software-bounds"], ["invariant", "boundary-first"]);
+  for (const id of ["invariant", "boundary-first"]) assert.ok(validTaskRunStrategy("software-bounds", id));
+  assert.ok(validTaskRunStrategy("controlled-sum-integers-v1", null));
+  for (const value of [null, undefined, "", "Invariant", "unknown", 1, ["invariant"]]) assert.ok(!validTaskRunStrategy("software-bounds", value), String(value));
+  for (const value of ["invariant", "", undefined, 0]) assert.ok(!validTaskRunStrategy("controlled-sum-integers-v1", value), String(value));
+});
+
+test("start and status carry exactly strategy_id in the allowed task combinations", () => {
+  const start = (task_id: string, strategy_id: unknown) => ({schema_version: "1.0", request_id: request, profile_id: profile, task_id, strategy_id, approved: true});
+  for (const id of ["invariant", "boundary-first"]) assert.deepEqual(validateTaskRunStart(start("software-bounds", id)), start("software-bounds", id));
+  assert.deepEqual(validateTaskRunStart(start("controlled-sum-integers-v1", null)), start("controlled-sum-integers-v1", null));
+  for (const value of [start("software-bounds", null), start("software-bounds", "unknown"), start("software-bounds", ""), start("software-bounds", undefined), start("software-bounds", ["invariant"]),
+    start("controlled-sum-integers-v1", "invariant"), start("controlled-sum-integers-v1", ""), start("controlled-sum-integers-v1", undefined), {...start("software-bounds", "invariant"), instructions: "free text"}])
+    assert.throws(() => validateTaskRunStart(value), /contract_invalid/);
+  const {strategy_id: _omitted, ...missing} = software().operation!;
+  assert.throws(() => validateTaskRunStatus({schema_version: "1.0", availability: "available", operation: missing}), /contract_invalid/);
+  const operationKeys = Object.keys(software().operation!).sort();
+  assert.deepEqual(operationKeys, ["cleanup", "error_code", "model", "outcome", "phase", "profile_id", "provider", "request_id", "result", "revision", "strategy_id", "task_id", "tool_calls"]);
+  assert.equal(validateTaskRunStatus(software({strategy_id: "boundary-first"})).operation?.strategy_id, "boundary-first");
+  assert.equal(validateTaskRunStatus(status()).operation?.strategy_id, null);
+  assert.equal(validateTaskRunStatus(software({phase: "starting", revision: 0, outcome: null, cleanup: "pending", tool_calls: 0, model: {requested: "gpt-6-luna", observed: null}, result: null})).operation?.strategy_id, "invariant");
+  for (const value of [software({strategy_id: null}), software({strategy_id: "unknown"}), software({strategy_id: "Invariant"}), passed({strategy_id: "invariant"}), passed({strategy_id: ""}),
+    status({task_id: "software-bounds", phase: "running", revision: 2, strategy_id: null}), status({phase: "running", revision: 2, strategy_id: "boundary-first"})])
+    assert.throws(() => validateTaskRunStatus(value), /contract_invalid/);
+});
+
+test("a request never changes its strategy; a later request may use another", () => {
+  const model = {requested: "gpt-6-luna", observed: "gpt-6-luna"};
+  const running = status({task_id: "software-bounds", strategy_id: "invariant", phase: "running", revision: 3, tool_calls: 2, model});
+  assert.ok(acceptTaskRunUpdate(running, running));
+  assert.ok(acceptTaskRunUpdate(running, software({strategy_id: "invariant", revision: 9})));
+  assert.throws(() => acceptTaskRunUpdate(running, status({task_id: "software-bounds", strategy_id: "boundary-first", phase: "running", revision: 4, tool_calls: 2, model})), /stale/);
+  assert.throws(() => acceptTaskRunUpdate(running, status({task_id: "software-bounds", strategy_id: "boundary-first", phase: "running", revision: 3, tool_calls: 2, model})), /stale/);
+  assert.throws(() => acceptTaskRunUpdate(running, software({strategy_id: "boundary-first", revision: 9})), /stale/);
+  const done = software();
+  assert.throws(() => acceptTaskRunUpdate(done, software({strategy_id: "boundary-first"})), /stale/);
+  assert.throws(() => acceptTaskRunUpdate(done, software({strategy_id: "boundary-first", revision: 10})), /stale/);
+  const next = status({request_id: "30000000-0000-4000-8000-000000000003", task_id: "software-bounds", strategy_id: "boundary-first"});
+  assert.equal(acceptTaskRunUpdate(done, next).operation?.strategy_id, "boundary-first");
 });

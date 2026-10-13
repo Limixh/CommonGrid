@@ -16,7 +16,7 @@ import { DockerCommandError } from "./task-runtime.ts";
 import { ControlledTaskCleanupError, controlledOwnerLabel, controlledTaskExecDescription, controlledVerifierDeps, snapshotControlledCandidate, type ControlledTaskDocker, type ControlledVerifierDeps } from "./controlled-task.ts";
 import { taskCandidateSnapshotScript, validateControlledCandidateSource, type TaskSnapshotSpec } from "./controlled-task-artifact.ts";
 import { canonicalPinnedImageReference } from "./pinned-image.ts";
-import { taskRunCatalogPins } from "./task-run-protocol.ts";
+import { taskRunCatalogPins, taskRunStrategyIds } from "./task-run-protocol.ts";
 import type { TaskToolsRuntime } from "./task-runtime.ts";
 
 export const softwareBoundsTaskId = "software-bounds";
@@ -58,7 +58,7 @@ const equalLists = (a: readonly string[], b: readonly string[]) => a.length === 
 /**
  * Proves, before any Docker call, that the catalog contract is the exact one
  * the runner implements: pinned id/version/hash, the bundle's recomputed git
- * commit, paths, forbidden patterns, image and limits.
+ * commit, paths, approved strategy ids, forbidden patterns, image and limits.
  */
 export async function verifySoftwareBundle(value: unknown, pin: SoftwareBundlePin | undefined, bundle: SoftwareBundle = softwareBoundsBundle): Promise<TaskContract> {
   const fail = (reason: string): never => { throw new SoftwareBundleError(reason); };
@@ -73,6 +73,8 @@ export async function verifySoftwareBundle(value: unknown, pin: SoftwareBundlePi
   const paths: string[] = bundle.files.map(file => file.path);
   if (!equalLists(paths, ["package.json", "src/search.ts", "tests/search.test.ts"]) || !softwareEntryFiles.every(path => paths.includes(path))) fail("bundle_files");
   if (!equalLists(task.workspace.entry_files, softwareEntryFiles) || !equalLists(task.workspace.writable_paths, [softwareWritablePath])) fail("paths");
+  // The ids the protocol lets the UI name must be exactly the contract's, in order; instructions stay in the hash-verified contract.
+  if (!equalLists(task.strategies.map(item => item.id), taskRunStrategyIds[softwareBoundsTaskId])) fail("strategies");
   if (!equalLists(task.verification.forbidden_patterns, softwareForbiddenPatterns)) fail("forbidden_patterns");
   if (task.verification.local_precheck !== softwareTestCommand || task.verification.server_command !== softwareTestCommand) fail("command");
   let image: string, pinned: string;
@@ -89,9 +91,20 @@ export function verifyCatalogSoftwareBundle(image: string): Promise<TaskContract
 
 export const softwareHarnessInstructions = "Workspace: the working directory is /task. Edit only /task/src/search.ts, using only task_exec. The visible tests in /task/tests/search.test.ts and /task/package.json must not be edited, and no other file may be created. Run the visible tests with argv " +
   JSON.stringify(softwareTestArgv) + " (Node strips types, so use erasable TypeScript syntax only). Additional independent checks run elsewhere. Report a short completion.";
-/** The catalog prompt followed by the fixed harness description; the contract cannot change the tool contract. */
-export function softwareTaskPrompt(contract: Pick<TaskContract, "prompt">): string {
-  return `${contract.prompt}\n\n${softwareHarnessInstructions}\n\nTask tool contract: ${controlledTaskExecDescription}`;
+export type SoftwareStrategy = TaskContract["strategies"][number];
+/** Fixed wording after a contract strategy; the strategy guides the approach only. */
+export const softwareStrategyNotice = "This strategy only guides your approach; it does not change the task or its acceptance criteria.";
+/** The contract's own entry for a strategy id, or undefined. Only the id crosses the UI boundary. */
+export function findSoftwareStrategy(contract: Pick<TaskContract, "strategies">, strategyId: string | null): SoftwareStrategy | undefined {
+  return contract.strategies.find(item => item.id === strategyId);
+}
+/**
+ * The catalog prompt, the approved strategy block taken verbatim from the
+ * verified contract, then the fixed harness description; neither the contract
+ * nor the strategy can change the tool contract.
+ */
+export function softwareTaskPrompt(contract: Pick<TaskContract, "prompt">, strategy: SoftwareStrategy): string {
+  return `${contract.prompt}\n\nApproved strategy (${strategy.id}): ${strategy.instructions}\n${softwareStrategyNotice}\n\n${softwareHarnessInstructions}\n\nTask tool contract: ${controlledTaskExecDescription}`;
 }
 
 // ---- Seeding ---------------------------------------------------------------
