@@ -1,0 +1,64 @@
+{
+  "schema_version": "1.0",
+  "checked_at": "2026-10-13T22:15:29.371Z",
+  "product_source_commit": "21ca243824086774d6dadb02b302cb14bdbb487e",
+  "purpose": "real_native_windows_catalog_software_task_acceptance",
+  "task_id": "software-intervals",
+  "strategy_id": "sort-first",
+  "contract_hash": "5f1f13e5b3623bbd61f9479ec4944e99c71efd2cb49a608a6b4ba4c881adb6f2",
+  "workspace_commit": "dcf0d103b825d9e2cdc41f5a0efa6811e694a069",
+  "host": "windows-x64",
+  "build": "debug_native_with_production_frontend_and_isolated_app_store",
+  "success": true,
+  "provider": "claude",
+  "mode": "reuse_authenticated_session",
+  "official_authentication": "passed",
+  "real_native_ipc": true,
+  "mocked_native_ipc": false,
+  "requested_model": "haiku",
+  "observed_model": "claude-haiku-5-5",
+  "authenticated_tasks_requested": 1,
+  "tool_calls": 3,
+  "verifier": {
+    "passed": true,
+    "cases": 40,
+    "visible_tests_passed": true,
+    "hidden_cases_passed": true
+  },
+  "candidate_sha256": "8923d2fd603243bd3ad863fe9dd2ce917520db99bb7b115c2f2cc812cf214890",
+  "patch_sha256": "d42f0638efeb6e3e90c58e00f14dcf50ffe2ee985f05db42c6017af3698edf7d",
+  "applied_candidate_sha256": "8923d2fd603243bd3ad863fe9dd2ce917520db99bb7b115c2f2cc812cf214890",
+  "local_result_deliverability": "passed",
+  "server_upload_performed": false,
+  "native_task_cleanup": "verified",
+  "post_task_official_authenticated_status": "passed",
+  "real_account_ui_acceptance_checks_passed": 7,
+  "independent_managed_cleanup": {
+    "status": "verified",
+    "journal_operations": 15,
+    "namespace_ids_checked": 16,
+    "lease_ids_checked": 15,
+    "managed_containers_absent": true,
+    "profile_claims_absent": true
+  },
+  "independent_managed_cleanup_journal_scope": "cumulative_source_isolated_store_public_journals",
+  "process_cleanup": {
+    "method": "windows_taskkill",
+    "status": "termination_reported",
+    "helperExitCode": 0
+  },
+  "fixture_coordinator_cleanup": {
+    "method": "windows_taskkill",
+    "status": "termination_reported",
+    "helperExitCode": 0
+  },
+  "user_account_imported": false,
+  "paid_api_fallback": false,
+  "scope_limits": [
+    "One software-intervals run with sort-first on Windows/WebView2; this is no benchmark or general proof of program correctness.",
+    "Existing isolated official session verified before and after the task; no fresh login, credential import or model fallback.",
+    "Catalog read through a local fixture-mode coordinator and read-only test binding; files seeded from the pinned local bundle, no repository clone.",
+    "Local result-package policy passed before native success; no active coordinator lease, server scan, submission or upload was performed.",
+    "Independent cleanup inventory includes earlier source-profile operations; separate task/exporter/verifier resources use native supervisor cleanup evidence."
+  ]
+}
