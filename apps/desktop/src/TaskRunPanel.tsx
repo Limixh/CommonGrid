@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   acceptTaskRunUpdate, taskRunMaxToolCalls, taskRunRequestedModels,
-  type TaskRunError, type TaskRunOperation, type TaskRunOutcome, type TaskRunPhase, type TaskRunStatus,
+  type TaskRunError, type TaskRunOperation, type TaskRunOutcome, type TaskRunPhase, type TaskRunStatus, type TaskRunTaskId,
 } from "@commongrid/agent-adapters/task-run";
 import type { ManagedProfile } from "@commongrid/agent-adapters/managed-profiles";
 import { cancelTaskRun, readTaskRun, startTaskRun, taskRunNative } from "./task-run-client";
@@ -12,12 +12,15 @@ type Words = {
   cancelPending: string; error: string; paused: string; otherProfile: string; otherReview: string; toolCalls: string; verifier: string;
   verifierPassed: (cases: number) => string; verifierRejected: (cases: number, json: boolean, sparse: boolean) => string;
   candidate: string; patch: string; diff: string; copy: string; copied: string; copyFailed: string;
+  historyTitle: string; historyDescription: string; activeTask: string; lastTask: string;
   phases: Record<Exclude<TaskRunPhase, "finished">, string>; outcomes: Record<TaskRunOutcome, string>;
   errors: (model: string) => Record<TaskRunError, string>;
 };
 const words: Record<"tr" | "en", Words> = {
   tr: {
     title: "Onaylı görev", description: "Hesabı bağlı seçili profille, onayladığın tek bir kontrollü görevi izole ortamda çalıştır ve yalnız doğrulanmış sonucu gör.",
+    historyTitle: "Yerel görev durumu", historyDescription: "Burada daha önce başlatılan yerel sum.mjs görevinin durumunu izleyebilirsin. Bu sonuç seçilen katalog görevine ait değildir.",
+    activeTask: "Çalışan görev", lastTask: "Son görev",
     refresh: "Görev durumunu yenile", cardTitle: "Kontrollü doğrulama görevi: sum.mjs",
     cardText: "Ajan, izole bir ortamda sum.mjs içindeki tamsayı toplama işlevini düzeltir. Sonuç bağımsız doğrulayıcıdan geçerse değişiklik diff olarak gösterilir.",
     model: "Kullanılacak model", observed: "Gözlenen model", limitsTitle: "Sınırlar",
@@ -52,6 +55,8 @@ const words: Record<"tr" | "en", Words> = {
   },
   en: {
     title: "Approved task", description: "Run one approved, controlled task in an isolated environment with the selected profile whose account is connected, and see only the verified result.",
+    historyTitle: "Local task status", historyDescription: "Observe a previously started local sum.mjs task here. Its result does not belong to the selected catalog task.",
+    activeTask: "Running task", lastTask: "Last task",
     refresh: "Refresh task status", cardTitle: "Controlled verification task: sum.mjs",
     cardText: "The agent fixes the integer summing function in sum.mjs inside an isolated environment. If the independent verifier accepts it, the change is shown as a diff.",
     model: "Model that will be used", observed: "Observed model", limitsTitle: "Limits",
@@ -106,7 +111,7 @@ function DiffView({patch, label}: {patch: string; label: string}) {
 // The deadline of a run is 1200 s; observation stops slightly after it.
 const pollLimit = 1300;
 
-export function TaskRunPanel({language, profile}: {language: "tr" | "en"; profile: ManagedProfile}) {
+export function TaskRunPanel({language, profile, taskId, allowStart}: {language: "tr" | "en"; profile: ManagedProfile; taskId: TaskRunTaskId; allowStart: boolean}) {
   const t = words[language];
   const requestedModel = taskRunRequestedModels[profile.provider];
   const [status, setStatus] = useState<TaskRunStatus | null>(null);
@@ -139,7 +144,7 @@ export function TaskRunPanel({language, profile}: {language: "tr" | "en"; profil
     if (mutation.current) return;
     const before = snapshot.current;
     const operation = before?.operation;
-    if (kind === "start" && (!before || before.availability !== "available" || !approved ||
+    if (kind === "start" && (!allowStart || !before || before.availability !== "available" || !approved ||
       operation && (operation.phase !== "finished" || operation.outcome === "needs_review"))) return;
     if (kind === "cancel" && (!operation || operation.profile_id !== profile.profile_id || operation.phase === "finished" || operation.phase === "cleaning")) return;
     if (kind !== "read") mutation.current = true;
@@ -150,7 +155,7 @@ export function TaskRunPanel({language, profile}: {language: "tr" | "en"; profil
     setPending(kind);
     try {
       const checked = kind === "start"
-        ? await startTaskRun({schema_version: "1.0", request_id: crypto.randomUUID(), profile_id: profile.profile_id, task_id: "controlled-sum-integers-v1", approved: true}, controller.signal)
+        ? await startTaskRun({schema_version: "1.0", request_id: crypto.randomUUID(), profile_id: profile.profile_id, task_id: taskId, approved: true}, controller.signal)
         : kind === "cancel" ? await cancelWithResync(operation!, controller.signal)
           : await readTaskRun(controller.signal);
       if (waiting.current !== controller || controller.signal.aborted) return;
@@ -184,7 +189,7 @@ export function TaskRunPanel({language, profile}: {language: "tr" | "en"; profil
     const timeout = window.setTimeout(() => { pollCount.current++; void observe("read"); }, 1000);
     return () => window.clearTimeout(timeout);
   }, [active, status, pending, paused, error]);
-  const blocked = status?.availability !== "available" || active || !!pending || error || operation?.outcome === "needs_review";
+  const blocked = !allowStart || status?.availability !== "available" || active || !!pending || error || operation?.outcome === "needs_review";
   const finished = ours && operation.phase === "finished" ? operation : null;
   const passedResult = finished?.outcome === "passed" ? finished.result : null;
   const rejectedResult = finished?.outcome === "rejected" ? finished.result : null;
@@ -194,9 +199,9 @@ export function TaskRunPanel({language, profile}: {language: "tr" | "en"; profil
   }
   const phaseText = ours && active ? t.phases[operation.phase as Exclude<TaskRunPhase, "finished">] : null;
   return <section className="task-run-panel" aria-labelledby="task-run-title" aria-busy={pending !== null}>
-    <div className="section-heading"><h3 id="task-run-title">{t.title}</h3>{taskRunNative() && <button className="secondary-button" disabled={pending === "start" || pending === "cancel"} onClick={refresh}>{t.refresh}</button>}</div>
-    <p>{t.description}</p>
-    <div className="task-run-card">
+    <div className="section-heading"><h3 id="task-run-title">{allowStart ? t.title : t.historyTitle}</h3>{taskRunNative() && <button className="secondary-button" disabled={pending === "start" || pending === "cancel"} onClick={refresh}>{t.refresh}</button>}</div>
+    <p>{allowStart ? t.description : t.historyDescription}</p>
+    {allowStart && <div className="task-run-card">
       <h4>{t.cardTitle}</h4>
       <p>{t.cardText}</p>
       <dl>
@@ -204,13 +209,13 @@ export function TaskRunPanel({language, profile}: {language: "tr" | "en"; profil
         <div><dt>{t.limitsTitle}</dt><dd><ul>{t.limits.map(limit => <li key={limit}>{limit}</li>)}</ul></dd></div>
       </dl>
       <p className="task-run-quota">{t.quota}</p>
-    </div>
-    <label className="task-run-approval">
+    </div>}
+    {allowStart && <label className="task-run-approval">
       <input type="checkbox" checked={approved} disabled={blocked} onChange={event => setApproved(event.target.checked)} />
       <span>{t.approve}</span>
-    </label>
+    </label>}
     <div className="cli-check-actions">
-      <button className="primary-button" disabled={blocked || !approved} onClick={() => void observe("start")}>{t.start}</button>
+      {allowStart && <button className="primary-button" disabled={blocked || !approved} onClick={() => void observe("start")}>{t.start}</button>}
       {ours && active && <button className="secondary-button" disabled={!!pending || operation.phase === "cleaning"} onClick={() => void observe("cancel")}>{t.cancel}</button>}
     </div>
     {status?.availability === "unavailable" && <p role="status">{t.unavailable}</p>}
@@ -221,11 +226,13 @@ export function TaskRunPanel({language, profile}: {language: "tr" | "en"; profil
     {!ours && active && <p role="status">{t.otherProfile}</p>}
     {!ours && operation?.outcome === "needs_review" && <p role="status">{t.otherReview}</p>}
     {ours && active && <div className="task-run-progress" role="status">
+      <span>{t.activeTask}: <code>{operation.task_id}</code> · sum.mjs</span>
       <strong>{phaseText}</strong>
       <span>{t.toolCalls}: {operation.tool_calls} / {taskRunMaxToolCalls}</span>
       {operation.model.observed && <span>{t.observed}: <code>{operation.model.observed}</code></span>}
     </div>}
     {finished && <div className="cli-check-result task-run-result" role="status">
+      <span>{t.lastTask}: <code>{finished.task_id}</code> · sum.mjs</span>
       <strong>{t.outcomes[finished.outcome!]}</strong>
       {finished.error_code && finished.error_code !== "cancelled" && finished.error_code !== "candidate_rejected" && <p>{t.errors(requestedModel)[finished.error_code]}</p>}
       {finished.tool_calls > 0 && <span>{t.toolCalls}: {finished.tool_calls} / {taskRunMaxToolCalls}</span>}

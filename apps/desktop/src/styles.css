@@ -1320,3 +1320,14 @@ h1 span {
 .task-run-diff-hunk { color: #8fb5c9; }
 .task-run-diff-meta { color: var(--muted); }
 .task-run-panel button:disabled { opacity: 0.45; }
+.local-controlled-task { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; padding: 20px; margin-bottom: 24px; border: 1px solid var(--line); border-radius: 12px; }
+.local-controlled-task > div { flex: 1 1 320px; }
+.local-controlled-task h2 { font-size: 18px; margin: 0 0 8px; }
+.local-controlled-task p { color: var(--muted); margin: 0; font-size: 13px; line-height: 1.6; }
+.execution-selection-panel { padding: 16px; margin: 20px 0; border: 1px solid var(--line); border-radius: 12px; }
+.execution-selection-panel h3 { font-size: 14px; margin: 0 0 8px; color: var(--muted); }
+.execution-selection-panel h4 { margin: 0 0 12px; font-size: 18px; }
+.execution-selection-panel dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+.execution-selection-panel dt { color: var(--muted); font-size: 13px; margin-bottom: 4px; }
+.execution-selection-panel dd { margin: 0; }
+.execution-selection-panel code, .task-run-progress code { overflow-wrap: anywhere; }

@@ -305,7 +305,9 @@ try {
   await page.reload({waitUntil: "domcontentloaded", timeout: 15_000});
   assert.equal(await page.evaluate(() => (globalThis as any).isTauri), true);
   if (observeClaudeUi) { stage = "install_passive_ui_observer"; await nativeUiTrace.install(page); stage = "open_agents"; }
-  await page.getByRole("button", {name: "Ajanlar ve ortam", exact: true}).click();
+  await page.locator(".local-controlled-task").getByRole("button", {name: "Kontrollü görevi seç", exact: true}).click();
+  await expect(page.locator(".execution-selection-panel")).toHaveAttribute("data-selection-kind", "controlled");
+  checks.push("workspace_explicit_local_task_selection_reaches_native_profile_screen");
   const profiles = page.locator(".managed-profiles-panel"), sessionPanel = page.locator(".profile-session-panel");
   await expect(profiles).toHaveAttribute("aria-busy", "false");
   const taskPanel = page.locator(".task-run-panel");

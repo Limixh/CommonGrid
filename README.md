@@ -21,6 +21,8 @@ Arayüz: http://127.0.0.1:1420 · API: http://127.0.0.1:8787/health.
 
 Masaüstü kabuğu için [geliştirme rehberine](docs/DEVELOPMENT.md), hesap kurulumu için [giriş rehberine](docs/AUTHENTICATION.md) bakın.
 
+Çalışma alanındaki **Kontrollü görevi seç** düğmesi yerel `sum.mjs` görevini profil ve onay ekranına taşır. Katalog görevlerinde **Profil seçimini hazırla**, seçilen görev ve yaklaşımı korur; bu görevler için çalışma alanı ve doğrulayıcı entegrasyonu sıradaki adımdır.
+
 ## Kontroller
 
 ```powershell

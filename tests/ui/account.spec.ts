@@ -46,6 +46,82 @@ async function mockAccount(page: Page, options: Options = {}) {
   return { receiptsRequested, logoutHeaders: () => logoutHeaders, setLogoutFail: (value: boolean) => { logoutFail = value; }, setSessionFail: (value: boolean) => { sessionFail = value; }, setReceiptStatus: (value: number) => { receiptStatus = value; } };
 }
 
+async function mockSelectedExecutionProfile(page: Page) {
+  await page.addInitScript(() => {
+    const target = window as Window & { isTauri: boolean; __executionStarts: unknown[]; __TAURI_INTERNALS__: { invoke: (command: string, args: any) => Promise<unknown> } };
+    target.isTauri = true;
+    target.__executionStarts = [];
+    target.__TAURI_INTERNALS__ = { invoke: (command, args) => {
+      if (command === "local_managed_profiles_status") return Promise.resolve({
+        schema_version: "1.0", availability: "available", revision: 1,
+        selected_profile_id: "a0000000-0000-4000-8000-000000000001",
+        profiles: [{ profile_id: "a0000000-0000-4000-8000-000000000001", provider: "codex", name: "Yerel profil" }],
+      });
+      if (["local_profile_session_status", "local_cli_check_status", "local_task_run_status"].includes(command))
+        return Promise.resolve({ schema_version: "1.0", availability: "available", operation: null });
+      if (command === "local_operation_status") return Promise.resolve({ status: "unavailable", reason: "operation_journal_missing", execution_enabled: false, automatic_recovery: false, worker_quiescence: "unknown", daemon_state: "unknown", operations: [] });
+      if (command === "local_task_run_start") target.__executionStarts.push(args);
+      return Promise.reject(new Error("unexpected_fixture_command"));
+    } };
+  });
+}
+
+async function preparePrivateExecutionSelection(page: Page) {
+  const task = catalog.tasks.find((item: { id: string }) => item.id === "software-bounds");
+  await expect(page.locator(".task-card")).toHaveCount(3);
+  await page.locator(".task-card").filter({ hasText: task.title }).click();
+  await page.getByRole("button", { name: "Profil seçimini hazırla", exact: true }).click();
+  const selection = page.getByTestId("execution-selection");
+  await expect(selection).toHaveAttribute("data-selection-kind", "catalog");
+  await expect(selection).toContainText(task.title);
+  await expect(selection).toContainText(task.contract_hash);
+  return task;
+}
+
+async function expectPrivateExecutionSelectionCleared(page: Page, task: { title: string; contract_hash: string }) {
+  await page.getByRole("button", { name: "Ajanlar ve ortam", exact: true }).click();
+  const selection = page.getByTestId("execution-selection");
+  await expect(selection).toHaveAttribute("data-selection-kind", "controlled");
+  await expect(selection).not.toContainText(task.title);
+  await expect(selection).not.toContainText(task.contract_hash);
+  await expect(page.getByText(task.title, { exact: true })).toHaveCount(0);
+  const panel = page.locator(".task-run-panel");
+  await expect(panel).toHaveAttribute("aria-busy", "false");
+  await expect(panel.getByRole("checkbox")).not.toBeChecked();
+  await expect(panel.getByRole("button", { name: "Başlat", exact: true })).toBeDisabled();
+  expect(await page.evaluate(() => (window as Window & { __executionStarts: unknown[] }).__executionStarts)).toEqual([]);
+}
+
+test("successful logout clears the captured private catalog execution selection without starting a local task", async ({ page }) => {
+  await mockAccount(page, { authenticated: true, database: true });
+  await mockSelectedExecutionProfile(page);
+  await page.goto("/");
+  const task = await preparePrivateExecutionSelection(page);
+  await page.getByRole("navigation").getByRole("button", { name: "Hesabım", exact: true }).click();
+  await page.getByRole("button", { name: "Çıkış yap", exact: true }).click();
+  await expect(page.getByTestId("account-name")).toHaveCount(0);
+  await expectPrivateExecutionSelectionCleared(page, task);
+});
+
+test("failed logout preserves a captured private task, while receipt expiry clears it without implicit execution", async ({ page }) => {
+  const mocked = await mockAccount(page, { authenticated: true, database: true, logoutFail: true });
+  await mockSelectedExecutionProfile(page);
+  await page.goto("/");
+  const task = await preparePrivateExecutionSelection(page);
+  await page.getByRole("navigation").getByRole("button", { name: "Hesabım", exact: true }).click();
+  await page.getByRole("button", { name: "Çıkış yap", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("Hesabın hâlâ bağlı");
+  await page.getByRole("button", { name: "Ajanlar ve ortam", exact: true }).click();
+  await expect(page.getByTestId("execution-selection")).toHaveAttribute("data-selection-kind", "catalog");
+  await expect(page.getByTestId("execution-selection")).toContainText(task.contract_hash);
+  await page.getByRole("navigation").getByRole("button", { name: "Katkılarım", exact: true }).click();
+  await expect(page.locator(".receipt-card")).toHaveCount(1);
+  mocked.setReceiptStatus(401);
+  await page.getByRole("button", { name: "Gönderilen sonuçlar", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("Oturumun sona erdi");
+  await expectPrivateExecutionSelectionCleared(page, task);
+});
+
 test("fixture account clearly shows disabled providers without a pretend login", async ({ page }) => {
   await mockAccount(page);
   await page.goto("/");

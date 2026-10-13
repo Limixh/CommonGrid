@@ -1,4 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import type { ManagedProfilesStatus } from "../../packages/agent-adapters/src/managed-profile-protocol";
 import { taskRunErrors, type TaskRunOperation, type TaskRunStatus } from "../../packages/agent-adapters/src/task-run-protocol";
 
@@ -6,6 +8,8 @@ const profileId = "a0000000-0000-4000-8000-000000000001";
 const secondId = "a0000000-0000-4000-8000-000000000002";
 const runId = "c0000000-0000-4000-8000-000000000001";
 const taskId = "controlled-sum-integers-v1";
+const catalogFixture = JSON.parse(readFileSync(path.join(process.cwd(), "services/coordinator/internal/catalog/catalog.json"), "utf8"));
+const softwareTask = catalogFixture.tasks.find((task: {id: string}) => task.id === "software-bounds");
 const candidateHash = "0123456789abcdef".repeat(4);
 const patchHash = "fedcba9876543210".repeat(4);
 const empty: TaskRunStatus = {schema_version: "1.0", availability: "available", operation: null};
@@ -352,4 +356,113 @@ test("observation pauses after the run deadline window and refresh resumes it wi
   expect((await calls(page)).length).toBe(before); expect((await calls(page)).some(call => call.command === "local_task_run_cancel")).toBe(false);
   await expect(panel).toContainText("Ajan çalışıyor");
   await setValue(page, passed); await refresh(page); await expect(panel).toContainText("Görev doğrulandı");
+});
+
+async function workspace(page: Page) {
+  await page.getByRole("navigation").getByRole("button", {name: /^Çalışma alanı/}).click();
+  await expect(page.locator(".task-card").first()).toBeVisible();
+}
+async function prepareSoftware(page: Page, strategy = "boundary-first") {
+  await page.locator(".task-card").filter({hasText: softwareTask.title}).click();
+  await page.locator("#strategy").selectOption(strategy);
+  await page.getByRole("button", {name: "Profil seçimini hazırla", exact: true}).click();
+  const selection = page.getByTestId("execution-selection");
+  await expect(selection).toHaveAttribute("data-selection-kind", "catalog");
+  return selection;
+}
+
+test("workspace's explicit controlled entry opens the selected profile and retains the strict native start request", async ({page}) => {
+  await freezeClock(page); await mockNative(page); await page.goto("/");
+  const entry = page.locator(".local-controlled-task");
+  await expect(entry).toContainText("Kontrollü doğrulama görevi: sum.mjs");
+  await entry.getByRole("button", {name: "Kontrollü görevi seç", exact: true}).click();
+  await expect(page.getByTestId("execution-selection")).toHaveAttribute("data-selection-kind", "controlled");
+  const panel = page.locator(".task-run-panel");
+  await expect(panel).toHaveAttribute("aria-busy", "false");
+  await expect(panel.getByRole("checkbox")).not.toBeChecked();
+  await approve(panel); await start(panel).click();
+  const starts = (await calls(page)).filter(call => call.command === "local_task_run_start");
+  expect(starts).toHaveLength(1);
+  expect(starts[0].args.request).toEqual({schema_version: "1.0", request_id: expect.stringMatching(/^[a-f0-9-]{36}$/), profile_id: profileId, task_id: taskId, approved: true});
+});
+
+test("catalog preparation captures contract and strategy, blocks execution and explains the boundary in Turkish and English", async ({page}) => {
+  await mockNative(page); await page.goto("/");
+  let writes = 0;
+  page.on("request", request => { if (request.method() === "POST" && new URL(request.url()).pathname.startsWith("/api/v1/")) writes++; });
+  const selection = await prepareSoftware(page);
+  for (const value of [softwareTask.title, softwareTask.id, softwareTask.type, softwareTask.kind, String(softwareTask.task_version), softwareTask.contract_hash, softwareTask.workspace.commit, "boundary-first"])
+    await expect(selection).toContainText(value);
+  await expect(selection).toContainText("Bu katalog görevi henüz çalıştırılamıyor.");
+  const panel = page.locator(".task-run-panel");
+  await expect(panel).toHaveAttribute("aria-busy", "false");
+  await expect(panel.locator(".task-run-approval")).toHaveCount(0);
+  await expect(start(panel)).toHaveCount(0);
+  await page.getByRole("button", {name: "Change language", exact: true}).click();
+  await expect(selection).toContainText("This catalog task cannot run yet.");
+  await expect(panel.locator(".task-run-approval")).toHaveCount(0);
+  await expect(panel.getByRole("button", {name: "Start", exact: true})).toHaveCount(0);
+  expect((await calls(page)).some(call => call.command === "local_task_run_start" || call.command === "local_task_run_cancel")).toBe(false);
+  expect(writes).toBe(0);
+});
+
+test("a prepared catalog snapshot survives navigation, filtering and refresh until another task is explicitly prepared", async ({page}) => {
+  await mockNative(page); await page.goto("/");
+  const selection = await prepareSoftware(page);
+  await workspace(page);
+  await page.getByRole("textbox", {name: "Görevlerde ara…"}).fill("Doğal sayılarda");
+  await expect(page.locator(".task-card")).toHaveCount(1);
+  await page.locator(".catalog-panel").getByRole("button", {name: "Yenile", exact: true}).click();
+  await expect(page.locator(".task-card")).toHaveCount(1);
+  await page.getByRole("button", {name: "Ajanlar ve ortam", exact: true}).click();
+  await expect(selection).toContainText(softwareTask.title);
+  await expect(selection).toContainText(softwareTask.contract_hash);
+  await expect(selection).toContainText("boundary-first");
+  await workspace(page);
+  await page.locator(".task-card").click();
+  await page.getByRole("button", {name: "Profil seçimini hazırla", exact: true}).click();
+  await expect(selection).toContainText("lean-add-comm");
+  await expect(selection).not.toContainText(softwareTask.contract_hash);
+  await expect(page.locator(".task-run-panel .task-run-approval")).toHaveCount(0);
+  expect((await calls(page)).some(call => call.command === "local_task_run_start")).toBe(false);
+});
+
+test("changing the prepared task or selected profile consumes approval and requires an explicit controlled switch", async ({page}) => {
+  await mockNative(page); const panel = await open(page);
+  await approve(panel); await expect(start(panel)).toBeEnabled();
+  await workspace(page); const selection = await prepareSoftware(page);
+  await expect(start(panel)).toHaveCount(0);
+  await selection.getByRole("button", {name: "Kontrollü görevi seç", exact: true}).click();
+  await expect(selection).toHaveAttribute("data-selection-kind", "controlled");
+  await expect(panel).toHaveAttribute("aria-busy", "false");
+  await expect(panel.getByRole("checkbox")).not.toBeChecked();
+  await expect(start(panel)).toBeDisabled();
+  await approve(panel); await expect(start(panel)).toBeEnabled();
+  await page.locator(".managed-profile-list li").filter({hasText: "Claude profilim"}).getByRole("button", {name: "Bu profili seç", exact: true}).click();
+  await expect(panel.locator(".task-run-card code")).toHaveText("haiku");
+  await expect(panel.getByRole("checkbox")).not.toBeChecked();
+  await expect(start(panel)).toBeDisabled();
+  await approve(panel); await start(panel).click();
+  expect((await calls(page)).filter(call => call.command === "local_task_run_start").map(call => call.args.request.profile_id)).toEqual([secondId]);
+});
+
+test("catalog selection keeps an active controlled run and its eventual result identified as the actual local task", async ({page}) => {
+  await freezeClock(page); await mockNative(page, running); await page.goto("/");
+  const selection = await prepareSoftware(page);
+  const panel = page.locator(".task-run-panel");
+  await expect(panel).toContainText("Ajan çalışıyor");
+  const progress = panel.locator(".task-run-progress");
+  await expect(progress).toContainText(taskId);
+  await expect(progress).not.toContainText(softwareTask.id);
+  await expect(start(panel)).toHaveCount(0);
+  await expect(cancel(panel)).toBeEnabled();
+  await setValue(page, passed); await refresh(page);
+  const result = panel.locator(".task-run-result");
+  await expect(result).toContainText("Görev doğrulandı");
+  await expect(result).toContainText(taskId);
+  await expect(result).not.toContainText(softwareTask.id);
+  await expect(panel.getByTestId("task-run-diff")).toBeVisible();
+  await expect(selection).toContainText(softwareTask.id);
+  await expect(panel.locator(".task-run-approval")).toHaveCount(0);
+  expect((await calls(page)).some(call => call.command === "local_task_run_start" || call.command === "local_task_run_cancel")).toBe(false);
 });

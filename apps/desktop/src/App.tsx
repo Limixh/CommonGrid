@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AccountPanel } from "./AccountPanel";
 import { useAccount } from "./account-api";
 import { ContributionSettingsPage } from "./ContributionSettingsPage";
@@ -10,12 +10,33 @@ import type { Page } from "./ui-types";
 import { useTaskCatalog } from "./useTaskCatalog";
 import { WorkspacePage } from "./WorkspacePage";
 import { ManagedProfilesPanel } from "./ManagedProfilesPanel";
+import { controlledExecutionSelection, type ExecutionSelection } from "./execution-selection";
 
 export function App() {
   const account = useAccount();
   const { settings, draft, setDraft, notice, setNotice, save, toggleLanguage } = useContributionSettings();
   const [page, setPage] = useState<Page>("workspace");
+  // Ownership stays in App; account identities never reach task UI or native IPC.
+  // Undefined denotes a public fixture/local selection, null an invalid private one.
+  const [storedExecutionSelection, setStoredExecutionSelection] = useState<{selection: ExecutionSelection; accountOwner?: string | null}>({selection: controlledExecutionSelection});
   const catalog = useTaskCatalog(account, settings.language);
+  const accountOwner = account.state.status === "authenticated"
+    ? JSON.stringify([account.state.session.user.provider, account.state.session.user.id]) : null;
+  const privateSelectionInvalid = storedExecutionSelection.accountOwner !== undefined &&
+    (accountOwner === null || storedExecutionSelection.accountOwner !== accountOwner || catalog.status === "unauthorized");
+  // Hide a private snapshot synchronously, before the effect erases it. A
+  // catalog refresh temporarily clears source, but does not change ownership.
+  const executionSelection = privateSelectionInvalid ? controlledExecutionSelection : storedExecutionSelection.selection;
+  useEffect(() => {
+    if (privateSelectionInvalid) setStoredExecutionSelection(current => current.accountOwner !== undefined &&
+      (accountOwner === null || current.accountOwner !== accountOwner || catalog.status === "unauthorized")
+      ? {selection: controlledExecutionSelection} : current);
+  }, [privateSelectionInvalid, accountOwner, catalog.status]);
+  function prepareExecution(selection: ExecutionSelection) {
+    setStoredExecutionSelection(selection.kind === "catalog" && catalog.source === "database"
+      ? {selection, accountOwner} : {selection});
+    setPage("agents");
+  }
   const { doctor, loadDoctor } = useEnvironmentReadiness();
   const { projects, tasks, status, source, project, setProject } = catalog;
   const t = words[settings.language];
@@ -107,9 +128,9 @@ export function App() {
           </button>
         </header>
         {page === "workspace" ? (
-          <WorkspacePage catalog={catalog} settings={settings} t={t} setPage={setPage} />
+          <WorkspacePage catalog={catalog} settings={settings} t={t} setPage={setPage} onPrepareExecution={prepareExecution} />
         ) : page === "agents" ? (
-          <EnvironmentPage language={settings.language} doctor={doctor} loadDoctor={loadDoctor} managedProfiles={<ManagedProfilesPanel language={settings.language} />} />
+          <EnvironmentPage language={settings.language} doctor={doctor} loadDoctor={loadDoctor} managedProfiles={<ManagedProfilesPanel language={settings.language} selection={executionSelection} onSelectControlled={() => setStoredExecutionSelection({selection: controlledExecutionSelection})} />} />
         ) : page === "account" || page === "contributions" ? (
           <AccountPanel account={account} language={settings.language} contributions={page === "contributions"} resumeTarget={status === "ready" && catalog.task ? { task: catalog.task, strategyId: catalog.strategy } : null} />
         ) : (

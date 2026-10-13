@@ -6,6 +6,8 @@ import {
 import { createManagedProfile, managedProfilesNative, readManagedProfiles, selectManagedProfile } from "./managed-profile-client";
 import { ProfileSessionPanel } from "./ProfileSessionPanel";
 import { TaskRunPanel } from "./TaskRunPanel";
+import { ExecutionSelectionPanel } from "./ExecutionSelectionPanel";
+import { controlledExecutionSelection, executionSelectionKey, type ExecutionSelection } from "./execution-selection";
 
 const words = {
   tr: {
@@ -25,7 +27,7 @@ const words = {
     limit: "This device has reached its limit of 16 profiles.", saved: "Saved profile", retry: "Retry the same profile",
   },
 };
-export function ManagedProfilesPanel({language}: {language: "tr" | "en"}) {
+export function ManagedProfilesPanel({language, selection, onSelectControlled}: {language: "tr" | "en"; selection: ExecutionSelection; onSelectControlled: () => void}) {
   const t = words[language];
   const [status, setStatus] = useState<ManagedProfilesStatus | null>(null);
   const [pending, setPending] = useState<"read" | "create" | "select" | null>("read");
@@ -87,6 +89,7 @@ export function ManagedProfilesPanel({language}: {language: "tr" | "en"}) {
   return <section className="settings-box managed-profiles-panel" aria-labelledby="managed-profiles-title" aria-busy={pending !== null}>
     <div className="section-heading"><h2 id="managed-profiles-title">{t.title}</h2>{managedProfilesNative() && <button className="secondary-button" disabled={pending === "create" || pending === "select"} onClick={() => void observe("read")}>{t.refresh}</button>}</div>
     <p>{t.description}</p>
+    <ExecutionSelectionPanel language={language} selection={selection} onSelectControlled={onSelectControlled} />
     {status?.availability === "unavailable" && <p role="status">{t.unavailable}</p>}
     {pending === "read" && !status && <p role="status">{t.loading}</p>}
     {error && <p role="alert">{t.error}</p>}
@@ -105,6 +108,7 @@ export function ManagedProfilesPanel({language}: {language: "tr" | "en"}) {
         <button className="secondary-button" disabled={!enabled || retry} onClick={() => void observe("select", profile.profile_id)}>{t.select}</button>}
     </li>)}</ul>}
     {selectedProfile && <ProfileSessionPanel key={selectedProfile.profile_id} language={language} profile={selectedProfile} />}
-    {selectedProfile && <TaskRunPanel key={"task-" + selectedProfile.profile_id} language={language} profile={selectedProfile} />}
+    {selectedProfile && <TaskRunPanel key={"task-" + selectedProfile.profile_id + executionSelectionKey(selection)} language={language} profile={selectedProfile}
+      taskId={controlledExecutionSelection.task_id} allowStart={selection.kind === "controlled"} />}
   </section>;
 }

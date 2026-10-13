@@ -4,6 +4,8 @@ CommonGrid tam v1 hedefiyle geliştiriliyor. Şu an görev inceleme, hesap/katk�
 
 Bu dosya kurulum ve çalışma rehberidir. Tarihli test sonuçları ve önceki kararların uygulama kayıtları [DEVELOPMENT_HISTORY.md](DEVELOPMENT_HISTORY.md) içinde korunur. Ürün gereksinimleri [spec'te](../PROJECT_SPEC1.2.md), planlanan fazlar [roadmap'te](../implementation_roadmap1.3.md), karar gerekçeleri [ADR'lerde](../spike/adr/) bulunur.
 
+Çalışma alanındaki yerel görev kartı profil, hesap ve görev onayı ekranına bağlanır. Katalogdaki **Profil seçimini hazırla** işlemi görev sürümü/hash'i ve seçilen yaklaşımın sabit bir kopyasını tutar; mevcut katalog örneklerine çalıştırma desteği vermez. Görev/profil değişimi önceki onayı temizler. Özel katalog seçimleri CommonGrid oturumu sona erince temizlenir; yerel ajan hesabı ayrı yönetilir.
+
 ## Günlük geliştirme
 
 ```powershell

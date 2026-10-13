@@ -5,10 +5,11 @@ import { TaskDependenciesPanel, StatusBadge } from "./TaskDependenciesPanel";
 import { kindLabel, statusOf, TASK_STATUSES, statusLabel } from "./task-dependencies";
 import type { Settings, Page } from "./ui-types";
 import type { TaskCatalog } from "./useTaskCatalog";
+import { captureCatalogSelection, controlledExecutionSelection, type ExecutionSelection } from "./execution-selection";
 
-type WorkspacePageProps = { catalog: TaskCatalog; settings: Settings; t: UIWords; setPage: (page: Page) => void };
+type WorkspacePageProps = { catalog: TaskCatalog; settings: Settings; t: UIWords; setPage: (page: Page) => void; onPrepareExecution: (selection: ExecutionSelection) => void };
 
-export function WorkspacePage({ catalog, settings, t, setPage }: WorkspacePageProps) {
+export function WorkspacePage({ catalog, settings, t, setPage, onPrepareExecution }: WorkspacePageProps) {
   const { projects, tasks, statuses, status, source, setSelected, query, setQuery, type, setType, project, setProject, statusFilter, setStatusFilter, tab, setTab, strategy, setStrategy, filtered, task, loadCatalog, pagers, duplicates, loadMoreTasks, loadMoreProjects, revealTask } = catalog;
   const detailHeading = useRef<HTMLHeadingElement>(null);
   const focusDetail = useRef(false);
@@ -52,6 +53,10 @@ export function WorkspacePage({ catalog, settings, t, setPage }: WorkspacePagePr
           <div className="graph-node gn5">∞</div>
           <span className="graph-label">COMMON / GRID</span>
         </div>
+      </section>
+      <section className="local-controlled-task" aria-labelledby="local-controlled-task-title">
+        <div><h2 id="local-controlled-task-title">{t.controlledTaskTitle}</h2><p>{t.controlledTaskText}</p></div>
+        <button className="secondary-button" onClick={() => onPrepareExecution(controlledExecutionSelection)}>{t.selectControlledTask}</button>
       </section>
       {status === "ready" && <section className="stats-strip" aria-label="Catalog statistics">
         {[
@@ -366,9 +371,10 @@ export function WorkspacePage({ catalog, settings, t, setPage }: WorkspacePagePr
                 <p>{t.gateText}</p>
                 <button
                   className="text-button"
-                  onClick={() => setPage("agents")}
+                  disabled={!task.strategies.some(item => item.id === strategy)}
+                  onClick={() => onPrepareExecution(captureCatalogSelection(task, strategy))}
                 >
-                  {t.inspect}
+                  {t.prepareProfile}
                   <Icon name="arrow" size={14} />
                 </button>
               </div>
