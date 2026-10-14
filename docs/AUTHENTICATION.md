@@ -66,7 +66,8 @@ Google/GitHub access tokenları ve Google ID tokenı yalnız callback sırasınd
 | `POST /api/v1/leases/{id}/artifacts` | Oturum/Origin/CSRF ile binary kaynak paketi yükleme; purpose ve request_key query'de |
 | `GET /api/v1/artifacts/{id}` | Yalnız sahibin dosya receipt'i; içerik ve dosya yolları verilmez |
 | `POST /api/v1/submissions/{id}/review` | Kalıcı owner/grant yetkisi; kendi adayını incelemek yasak |
-| `POST /api/v1/tasks/{id}/leases`, `/leases/{id}/start` | Her zaman `409 isolation_gate_pending`; yeni çalışma başlatmaz |
+| `POST /api/v1/tasks/{id}/leases`, `/leases/{id}/start` | Varsayılan `409 isolation_gate_pending`; yalnız açık loopback geliştirme ayarında iki sabit yazılım sözleşmesine kiralama/başlatma yeteneği ([kurulum](DEVELOPMENT.md#merkezi-yazılım-görevi-gönderimi)) |
+| `POST /api/v1/leases/{id}/heartbeat` | Aynı dar izin, sahip/aktif sözleşme/süre kontrolü; süre veya bütçe uzatmaz |
 
 Listeler `limit=1..100` (varsayılan 50) ve `after` cursor kullanır; response `next_cursor` taşır. Arayüz katkı ekranı sonraki sayfayı açık seçimle yükler. DB proje tablosunda henüz editoryal title/description yoktur: başlık ID, açıklama boş ve tip güncel task türlerinden türetilir. Proje oluşturma/düzenleme paneli ve erişim/moderasyon politikaları sonraki ürün işidir.
 

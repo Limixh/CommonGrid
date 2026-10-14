@@ -3,14 +3,14 @@ import path from "node:path";
 import type { TaskContract } from "@commongrid/task-schema";
 import { ControlledTaskCleanupError, controlledTaskId, createControlledPatch, seedControlledTask, snapshotControlledCandidate, verifyControlledCandidate, type ControlledPatch, type ControlledVerifierResult } from "../../../packages/agent-adapters/src/controlled-task.ts";
 import { findSoftwareStrategy, type SoftwareStrategy, seedSoftwareTask, snapshotSoftwareCandidate, softwareTaskPrompt, softwareTaskSpecFor, softwareTaskSpecs, type SoftwareTaskSpec, verifyCatalogSoftwareBundle, verifySoftwareCandidate, type SoftwareVerifierResult } from "../../../packages/agent-adapters/src/software-task.ts";
-import { assertSoftwareResultDeliverable } from "../../../packages/agent-adapters/src/software-result.ts";
+import { assertSoftwareResultDeliverable, buildSoftwareResultBundle } from "../../../packages/agent-adapters/src/software-result.ts";
 import { TaskToolLimitError, runControlledProviderTurn, type ProviderTurnOptions } from "../../../packages/agent-adapters/src/controlled-task-session.ts";
 import { ManagedCliRuntime, startBridge, type ManagedRuntimeAssets } from "../../../packages/agent-adapters/src/managed-runtime.ts";
 import { assertBridgeHealthy, ProviderFailure } from "../../../packages/agent-adapters/src/session-protocol.ts";
 import { executeTaskTool } from "../../../packages/agent-adapters/src/task-tool.ts";
 import { TaskToolsRuntime } from "../../../packages/agent-adapters/src/task-runtime.ts";
-import { taskRunMaxFrameBytes, taskRunMaxToolCalls, taskRunObservedModels, taskRunRequestedModels, taskRunTaskIds, validTaskRunStrategy, validateTaskRunResult, validateTaskRunStatus,
-  type TaskRunBoot, type TaskRunError, type TaskRunFrame, type TaskRunOutcome, type TaskRunResult, type TaskRunTaskId, type TaskRunVerifier } from "../../../packages/agent-adapters/src/task-run-protocol.ts";
+import { taskRunMaxFrameBytes, taskRunMaxToolCalls, taskRunObservedModels, taskRunRequestedModels, taskRunTaskIds, validTaskRunStrategy, validateTaskRunResult, validateTaskRunStatus, validateTaskRunLeaseContext, validateTaskRunResultPackage,
+  type TaskRunArtifact, type TaskRunBoot, type TaskRunError, type TaskRunFrame, type TaskRunOutcome, type TaskRunResult, type TaskRunTaskId, type TaskRunVerifier } from "../../../packages/agent-adapters/src/task-run-protocol.ts";
 import { verifyAssets, verifyDockerPrerequisite } from "./cli-check.ts";
 import { BindingFailure, ProfileBindings, uuid, type ProfileBinding } from "./profile-bindings.ts";
 
@@ -19,11 +19,14 @@ class TaskRunFailure extends Error { constructor(readonly code: TaskRunError) { 
 const bootKeys = ["type", "schema_version", "request_id", "profile_id", "provider", "task_id", "strategy_id", "journal_root", "assets_root", "profile_registry_root"].sort().join();
 export function parseTaskRunBoot(value: unknown): TaskRunBoot {
   const boot = value as TaskRunBoot;
-  if (!boot || typeof boot !== "object" || Array.isArray(boot) || Object.keys(boot).sort().join() !== bootKeys ||
+  if (!boot || typeof boot !== "object" || Array.isArray(boot) || Object.keys(boot).filter(key => key !== "lease_context").sort().join() !== bootKeys ||
     boot.type !== "task_run_boot" || boot.schema_version !== "1.0" || typeof boot.request_id !== "string" || !uuid.test(boot.request_id) ||
     typeof boot.profile_id !== "string" || !uuid.test(boot.profile_id) || !["codex", "claude"].includes(boot.provider) || !(taskRunTaskIds as readonly unknown[]).includes(boot.task_id) || !validTaskRunStrategy(boot.task_id, boot.strategy_id) ||
     ![boot.journal_root, boot.assets_root, boot.profile_registry_root].every(root => typeof root === "string" && root.length < 4096 && !/[\x00\r\n]/.test(root) && path.isAbsolute(root)) ||
     path.basename(boot.profile_registry_root) !== "managed-profiles") throw new TaskRunFailure("worker_failed");
+  if (Object.hasOwn(boot, "lease_context")) {
+    try { validateTaskRunLeaseContext(boot.lease_context, boot.task_id, boot.strategy_id); } catch { throw new TaskRunFailure("worker_failed"); }
+  }
   return boot;
 }
 export function taskRunBindingRoot(boot: Pick<TaskRunBoot, "profile_registry_root">): string {
@@ -119,18 +122,19 @@ const stepFailure = (signal: AbortSignal, code: TaskRunError) => (error: unknown
   if (signal.aborted) throw error;
   throw new TaskRunFailure(error instanceof Error && /^candidate_/.test(error.message) ? "candidate_invalid" : code);
 };
-function terminalFrame(boot: TaskRunBoot, outcome: TaskRunOutcome, error: TaskRunError | null, unverified: boolean, result: TaskRunResult | null, toolCalls: number, observed: string | null): Extract<TaskRunFrame, {type: "result"}> {
-  const frame = {type: "result", outcome, error_code: error, cleanup: unverified ? "unknown" : "verified", result} as const;
+function terminalFrame(boot: TaskRunBoot, outcome: TaskRunOutcome, error: TaskRunError | null, unverified: boolean, result: TaskRunResult | null, toolCalls: number, observed: string | null, artifact?: TaskRunArtifact): Extract<TaskRunFrame, {type: "result"}> {
+  const frame = {type: "result", outcome, error_code: error, cleanup: unverified ? "unknown" : "verified", result, ...(artifact && outcome === "passed" && !unverified ? {artifact} : {})} as const;
   // The supervisor projects this frame into the public status; refuse anything
   // that projection would reject, and keep the line bounded.
   validateTaskRunStatus({schema_version: "1.0", availability: "available", operation: {request_id: boot.request_id, profile_id: boot.profile_id, provider: boot.provider, task_id: boot.task_id, strategy_id: boot.strategy_id,
-    revision: 1, phase: "finished", outcome, error_code: error, cleanup: frame.cleanup, tool_calls: toolCalls, model: {requested: taskRunRequestedModels[boot.provider], observed}, result}});
+    revision: 1, phase: "finished", outcome, error_code: error, cleanup: frame.cleanup, tool_calls: toolCalls, model: {requested: taskRunRequestedModels[boot.provider], observed}, result, ...(boot.lease_context ? {lease_context: boot.lease_context} : {})}});
   if (Buffer.byteLength(JSON.stringify(frame)) > taskRunMaxFrameBytes) throw new Error("task_run_frame_too_large");
   return frame;
 }
 export async function runTaskRun(boot: TaskRunBoot, signal: AbortSignal, emit: (frame: TaskRunFrame) => void, deps: TaskRunDependencies = dependencies): Promise<void> {
   let runtime: TaskRunRuntime | undefined, bridge: TaskRunBridge | undefined, sandbox: TaskRunSandbox | undefined, release: (() => void) | undefined;
   let error: TaskRunError | null = null, result: TaskRunResult | null = null;
+  let artifact: TaskRunArtifact | undefined;
   // Scalars observed from the provider; mutated by the observer callbacks only.
   const seen = {observed: null as string | null, toolCalls: 0};
   let accepting = false, cleanupFailed = false, holdOwnership = false, settled = false;
@@ -138,6 +142,7 @@ export async function runTaskRun(boot: TaskRunBoot, signal: AbortSignal, emit: (
   emit({type: "progress", phase: "preparing"});
   try {
     signal.throwIfAborted();
+    if (boot.lease_context && boot.lease_context.expires_at_ms <= Date.now()) throw new TaskRunFailure("deadline_exceeded");
     const binding = await deps.bindings(taskRunBindingRoot(boot)).read(boot.profile_id, boot.provider);
     signal.throwIfAborted();
     if (!binding) throw new TaskRunFailure("profile_unbound");
@@ -196,6 +201,12 @@ export async function runTaskRun(boot: TaskRunBoot, signal: AbortSignal, emit: (
       if (steps.deliverable) await steps.deliverable(evidence).catch(error => {
         throw new TaskRunFailure(error instanceof Error && /^candidate_/.test(error.message) ? "candidate_invalid" : "asset_invalid");
       });
+      if (boot.lease_context && softwareSpec && contract && strategy) {
+        const bundle = await buildSoftwareResultBundle(contract, {baseline: softwareSpec.baseline, strategyId: strategy.id, leaseId: boot.lease_context.lease_id,
+          patch: evidence.patch, candidateSha256: evidence.candidate_sha256}).catch(() => { throw new TaskRunFailure("candidate_invalid"); });
+        artifact = {lease_id: boot.lease_context.lease_id, sha256: bundle.sha256, size_bytes: bundle.size_bytes, bytes_base64: bundle.bytes.toString("base64")};
+        validateTaskRunResultPackage({schema_version: "1.0", request_id: boot.request_id, ...artifact});
+      }
       result = validateTaskRunResult({verifier, candidate_sha256: verdict.candidate_sha256, patch_sha256: evidence.patch_sha256, patch: evidence.patch}, "passed", boot.task_id);
     }
   } catch (failure) {
@@ -224,7 +235,7 @@ export async function runTaskRun(boot: TaskRunBoot, signal: AbortSignal, emit: (
     if (error !== null && error !== "candidate_rejected") result = null;
     const outcome: TaskRunOutcome = unverified ? "needs_review" : error === null ? "passed" : error === "candidate_rejected" ? "rejected" : error === "cancelled" ? "cancelled" : "failed";
     let frame: Extract<TaskRunFrame, {type: "result"}>;
-    try { frame = terminalFrame(boot, outcome, error, unverified, result, seen.toolCalls, seen.observed); }
+    try { frame = terminalFrame(boot, outcome, error, unverified, result, seen.toolCalls, seen.observed, artifact); }
     catch { frame = terminalFrame(boot, unverified ? "needs_review" : "failed", unverified && error === "cleanup_failed" ? "cleanup_failed" : "worker_failed", unverified, null, seen.toolCalls, seen.observed); }
     emit(frame);
   }

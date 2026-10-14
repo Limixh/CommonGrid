@@ -2,6 +2,8 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 import {
   validateTaskRunStart, validateTaskRunCancel, validateTaskRunStatus, unavailableTaskRun, taskRunMaxStatusBytes,
   type TaskRunStartRequest, type TaskRunCancelRequest, type TaskRunStatus,
+  validateTaskRunResultPackageRequest, validateTaskRunResultPackage, type TaskRunResultPackageRequest, type TaskRunResultPackage,
+  sameTaskRunLeaseContext,
 } from "@commongrid/agent-adapters/task-run";
 
 export const taskRunNative = () => isTauri();
@@ -32,7 +34,7 @@ export async function startTaskRun(request: TaskRunStartRequest, signal: AbortSi
   const status = await checkedInvoke("local_task_run_start", {request: checked}, signal);
   if (status.availability === "available" && (!status.operation || status.operation.request_id !== checked.request_id ||
     status.operation.profile_id !== checked.profile_id || status.operation.task_id !== checked.task_id ||
-    status.operation.strategy_id !== checked.strategy_id)) throw new Error("task_run_contract_invalid");
+    status.operation.strategy_id !== checked.strategy_id || !sameTaskRunLeaseContext(status.operation.lease_context, checked.lease_context))) throw new Error("task_run_contract_invalid");
   return status;
 }
 export async function cancelTaskRun(request: TaskRunCancelRequest, signal: AbortSignal) {
@@ -41,4 +43,11 @@ export async function cancelTaskRun(request: TaskRunCancelRequest, signal: Abort
   if (status.availability === "available" && (!status.operation || status.operation.request_id !== checked.request_id ||
     status.operation.revision < checked.expected_revision)) throw new Error("task_run_contract_invalid");
   return status;
+}
+export async function exportTaskRunResultPackage(request: TaskRunResultPackageRequest, signal: AbortSignal): Promise<TaskRunResultPackage> {
+  const checked = validateTaskRunResultPackageRequest(request);
+  if (!taskRunNative()) throw new Error("task_run_contract_invalid");
+  const result = validateTaskRunResultPackage(await boundedInvoke("local_task_run_result_package", {request: checked}, signal));
+  if (result.request_id !== checked.request_id) throw new Error("task_run_contract_invalid");
+  return result;
 }

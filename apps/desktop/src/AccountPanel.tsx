@@ -6,7 +6,7 @@ import type { ResumeTarget } from "./contribution-client";
 const words = {
   tr: {
     account: "Hesabım", contributions: "Katkılarım", description: "Hesabını bağlayarak sana ait katkı kayıtlarını görüntüle.",
-    privacy: "Hesap bağlantısı görev başlatmayı açmaz. Çalıştırma henüz kullanıma hazır değil.",
+    privacy: "Hesap bağlantısı tek başına görev başlatmaz. Desteklenen görevler ayrıca profil seçimi ve açık çalıştırma onayı gerektirir.",
     loading: "Hesap kontrol ediliyor…", offline: "Hesap bilgilerine ulaşılamadı. Bağlantını kontrol edip tekrar dene.",
     retry: "Tekrar dene", signIn: "Giriş yap", github: "GitHub ile giriş yap", google: "Google ile giriş yap",
     preparing: "Hesap bağlantısı hazırlanıyor", preparingText: "Giriş seçenekleri hazır olduğunda burada görünecek.",
@@ -21,7 +21,7 @@ const words = {
   },
   en: {
     account: "My account", contributions: "My contributions", description: "Connect your account to view your own contribution records.",
-    privacy: "Connecting an account does not enable task execution. Execution is still being prepared.",
+    privacy: "Connecting an account alone does not start a task. Supported tasks also require a selected profile and explicit approval to run.",
     loading: "Checking your account…", offline: "Your account could not load. Check your connection and try again.",
     retry: "Try again", signIn: "Sign in", github: "Sign in with GitHub", google: "Sign in with Google",
     preparing: "Account connection is being prepared", preparingText: "Sign-in options will appear here when they are ready.",

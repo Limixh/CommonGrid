@@ -83,6 +83,10 @@ func (databaseHarnessResolver) Resolve(task contract.TaskContract, purpose strin
 }
 
 func databaseAPI(t *testing.T) (*store.Store, http.Handler, *verification.Worker) {
+	return databaseAPIWithExecution(t, nil)
+}
+
+func databaseAPIWithExecution(t *testing.T, executionContracts []string) (*store.Store, http.Handler, *verification.Worker) {
 	t.Helper()
 	dsn := os.Getenv("CG_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -129,6 +133,9 @@ func databaseAPI(t *testing.T) (*store.Store, http.Handler, *verification.Worker
 		}
 	})
 	var scanner ArtifactScanner = databaseArtifactScanner{}
+	if len(executionContracts) != 0 {
+		scanner = softwareDatabaseScanner{}
+	}
 	service := &ArtifactService{Vault: vault, Scanner: scanner, ScanPolicy: "trusted-test-fixture", ScanPolicyVersion: "v1", DevelopmentOnly: true}
 	if binary, digest := os.Getenv("CG_TEST_TRIVY_BINARY"), os.Getenv("CG_TEST_TRIVY_SHA256"); binary != "" || digest != "" || os.Getenv("CG_REQUIRE_TRIVY_TESTS") == "1" {
 		scanner, err = artifact.NewTrivyScanner(binary, digest, t.TempDir())
@@ -147,7 +154,7 @@ func databaseAPI(t *testing.T) (*store.Store, http.Handler, *verification.Worker
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler, err := NewAuthenticated(db, manager, Config{PublicURL: "http://127.0.0.1:8787", UIOrigin: "http://127.0.0.1:1420", Development: true, Artifacts: service})
+	handler, err := NewAuthenticated(db, manager, Config{PublicURL: "http://127.0.0.1:8787", UIOrigin: "http://127.0.0.1:1420", Development: true, Artifacts: service, ExecutionContracts: executionContracts})
 	if err != nil {
 		t.Fatal(err)
 	}

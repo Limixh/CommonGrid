@@ -12,7 +12,7 @@ import { BindingFailure, type ProfileBinding } from "../../../apps/desktop/nativ
 import { verifyAssets, type Boot } from "../../../apps/desktop/native-worker/cli-check.ts";
 import { parseTaskRunBoot, runTaskRun, taskRunBindingRoot, type TaskRunBoot, type TaskRunDependencies, type TaskRunFrame, type TaskRunRuntime, type TaskRunSandbox } from "../../../apps/desktop/native-worker/task-run.ts";
 import { ControlledTaskCleanupError, applyControlledPatch, controlledBaseline, createControlledPatch, controlledVerifierCases } from "../src/controlled-task.ts";
-import { contractHash } from "@commongrid/task-schema";
+import { contractHash, validateTask } from "@commongrid/task-schema";
 import { softwareBaseline, softwareBoundsTask, softwareBoundsTaskId, softwareIntervalsBaseline, softwareIntervalsTask, softwareIntervalsTaskId, softwareTaskPrompt, softwareTaskSpecFor, verifySoftwareBundle, type SoftwareTaskId, type SoftwareTaskSpec } from "../src/software-task.ts";
 import { TaskToolLimitError, runControlledProviderTurn, type ProviderProcessFactory, type ProviderTurnOptions } from "../src/controlled-task-session.ts";
 import type { ManagedRuntimeAssets } from "../src/managed-runtime.ts";
@@ -20,6 +20,7 @@ import { ProviderFailure } from "../src/session-protocol.ts";
 import { executeTaskTool } from "../src/task-tool.ts";
 import { acceptTaskRunUpdate, taskRunMaxFrameBytes, taskRunMaxToolCalls, taskRunObservedModels, taskRunRequestedModels, validateTaskRunStatus, type TaskRunProvider, type TaskRunStatus, type TaskRunTaskId } from "../src/task-run-protocol.ts";
 import pins from "../runtime-assets/native-cli-assets.lock.json";
+import { buildSoftwareResultBundle } from "../src/software-result.ts";
 
 const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
 const softwareTasks = {"software-bounds": softwareBoundsTask, "software-intervals": softwareIntervalsTask} as const;
@@ -131,6 +132,47 @@ function supervise(boot: TaskRunBoot, frames: TaskRunFrame[]): TaskRunStatus {
   return validateTaskRunStatus(previous);
 }
 const types = (frames: TaskRunFrame[]) => frames.map(frame => frame.type === "progress" ? frame.phase : frame.type);
+
+for (const task of softwareIds) {
+  test(`${task}: leased run retains only the exact real-lease package after verified cleanup`, async () => {
+    const f = fixture({task});
+    const contract = await validateTask(softwareTasks[task]);
+    f.boot.lease_context = {lease_id: "lease-worker-1", attempt_id: "attempt-worker-1", task_version: contract.task_version,
+      contract_hash: contract.contract_hash, base_commit: contract.workspace.commit, strategy_id: f.boot.strategy_id!, time_limit_sec: 120,
+      expires_at_ms: Date.now() + 120_000};
+    assert.deepEqual(parseTaskRunBoot(f.boot), f.boot);
+    await f.run();
+    const final = result(f.frames);
+    assert.equal(final.outcome, "passed");
+    assert.ok(final.result && final.artifact);
+    const expected = await buildSoftwareResultBundle(contract, {baseline: baselineFor(task), strategyId: f.boot.strategy_id!, leaseId: f.boot.lease_context.lease_id,
+      patch: final.result.patch!, candidateSha256: final.result.candidate_sha256});
+    assert.deepEqual(final.artifact, {lease_id: f.boot.lease_context.lease_id, sha256: expected.sha256, size_bytes: expected.size_bytes, bytes_base64: expected.bytes.toString("base64")});
+    assert.ok(expected.bytes.includes(Buffer.from('"lease_id":"lease-worker-1"')));
+    assert.ok(expected.bytes.includes(Buffer.from(fixedFor(task))));
+    assertSupervisorRules(f.frames);
+    for (const frame of f.frames.slice(0, -1)) assert.equal(Object.hasOwn(frame, "artifact"), false);
+    for (const kind of ["rejected", "cancelled", "cleanup_failed"] as const) {
+      const failed = fixture({task}); failed.boot.lease_context = f.boot.lease_context;
+      const abort = new AbortController();
+      if (kind === "rejected") failed.deps.softwareVerify = async source => ({passed: false, cases: 40, visible_tests_passed: true, hidden_cases_passed: false, candidate_sha256: sha256(source)});
+      if (kind === "cancelled") { const original = failed.deps.softwareVerify!; failed.deps.softwareVerify = async (...args) => {const verified = await original(...args); abort.abort(); return verified;}; }
+      if (kind === "cleanup_failed") failed.sandbox.close = async () => {throw new Error("cleanup unverified");};
+      await failed.run(abort.signal);
+      assert.notEqual(result(failed.frames).outcome, "passed");
+      assert.equal(Object.hasOwn(result(failed.frames), "artifact"), false, kind);
+    }
+  });
+}
+
+test("an expired or foreign lease stops before profile or provider access", async () => {
+  const f = fixture({task: "software-bounds"}), contract = await validateTask(softwareTasks["software-bounds"]);
+  f.boot.lease_context = {lease_id: "lease-1", attempt_id: "attempt-1", task_version: 1, contract_hash: contract.contract_hash,
+    base_commit: contract.workspace.commit, strategy_id: "invariant", time_limit_sec: 120, expires_at_ms: Date.now() - 1};
+  await f.run();
+  assert.equal(result(f.frames).error_code, "deadline_exceeded"); assert.deepEqual(f.calls, []);
+  assert.throws(() => parseTaskRunBoot({...f.boot, lease_context: {...f.boot.lease_context, contract_hash: "0".repeat(64)}}), /worker_failed/);
+});
 
 test("boot accepts only the exact trusted fixed shape with absolute native paths", () => {
   const boot = bootFor("codex");

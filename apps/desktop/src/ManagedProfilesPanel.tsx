@@ -8,6 +8,7 @@ import { ProfileSessionPanel } from "./ProfileSessionPanel";
 import { TaskRunPanel } from "./TaskRunPanel";
 import { ExecutionSelectionPanel } from "./ExecutionSelectionPanel";
 import { controlledExecutionSelection, executionSelectionKey, runnableSelection, type ExecutionSelection } from "./execution-selection";
+import type { CentralTaskControl } from "./useCentralTask";
 
 const words = {
   tr: {
@@ -27,7 +28,7 @@ const words = {
     limit: "This device has reached its limit of 16 profiles.", saved: "Saved profile", retry: "Retry the same profile",
   },
 };
-export function ManagedProfilesPanel({language, selection, onSelectControlled}: {language: "tr" | "en"; selection: ExecutionSelection; onSelectControlled: () => void}) {
+export function ManagedProfilesPanel({language, selection, central, onSelectControlled}: {language: "tr" | "en"; selection: ExecutionSelection; central: CentralTaskControl; onSelectControlled: () => void}) {
   const t = words[language];
   const [status, setStatus] = useState<ManagedProfilesStatus | null>(null);
   const [pending, setPending] = useState<"read" | "create" | "select" | null>("read");
@@ -89,7 +90,7 @@ export function ManagedProfilesPanel({language, selection, onSelectControlled}: 
   return <section className="settings-box managed-profiles-panel" aria-labelledby="managed-profiles-title" aria-busy={pending !== null}>
     <div className="section-heading"><h2 id="managed-profiles-title">{t.title}</h2>{managedProfilesNative() && <button className="secondary-button" disabled={pending === "create" || pending === "select"} onClick={() => void observe("read")}>{t.refresh}</button>}</div>
     <p>{t.description}</p>
-    <ExecutionSelectionPanel language={language} selection={selection} onSelectControlled={onSelectControlled} />
+    <ExecutionSelectionPanel language={language} selection={selection} centralRequired={central.required} centralAvailable={central.available} onSelectControlled={onSelectControlled} />
     {status?.availability === "unavailable" && <p role="status">{t.unavailable}</p>}
     {pending === "read" && !status && <p role="status">{t.loading}</p>}
     {error && <p role="alert">{t.error}</p>}
@@ -110,6 +111,6 @@ export function ManagedProfilesPanel({language, selection, onSelectControlled}: 
     {selectedProfile && <ProfileSessionPanel key={selectedProfile.profile_id} language={language} profile={selectedProfile} />}
     {selectedProfile && <TaskRunPanel key={"task-" + selectedProfile.profile_id + executionSelectionKey(selection)} language={language} profile={selectedProfile}
       taskId={runnableSelection(selection)?.task_id ?? controlledExecutionSelection.task_id}
-      strategyId={runnableSelection(selection)?.strategy_id ?? null} allowStart={runnableSelection(selection) !== null} />}
+      strategyId={runnableSelection(selection)?.strategy_id ?? null} central={central} allowStart={runnableSelection(selection) !== null} />}
   </section>;
 }

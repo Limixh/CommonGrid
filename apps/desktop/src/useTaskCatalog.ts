@@ -13,6 +13,7 @@ import {
   type StatusKey,
 } from "./task-dependencies";
 import type { Project } from "./ui-types";
+import { readExecutionCapabilities, type ExecutionCapabilities } from "./central-execution-client";
 
 type ListName = "projects" | "tasks";
 type MoreState = "idle" | "loading" | "error";
@@ -51,6 +52,7 @@ export function useTaskCatalog(account: Account, language: Language) {
     "loading",
   );
   const [source, setSource] = useState<"fixture" | "database" | null>(null);
+  const [executionCapabilities, setExecutionCapabilities] = useState<ExecutionCapabilities>(new Map());
   const catalogRequest = useRef<AbortController | null>(null);
   // Canonical paging state. Refs keep cursor/duplicate decisions correct across
   // overlapping responses; React state is only a rendered copy.
@@ -61,6 +63,7 @@ export function useTaskCatalog(account: Account, language: Language) {
     projects: [] as Project[],
     tasks: [] as TaskContract[],
     statuses: new Map<string, StatusKey>(),
+    executionCapabilities: new Map() as Map<string, import("./central-execution-client").ExecutionCapability>,
     cursor: { projects: "", tasks: "" } as Record<ListName, string>,
     used: { projects: new Set<string>(), tasks: new Set<string>() } as Record<ListName, Set<string>>,
     pages: { projects: 1, tasks: 1 } as Record<ListName, number>,
@@ -85,6 +88,7 @@ export function useTaskCatalog(account: Account, language: Language) {
     p.ready = false;
     p.source = null;
     p.projects = []; p.tasks = []; p.statuses = new Map();
+    p.executionCapabilities = new Map();
     p.cursor = { projects: "", tasks: "" };
     p.used = { projects: new Set(), tasks: new Set() };
     p.pages = { projects: 1, tasks: 1 };
@@ -105,6 +109,7 @@ export function useTaskCatalog(account: Account, language: Language) {
   function clearAll() {
     resetPaging();
     setTasks([]); setProjects([]); setStatuses(new Map()); setSelected(""); setSource(null);
+    setExecutionCapabilities(new Map());
     setPagers({ projects: IDLE, tasks: IDLE }); setDuplicates(0);
   }
 
@@ -151,6 +156,7 @@ export function useTaskCatalog(account: Account, language: Language) {
       const valid: TaskContract[] = await Promise.all(
         taskData.items.map((item: unknown) => validateTask(item)),
       );
+      const capabilities = readExecutionCapabilities(taskData.execution_capabilities, valid, taskData.source);
       if (catalogRequest.current !== controller || paging.current.generation !== generation) return;
       if (signal.aborted) throw new Error("Catalog timed out");
       const nextProjects = readCursor(projectData.next_cursor);
@@ -162,6 +168,7 @@ export function useTaskCatalog(account: Account, language: Language) {
       p.projects = mergedProjects.added;
       p.tasks = mergedTasks.added;
       p.statuses = readStatuses(taskData.statuses, new Set(p.tasks.map((item) => item.id)));
+      p.executionCapabilities = new Map(capabilities);
       p.duplicates = mergedProjects.duplicates + mergedTasks.duplicates;
       p.cursor = { projects: nextProjects, tasks: nextTasks };
       p.capped = { projects: mergedProjects.capped, tasks: mergedTasks.capped };
@@ -172,6 +179,7 @@ export function useTaskCatalog(account: Account, language: Language) {
       setProjects(p.projects);
       setTasks(p.tasks);
       setStatuses(p.statuses);
+      setExecutionCapabilities(p.executionCapabilities);
       setSource(taskData.source);
       publishPagers();
       setSelected((current) =>
@@ -219,10 +227,12 @@ export function useTaskCatalog(account: Account, language: Language) {
       const next = readCursor(data.next_cursor);
       let incoming: Project[] | TaskContract[];
       let pageStatuses = new Map<string, StatusKey>();
+      let pageCapabilities: ExecutionCapabilities = new Map();
       if (list === "projects") incoming = (data.items as Project[]).map(checkProject);
       else {
         incoming = await Promise.all((data.items as unknown[]).map((item) => validateTask(item)));
         pageStatuses = readStatuses(data.statuses, new Set(incoming.map((item) => item.id)));
+        pageCapabilities = readExecutionCapabilities(data.execution_capabilities, incoming as TaskContract[], data.source);
       }
       if (!live()) return;
       if (controller.signal.aborted) throw new Error("Page timed out");
@@ -233,6 +243,8 @@ export function useTaskCatalog(account: Account, language: Language) {
         for (const added of merged.added) {
           const value = pageStatuses.get(added.id);
           if (value) p.statuses.set(added.id, value);
+          const capability = pageCapabilities.get(added.id);
+          if (capability) p.executionCapabilities.set(added.id, capability);
         }
       }
       p.duplicates += merged.duplicates;
@@ -243,7 +255,7 @@ export function useTaskCatalog(account: Account, language: Language) {
       else if (next && (merged.capped || p.pages[list] >= MAX_CATALOG_PAGES || p[list].length >= MAX_CATALOG_ITEMS)) { p.capped[list] = true; p.cursor[list] = ""; }
       else p.cursor[list] = next;
       if (list === "projects") setProjects(p.projects);
-      else { setTasks(p.tasks); setStatuses(new Map(p.statuses)); }
+      else { setTasks(p.tasks); setStatuses(new Map(p.statuses)); setExecutionCapabilities(new Map(p.executionCapabilities)); }
       publishPagers();
     } catch {
       if (live()) p.failed[list] = true;
@@ -289,7 +301,7 @@ export function useTaskCatalog(account: Account, language: Language) {
   }
 
   return {
-    projects, tasks, statuses, status, source, selected, setSelected, query, setQuery, type, setType, project, setProject,
+    projects, tasks, statuses, status, source, executionCapabilities, selected, setSelected, query, setQuery, type, setType, project, setProject,
     statusFilter, setStatusFilter, tab, setTab, strategy, setStrategy, filtered, task, loadCatalog,
     pagers, duplicates, loadMoreTasks: () => loadMore("tasks"), loadMoreProjects: () => loadMore("projects"), revealTask,
   };

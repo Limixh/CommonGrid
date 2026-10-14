@@ -119,6 +119,7 @@ fn start(id: &str) -> Start {
         task_id: TASK_ID.into(),
         strategy_id: None,
         approved: true,
+        lease_context: None,
     }
 }
 fn cancel(id: &str, revision: u32) -> Cancel {
@@ -274,6 +275,7 @@ fn operation(provider: Provider, phase: Phase) -> Operation {
         task_id: TASK_ID,
         strategy_id: None,
         revision: 10,
+        lease_context: None,
         phase,
         outcome: None,
         error_code: None,
@@ -3139,7 +3141,8 @@ fn main_only_acl_and_wrappers_reject_remote_extra_raw_and_url_payloads() {
         .invoke_handler(tauri::generate_handler![
             local_task_run_start,
             local_task_run_status,
-            local_task_run_cancel
+            local_task_run_cancel,
+            local_task_run_result_package
         ])
         .build(context)
         .unwrap();
@@ -3185,6 +3188,18 @@ fn main_only_acl_and_wrappers_reject_remote_extra_raw_and_url_payloads() {
         status,
         json!({"schema_version":"1.0","availability":"available","operation":null})
     );
+    // Exercise the allow path as well: registering a command without granting
+    // it to main would otherwise make every export fail in the real app.
+    let runs = app.state::<Arc<TaskRun>>();
+    let (prepared, _rx) = leased_cleaning();
+    runs.inner.lock().unwrap().status.operation = Some(current(&prepared));
+    let mut end = None;
+    assert!(feed(&runs, &package_frame(), &mut end));
+    runs.finish(ID, end.unwrap());
+    let package = invoke(&main, local, "local_task_run_result_package", InvokeBody::Json(
+        json!({"request":{"schema_version":"1.0","request_id":ID,"expected_revision":current(&runs).revision}})))
+        .unwrap().deserialize::<Value>().unwrap();
+    assert_eq!(package["lease_id"], "lease-native-1");
     for (command, body) in [
         (
             "local_task_run_start",
@@ -3193,6 +3208,10 @@ fn main_only_acl_and_wrappers_reject_remote_extra_raw_and_url_payloads() {
         ("local_task_run_status", json!({})),
         (
             "local_task_run_cancel",
+            json!({"request":{"schema_version":"1.0","request_id":ID,"expected_revision":0}}),
+        ),
+        (
+            "local_task_run_result_package",
             json!({"request":{"schema_version":"1.0","request_id":ID,"expected_revision":0}}),
         ),
     ] {
@@ -3246,4 +3265,157 @@ fn main_only_acl_and_wrappers_reject_remote_extra_raw_and_url_payloads() {
         json!(DENIED)
     );
     assert_eq!(fs::read_dir(&fixture.directory).unwrap().count(), 0);
+}
+
+fn lease_context() -> LeaseContext {
+    LeaseContext {
+        lease_id: "lease-native-1".into(),
+        attempt_id: "attempt-native-1".into(),
+        task_version: 1,
+        contract_hash: "4823a3908e60b9bdeebf737c4f1d8c71a53c86981f5a4c6845877ba815f1216d".into(),
+        base_commit: "7a06a3ea1880fec11033104223474b8f297cab6c".into(),
+        strategy_id: "invariant".into(),
+        time_limit_sec: 120,
+        expires_at_ms: (SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis()
+            + 120_000) as u64,
+    }
+}
+fn leased_cleaning() -> (TaskRun, mpsc::Receiver<()>) {
+    let (owner, rx) = primed(Provider::Codex, Phase::Cleaning, 3, Some("gpt-6-luna"));
+    {
+        let mut inner = owner.inner.lock().unwrap();
+        let operation = inner.status.operation.as_mut().unwrap();
+        operation.task_id = SOFTWARE_TASK;
+        operation.strategy_id = Some("invariant");
+        operation.lease_context = Some(lease_context());
+    }
+    (owner, rx)
+}
+fn package_frame() -> Value {
+    let bytes = b"test-only package transport bytes";
+    let mut frame = result_frame("passed", json!(null), "verified", soft_ok_result());
+    frame["artifact"] = json!({"lease_id":"lease-native-1", "sha256":format!("{:x}", Sha256::digest(bytes)),
+        "size_bytes":bytes.len(), "bytes_base64":STANDARD.encode(bytes)});
+    frame
+}
+
+#[test]
+fn leased_package_is_private_hash_checked_and_exported_only_after_verified_finish() {
+    let (owner, _rx) = leased_cleaning();
+    let mut end = None;
+    let frame = package_frame();
+    for (field, bad) in [
+        ("lease_id", json!("other-lease")),
+        ("sha256", json!(H)),
+        ("size_bytes", json!(16385)),
+        ("bytes_base64", json!("YR==")),
+        ("private", json!("SECRET")),
+    ] {
+        let mut malformed = frame.clone();
+        malformed["artifact"][field] = bad;
+        assert!(!feed(&owner, &malformed, &mut end), "{field}");
+        assert!(owner.inner.lock().unwrap().artifact.is_none());
+    }
+    assert!(!feed(
+        &owner,
+        &result_frame("passed", json!(null), "verified", soft_ok_result()),
+        &mut end
+    ));
+    assert!(feed(&owner, &frame, &mut end));
+    assert!(owner.package(cancel(ID, current(&owner).revision)).is_err());
+    owner.finish(ID, end.unwrap());
+    let operation = current(&owner);
+    assert_eq!(operation.outcome, Some(Outcome::Passed));
+    let exported = owner.package(cancel(ID, operation.revision)).unwrap();
+    assert_eq!(exported["lease_id"], "lease-native-1");
+    assert_eq!(exported["bytes_base64"], frame["artifact"]["bytes_base64"]);
+    assert_eq!(exported["request_id"], ID);
+    assert!(!value(&owner.status()).to_string().contains("bytes_base64"));
+    assert!(owner.package(cancel(OTHER, operation.revision)).is_err());
+    assert!(owner.package(cancel(ID, operation.revision - 1)).is_err());
+    for cancelled in [false, true] {
+        let (failed, _rx) = leased_cleaning();
+        let mut end = None;
+        assert!(feed(&failed, &frame, &mut end));
+        if cancelled {
+            failed.inner.lock().unwrap().cancel_requested = true;
+        }
+        failed.finish(
+            ID,
+            if cancelled {
+                end.unwrap()
+            } else {
+                End::review("cleanup_failed")
+            },
+        );
+        assert!(failed.inner.lock().unwrap().artifact.is_none());
+        assert!(failed
+            .package(cancel(ID, current(&failed).revision))
+            .is_err());
+    }
+    let (unleased, _rx) = primed(Provider::Codex, Phase::Cleaning, 3, Some("gpt-6-luna"));
+    assert!(!feed(&unleased, &frame, &mut None));
+}
+
+#[test]
+fn lease_admission_pins_context_and_replay_cannot_extend_or_replace_it() {
+    let fixture = Fixture::new();
+    fixture.registry("codex");
+    let owner = Owner::new();
+    let request = Start {
+        task_id: SOFTWARE_TASK.into(),
+        strategy_id: Some("invariant".into()),
+        lease_context: Some(lease_context()),
+        ..start(ID)
+    };
+    let wrapped = json!({"request":value(&request)});
+    assert!(preflight(&wrapped, Shape::Start));
+    assert!(preflight(
+        &json!({"request":{"schema_version":"1.0","request_id":ID,"expected_revision":4}}),
+        Shape::Package
+    ));
+    for field in [
+        "lease_id",
+        "attempt_id",
+        "task_version",
+        "contract_hash",
+        "base_commit",
+        "strategy_id",
+        "time_limit_sec",
+        "expires_at_ms",
+    ] {
+        let mut malformed = wrapped.clone();
+        malformed["request"]["lease_context"]
+            .as_object_mut()
+            .unwrap()
+            .remove(field);
+        assert!(!preflight(&malformed, Shape::Start), "missing {field}");
+    }
+    let root = fixture.directory.join("missing-launcher");
+    owner
+        .start(request.clone(), root.clone(), fixture.directory.clone())
+        .unwrap();
+    let operation = wait(&owner, Phase::Finished);
+    assert_eq!(operation.lease_context, request.lease_context);
+    assert!(owner
+        .start(request.clone(), root.clone(), fixture.directory.clone())
+        .is_ok());
+    let mut changed = request.clone();
+    changed.lease_context.as_mut().unwrap().expires_at_ms += 1;
+    assert!(owner
+        .start(changed, root.clone(), fixture.directory.clone())
+        .is_err());
+    let mut expired = request.clone();
+    expired.request_id = OTHER.into();
+    expired.lease_context.as_mut().unwrap().expires_at_ms = 1;
+    assert!(owner
+        .start(expired, root, fixture.directory.clone())
+        .is_err());
+    let mut context = lease_context();
+    assert!(context.remaining().unwrap() <= Duration::from_secs(120));
+    context.expires_at_ms = 1;
+    assert!(context.remaining().is_none());
 }

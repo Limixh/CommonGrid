@@ -5,6 +5,7 @@ import {
 } from "@commongrid/agent-adapters/task-run";
 import type { ManagedProfile } from "@commongrid/agent-adapters/managed-profiles";
 import { cancelTaskRun, readTaskRun, startTaskRun, taskRunNative } from "./task-run-client";
+import type { CentralTaskControl } from "./useCentralTask";
 
 type TaskWords = {title: string; text: string; limits: string[]; checks: readonly [string, string]};
 type Words = {
@@ -157,7 +158,7 @@ function DiffView({patch, label}: {patch: string; label: string}) {
 // The deadline of a run is 1200 s; observation stops slightly after it.
 const pollLimit = 1300;
 
-export function TaskRunPanel({language, profile, taskId, strategyId, allowStart}: {language: "tr" | "en"; profile: ManagedProfile; taskId: TaskRunTaskId; strategyId: string | null; allowStart: boolean}) {
+export function TaskRunPanel({language, profile, taskId, strategyId, allowStart, central}: {language: "tr" | "en"; profile: ManagedProfile; taskId: TaskRunTaskId; strategyId: string | null; allowStart: boolean; central?: CentralTaskControl}) {
   const t = words[language];
   const card = t.tasks[taskId];
   const requestedModel = taskRunRequestedModels[profile.provider];
@@ -191,7 +192,7 @@ export function TaskRunPanel({language, profile, taskId, strategyId, allowStart}
     if (mutation.current) return;
     const before = snapshot.current;
     const operation = before?.operation;
-    if (kind === "start" && (!allowStart || !before || before.availability !== "available" || !approved ||
+    if (kind === "start" && (!allowStart || central?.required && !central.available || !before || before.availability !== "available" || !(approved || central?.retryable) ||
       operation && (operation.phase !== "finished" || operation.outcome === "needs_review"))) return;
     if (kind === "cancel" && (!operation || operation.profile_id !== profile.profile_id || operation.phase === "finished" || operation.phase === "cleaning")) return;
     if (kind !== "read") mutation.current = true;
@@ -202,7 +203,8 @@ export function TaskRunPanel({language, profile, taskId, strategyId, allowStart}
     setPending(kind);
     try {
       const checked = kind === "start"
-        ? await startTaskRun({schema_version: "1.0", request_id: crypto.randomUUID(), profile_id: profile.profile_id, task_id: taskId, strategy_id: strategyId, approved: true}, controller.signal)
+        ? central?.required ? await central.start(profile, controller.signal)
+          : await startTaskRun({schema_version: "1.0", request_id: crypto.randomUUID(), profile_id: profile.profile_id, task_id: taskId, strategy_id: strategyId, approved: true}, controller.signal)
         : kind === "cancel" ? await cancelWithResync(operation!, controller.signal)
           : await readTaskRun(controller.signal);
       if (waiting.current !== controller || controller.signal.aborted) return;
@@ -214,6 +216,7 @@ export function TaskRunPanel({language, profile, taskId, strategyId, allowStart}
       // Approval covers one run only.
       if (incoming && incoming.phase !== "finished" || kind === "start") setApproved(false);
       if (kind !== "read" || operation?.request_id !== incoming?.request_id) { pollCount.current = 0; pollStarted.current = Date.now(); setPaused(false); }
+      if (kind === "cancel" && operation && central?.required) await central.cancel(operation, controller.signal);
     } catch {
       if (waiting.current === controller) { setError(true); setPaused(true); }
     } finally {
@@ -236,7 +239,9 @@ export function TaskRunPanel({language, profile, taskId, strategyId, allowStart}
     const timeout = window.setTimeout(() => { pollCount.current++; void observe("read"); }, 1000);
     return () => window.clearTimeout(timeout);
   }, [active, status, pending, paused, error]);
-  const blocked = !allowStart || status?.availability !== "available" || active || !!pending || error || operation?.outcome === "needs_review";
+  const centralSubmitting = central?.view?.phase === "submitting";
+  const blocked = !allowStart || central?.required && !central.available || status?.availability !== "available" || active || !!pending ||
+    centralSubmitting || error && !central?.retryable || operation?.outcome === "needs_review";
   const finished = ours && operation.phase === "finished" ? operation : null;
   const passedResult = finished?.outcome === "passed" ? finished.result : null;
   const rejectedResult = finished?.outcome === "rejected" ? finished.result : null;
@@ -255,7 +260,8 @@ export function TaskRunPanel({language, profile, taskId, strategyId, allowStart}
       <dl>
         {strategyId && <div><dt>{t.strategy}</dt><dd><code>{strategyId}</code><p className="muted-note">{t.strategyNote}</p></dd></div>}
         <div><dt>{t.model}</dt><dd><code>{requestedModel}</code></dd></div>
-        <div><dt>{t.limitsTitle}</dt><dd><ul>{card.limits.map(limit => <li key={limit}>{limit}</li>)}</ul></dd></div>
+        <div><dt>{t.limitsTitle}</dt><dd><ul>{card.limits.map(limit => <li key={limit}>{central?.required && limit === (language === "tr" ? "20 dakika süre sınırı." : "20 minute time limit.")
+          ? language === "tr" ? "En fazla 20 dakika; merkezi bütçe daha kısa bir süre ayırabilir." : "At most 20 minutes; the central budget may allocate a shorter limit." : limit}</li>)}</ul></dd></div>
       </dl>
       <p className="task-run-quota">{t.quota}</p>
     </div>}
@@ -264,7 +270,7 @@ export function TaskRunPanel({language, profile, taskId, strategyId, allowStart}
       <span>{t.approve}</span>
     </label>}
     <div className="cli-check-actions">
-      {allowStart && <button className="primary-button" disabled={blocked || !approved} onClick={() => void observe("start")}>{t.start}</button>}
+      {allowStart && <button className="primary-button" disabled={blocked || !(approved || central?.retryable)} onClick={() => void observe("start")}>{central?.retryable ? language === "tr" ? "Aynı başlatmayı tekrar dene" : "Retry the same start" : t.start}</button>}
       {ours && active && <button className="secondary-button" disabled={!!pending || operation.phase === "cleaning"} onClick={() => void observe("cancel")}>{t.cancel}</button>}
     </div>
     {status?.availability === "unavailable" && <p role="status">{t.unavailable}</p>}
@@ -272,6 +278,21 @@ export function TaskRunPanel({language, profile, taskId, strategyId, allowStart}
     {pending === "start" && <p role="status">{t.submitting}</p>}
     {pending === "cancel" && <p role="status">{t.cancelPending}</p>}
     {error && <p role="alert">{t.error}</p>}
+    {central?.required && !central.available && <p role="status">{language === "tr" ? "Bu görev için merkezi çalıştırma kullanılamıyor." : "Central execution is unavailable for this task."}</p>}
+    {central?.view?.lease && <dl className="task-run-hashes" data-testid="central-lease-budget">
+      <div><dt>{language === "tr" ? "Merkezi süre sınırı" : "Central time limit"}</dt><dd>{central.view.lease.effectiveLimitSec} s</dd></div>
+      <div><dt>{language === "tr" ? "Ayrılmış süre bütçesi" : "Reserved time budget"}</dt><dd>{Math.ceil(central.view.lease.reservedMs / 1000)} s</dd></div>
+      <div><dt>{language === "tr" ? "Merkezi durum" : "Central state"}</dt><dd><code>{central.view.lease.state}</code></dd></div>
+    </dl>}
+    {central?.view?.error && <p role="alert" data-testid="central-execution-error">{language === "tr"
+      ? central.view.error === "budget_exhausted" ? "Merkezi süre bütçesi yetersiz; görev başlatılmadı."
+        : central.view.error === "capacity_exhausted" ? "Merkezi görev kapasitesi dolu; görev başlatılmadı."
+          : ["lease_or_task_closed", "stale_contract"].includes(central.view.error) ? "Merkezi görev hakkı sona erdi veya sözleşme değişti. Görevi yeniden hazırla."
+            : "Merkezi işlem doğrulanamadı. Aynı işlemi tekrar deneyebilirsin."
+      : central.view.error === "budget_exhausted" ? "The central time budget is exhausted; the task did not start."
+        : central.view.error === "capacity_exhausted" ? "Central task capacity is full; the task did not start."
+          : ["lease_or_task_closed", "stale_contract"].includes(central.view.error) ? "The central lease ended or the contract changed. Prepare the task again."
+            : "The central operation could not be confirmed. You can retry the same operation."}</p>}
     {!ours && active && <p role="status">{t.otherProfile}</p>}
     {!ours && operation?.outcome === "needs_review" && <p role="status">{t.otherReview}</p>}
     {ours && active && <div className="task-run-progress" role="status">
@@ -285,7 +306,9 @@ export function TaskRunPanel({language, profile, taskId, strategyId, allowStart}
       <span>{t.lastTask}: <code>{finished.task_id}</code> · {taskRunPatchPaths[finished.task_id]}</span>
       {finished.strategy_id && <span>{t.strategy}: <code>{finished.strategy_id}</code></span>}
       <strong>{t.outcomes[finished.outcome!]}</strong>
-      {finished.error_code && finished.error_code !== "cancelled" && finished.error_code !== "candidate_rejected" && <p>{t.errors(requestedModel)[finished.error_code]}</p>}
+      {finished.error_code && finished.error_code !== "cancelled" && finished.error_code !== "candidate_rejected" && <p>{finished.error_code === "deadline_exceeded" && finished.lease_context
+        ? language === "tr" ? `Görev ${finished.lease_context.time_limit_sec} saniyelik merkezi süre sınırına ulaştı.` : `The task reached its ${finished.lease_context.time_limit_sec} second central time limit.`
+        : t.errors(requestedModel)[finished.error_code]}</p>}
       {finished.tool_calls > 0 && <span>{t.toolCalls}: {finished.tool_calls} / {taskRunMaxToolCalls}</span>}
       {finished.model.observed && <span>{t.observed}: <code>{finished.model.observed}</code></span>}
       {verified && <p>{t.verifier}: {(verified.verifier.passed ? t.verifierPassed : t.verifierRejected)(verified.verifier.cases,
@@ -299,8 +322,18 @@ export function TaskRunPanel({language, profile, taskId, strategyId, allowStart}
       <DiffView patch={passedResult.patch!} label={t.diff} />
       <div className="cli-check-actions">
         <button className="secondary-button" onClick={() => void copyDiff()}>{t.copy}</button>
+        {central?.required && finished?.lease_context && central.view?.requestId === finished.request_id && !central.view.receipt &&
+          <button className="primary-button" disabled={!central.canSubmit || centralSubmitting} onClick={() => void central.submit(finished)}>
+            {centralSubmitting ? language === "tr" ? "Gönderiliyor…" : "Submitting…" : language === "tr" ? "Gönder" : "Submit"}
+          </button>}
         {copy && <span role="status">{copy === "copied" ? t.copied : t.copyFailed}</span>}
       </div>
+    </div>}
+    {central?.view?.receipt && <div className="cli-check-result" role="status" data-testid="central-submission-receipt">
+      <strong>{language === "tr" ? "Sonuç merkeze teslim edildi" : "Result delivered to the coordinator"}</strong>
+      <span>{language === "tr" ? "Teslim kaydı" : "Submission receipt"}: <code>{central.view.receipt.id}</code></span>
+      <span>{language === "tr" ? "Durum" : "Status"}: <code>{central.view.receipt.status}</code></span>
+      <p>{language === "tr" ? "Merkezi doğrulama ve inceleme devam edebilir; bu kayıt görevin kabul edildiği anlamına gelmez." : "Central verification and review may continue; this receipt does not mean the task was accepted."}</p>
     </div>}
     {paused && active && !error && <p role="status">{t.paused}</p>}
   </section>;

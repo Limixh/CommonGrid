@@ -4,6 +4,7 @@ import {
   acceptTaskRunUpdate, taskRunCatalogPins, taskRunControlledTaskId, taskRunObservedModels, taskRunPatchHeader, taskRunPatchPaths,
   taskRunRequestedModels, taskRunStrategyIds, taskRunTaskIds, taskRunVerifierChecks, unavailableTaskRun, validTaskRunStrategy, validTaskRunPatch, validateTaskRunCancel, validateTaskRunResult,
   validateTaskRunStart, validateTaskRunStatus, type TaskRunOperation, type TaskRunStatus,
+  validateTaskRunResultPackage, validateTaskRunResultPackageRequest, sameTaskRunLeaseContext,
 } from "../src/task-run-protocol.ts";
 import { claudeFunctionalTestModel, claudeFunctionalTestObservedModels, codexFunctionalTestModel } from "../testing/functional-test-models.ts";
 
@@ -18,6 +19,35 @@ const status = (changes: Partial<TaskRunOperation> = {}): TaskRunStatus => ({sch
 const verified = {verifier: {passed: true, cases: 34, json_cases_passed: true, sparse_cases_passed: true}, candidate_sha256: hash, patch_sha256: patchHash, patch};
 const passed = (changes: Partial<TaskRunOperation> = {}) => status({phase: "finished", revision: 9, outcome: "passed", cleanup: "verified", tool_calls: 3,
   model: {requested: "gpt-6-luna", observed: "gpt-6-luna"}, result: verified, ...changes});
+
+test("leased starts pin the task, strategy, base and immutable bounded deadline", () => {
+  const lease = {lease_id: "lease-1", attempt_id: "attempt-1", task_version: 1,
+    contract_hash: taskRunCatalogPins["software-bounds"]!.contract_hash, base_commit: "7a06a3ea1880fec11033104223474b8f297cab6c",
+    strategy_id: "invariant", time_limit_sec: 120, expires_at_ms: 1_800_000_000_000};
+  const start = {schema_version: "1.0", request_id: request, profile_id: profile, task_id: "software-bounds", strategy_id: "invariant", approved: true, lease_context: lease};
+  assert.deepEqual(validateTaskRunStart(start), start);
+  for (const changes of [{lease_id: "../lease"}, {attempt_id: ""}, {task_version: 2}, {contract_hash: hash}, {base_commit: "0".repeat(40)},
+    {strategy_id: "boundary-first"}, {time_limit_sec: 0}, {time_limit_sec: 1201}, {expires_at_ms: 0}, {expires_at_ms: 1.2}, {token: "secret"}])
+    assert.throws(() => validateTaskRunStart({...start, lease_context: {...lease, ...changes}}), /contract_invalid/);
+  for (const lease_context of [null, undefined, []]) assert.throws(() => validateTaskRunStart({...start, lease_context}), /contract_invalid/);
+  assert.throws(() => validateTaskRunStart({...start, task_id: "controlled-sum-integers-v1", strategy_id: null}), /contract_invalid/);
+  const before = status({task_id: "software-bounds", strategy_id: "invariant", lease_context: lease});
+  const reordered = Object.fromEntries(Object.entries(lease).reverse()) as typeof lease;
+  assert.ok(sameTaskRunLeaseContext(lease, reordered));
+  assert.ok(acceptTaskRunUpdate(before, status({task_id: "software-bounds", strategy_id: "invariant", lease_context: reordered, phase: "preparing", revision: 1})));
+  for (const changes of [{lease_id: "lease-2"}, {attempt_id: "attempt-2"}, {time_limit_sec: 121}, {expires_at_ms: lease.expires_at_ms + 1}])
+    assert.throws(() => acceptTaskRunUpdate(before, status({task_id: "software-bounds", strategy_id: "invariant", lease_context: {...lease, ...changes}, phase: "preparing", revision: 1})), /stale/);
+});
+
+test("result package transport is identity scoped, bounded and canonical", () => {
+  const value = {schema_version: "1.0", request_id: request, lease_id: "lease-1", sha256: hash, size_bytes: 1, bytes_base64: "YQ=="};
+  assert.deepEqual(validateTaskRunResultPackage(value), value);
+  for (const changes of [{request_id: "x"}, {lease_id: "../x"}, {sha256: "X".repeat(64)}, {size_bytes: 0}, {size_bytes: 16385},
+    {bytes_base64: "YR=="}, {bytes_base64: "YQ"}, {bytes_base64: "YQ==\n"}, {size_bytes: 3}, {private: "secret"}])
+    assert.throws(() => validateTaskRunResultPackage({...value, ...changes}), /contract_invalid/);
+  assert.ok(validateTaskRunResultPackageRequest({schema_version: "1.0", request_id: request, expected_revision: 9}));
+  assert.throws(() => validateTaskRunResultPackageRequest({schema_version: "1.0", request_id: request, expected_revision: -1}), /contract_invalid/);
+});
 
 test("browser-safe model pins match the functional-test model policy", () => {
   assert.equal(taskRunRequestedModels.codex, codexFunctionalTestModel);

@@ -203,7 +203,7 @@ func (s *Store) mutateLease(ctx context.Context, userID, id, operation string) (
 	if _, err = lockScopes(ctx, tx, project, node); err != nil {
 		return Lease{}, err
 	}
-	_, _, taskStatus, _, err := lockTaskUser(ctx, tx, taskID, userID)
+	task, _, taskStatus, _, err := lockTaskUser(ctx, tx, taskID, userID)
 	if err != nil {
 		return Lease{}, err
 	}
@@ -217,7 +217,7 @@ func (s *Store) mutateLease(ctx context.Context, userID, id, operation string) (
 	}
 	ended := lease.State == "completed" || lease.State == "released" || lease.State == "expired"
 	if ended {
-		if operation == "start" || operation == "stop" {
+		if operation == "start" || operation == "stop" || operation == "heartbeat" {
 			return Lease{}, ErrClosed
 		}
 		return lease, tx.Commit(ctx)
@@ -225,7 +225,13 @@ func (s *Store) mutateLease(ctx context.Context, userID, id, operation string) (
 	var kind string
 	switch operation {
 	case "start":
+		if task.TaskVersion != lease.TaskVersion || task.ContractHash != lease.ContractHash {
+			return Lease{}, ErrStale
+		}
 		if taskStatus != "open" && taskStatus != "resumable" {
+			return Lease{}, ErrClosed
+		}
+		if !now.Before(lease.ExpiresAt) {
 			return Lease{}, ErrClosed
 		}
 		if lease.State == "active" {
@@ -237,6 +243,19 @@ func (s *Store) mutateLease(ctx context.Context, userID, id, operation string) (
 		lease.State = "active"
 		lease.StartedAt = &now
 		kind = "lease.started"
+	case "heartbeat":
+		if task.TaskVersion != lease.TaskVersion || task.ContractHash != lease.ContractHash {
+			return Lease{}, ErrStale
+		}
+		if taskStatus != "open" && taskStatus != "resumable" {
+			return Lease{}, ErrClosed
+		}
+		if (lease.State != "active" && lease.State != "stop_requested") || !now.Before(lease.ExpiresAt) {
+			return Lease{}, ErrClosed
+		}
+		// Heartbeats acknowledge ownership and current state. They never extend
+		// the reservation or trust a client clock, reported usage or pass flag.
+		return lease, tx.Commit(ctx)
 	case "stop":
 		if lease.State == "stop_requested" {
 			return lease, tx.Commit(ctx)
@@ -271,6 +290,9 @@ func (s *Store) mutateLease(ctx context.Context, userID, id, operation string) (
 
 func (s *Store) Start(ctx context.Context, userID, id string) (Lease, error) {
 	return s.mutateLease(ctx, userID, id, "start")
+}
+func (s *Store) Heartbeat(ctx context.Context, userID, id string) (Lease, error) {
+	return s.mutateLease(ctx, userID, id, "heartbeat")
 }
 func (s *Store) RequestStop(ctx context.Context, userID, id string) (Lease, error) {
 	return s.mutateLease(ctx, userID, id, "stop")

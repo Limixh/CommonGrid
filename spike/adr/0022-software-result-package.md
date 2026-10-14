@@ -1,6 +1,6 @@
 # ADR 0022: Yazılım görevi sonuç paketi (yalnız yerel inşa)
 
-Durum: Uygulanıyor — yalnız paket oluşturucu ve teslim edilebilirlik kapısı; gönderim, IPC ve arayüz yok.
+Durum: Yerel paket adımı tamamlandı. Aşağıdaki ilk kapsam korunur; lease, IPC ve gönderim devamı [ADR 0023](0023-leased-software-submission.md) ile uygulanmıştır.
 
 ## Karar
 

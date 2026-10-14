@@ -21,8 +21,8 @@ import (
 	"github.com/cyberphone/json-canonicalization/go/src/webpki.org/jsoncanonicalizer"
 )
 
-// Repository deliberately excludes reserve/start, verifier verdicts and grants.
-// Authenticated HTTP can manage existing metadata but cannot launch execution.
+// Repository excludes execution mutations, verifier verdicts and grants.
+// Execution mutations require the separate, explicitly pinned capability.
 type Repository interface {
 	ListProjects(context.Context, int, string) ([]store.ProjectSummary, error)
 	ListTasks(context.Context, string, int, string) ([]store.TaskRecord, error)
@@ -43,10 +43,11 @@ type Repository interface {
 }
 
 type Config struct {
-	PublicURL   string
-	UIOrigin    string
-	Development bool
-	Artifacts   *ArtifactService
+	PublicURL          string
+	UIOrigin           string
+	Development        bool
+	Artifacts          *ArtifactService
+	ExecutionContracts []string
 }
 
 type sessionManager interface {
@@ -60,6 +61,7 @@ type liveAPI struct {
 	auth      sessionManager
 	validator *contract.Validator
 	artifacts *ArtifactService
+	execution map[string]contract.TaskContract
 }
 
 var apiID = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,95}$`)
@@ -116,7 +118,11 @@ func newAuthenticated(repo Repository, manager sessionManager, options Config) (
 	if options.Artifacts != nil && options.Artifacts.DevelopmentOnly && !options.Development {
 		return nil, store.ErrInvalid
 	}
-	a := &liveAPI{repo: repo, auth: manager, validator: validator, artifacts: options.Artifacts}
+	execution, err := configuredExecution(repo, options)
+	if err != nil {
+		return nil, err
+	}
+	a := &liveAPI{repo: repo, auth: manager, validator: validator, artifacts: options.Artifacts, execution: execution}
 	mux := http.NewServeMux()
 	manager.Mount(mux)
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
@@ -260,15 +266,19 @@ func (a *liveAPI) mount(mux *http.ServeMux) {
 		}
 		items := make([]contract.TaskContract, 0, len(records))
 		statuses := map[string]string{}
+		capabilities := map[string]ExecutionCapability{}
 		for _, record := range records {
 			items = append(items, record.Contract)
 			statuses[record.Contract.Id] = record.Status
+			if capability, ok := a.executionCapability(record); ok {
+				capabilities[record.Contract.Id] = capability
+			}
 		}
 		next := ""
 		if len(records) == limit {
 			next = records[len(records)-1].Contract.Id
 		}
-		write(w, 200, map[string]any{"source": "database", "execution_enabled": false, "items": items, "statuses": statuses, "next_cursor": next})
+		write(w, 200, map[string]any{"source": "database", "execution_enabled": false, "execution_capabilities": capabilities, "items": items, "statuses": statuses, "next_cursor": next})
 	}))
 	mux.HandleFunc("GET /api/v1/tasks/{id}", a.secured(func(w http.ResponseWriter, r *http.Request, _ string) {
 		if _, err := query(r); err != nil {
@@ -280,13 +290,13 @@ func (a *liveAPI) mount(mux *http.ServeMux) {
 			apiError(w, err)
 			return
 		}
-		write(w, 200, map[string]any{"source": "database", "execution_enabled": false, "item": record.Contract, "statuses": map[string]string{record.Contract.Id: record.Status}})
+		capabilities := map[string]ExecutionCapability{}
+		if capability, ok := a.executionCapability(record); ok {
+			capabilities[record.Contract.Id] = capability
+		}
+		write(w, 200, map[string]any{"source": "database", "execution_enabled": false, "execution_capabilities": capabilities, "item": record.Contract, "statuses": map[string]string{record.Contract.Id: record.Status}})
 	}))
-	for _, route := range []string{"POST /api/v1/tasks/{id}/leases", "POST /api/v1/leases/{id}/start"} {
-		mux.HandleFunc(route, a.secured(func(w http.ResponseWriter, r *http.Request, _ string) {
-			write(w, 409, map[string]any{"code": "isolation_gate_pending", "execution_enabled": false})
-		}))
-	}
+	a.mountExecution(mux)
 	mux.HandleFunc("GET /api/v1/me/leases", a.secured(func(w http.ResponseWriter, r *http.Request, user string) {
 		_, limit, after, err := page(r)
 		if err != nil {

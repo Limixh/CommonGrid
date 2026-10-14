@@ -8,7 +8,9 @@ use crate::{
     profile_session::ProfileSession,
     profile_store::{self, Provider},
 };
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::{
     collections::HashSet,
     fs,
@@ -19,7 +21,7 @@ use std::{
         mpsc, Arc, Mutex, OnceLock, Weak,
     },
     thread,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tauri::{
     ipc::{InvokeBody, Request},
@@ -38,6 +40,86 @@ const MAX_PATCH_BYTES: usize = 49_152;
 const MAX_STATUS_BYTES: usize = 65_536;
 const MAX_FRAME_BYTES: usize = 65_536;
 const MAX_FRAMES: usize = 64;
+const MAX_PACKAGE_BYTES: usize = 16_384;
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct LeaseContext {
+    lease_id: String,
+    attempt_id: String,
+    task_version: u64,
+    contract_hash: String,
+    base_commit: String,
+    strategy_id: String,
+    time_limit_sec: u64,
+    expires_at_ms: u64,
+}
+fn server_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 96
+        && value.as_bytes()[0].is_ascii_alphanumeric()
+        && value
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || c == b'_' || c == b'-')
+}
+impl LeaseContext {
+    fn valid(&self, task: &str, strategy: Option<&str>) -> bool {
+        let pin = match task {
+            SOFTWARE_TASK => (
+                "4823a3908e60b9bdeebf737c4f1d8c71a53c86981f5a4c6845877ba815f1216d",
+                "7a06a3ea1880fec11033104223474b8f297cab6c",
+            ),
+            INTERVALS_TASK => (
+                "5f1f13e5b3623bbd61f9479ec4944e99c71efd2cb49a608a6b4ba4c881adb6f2",
+                "dcf0d103b825d9e2cdc41f5a0efa6811e694a069",
+            ),
+            _ => return false,
+        };
+        server_id(&self.lease_id)
+            && server_id(&self.attempt_id)
+            && self.task_version == 1
+            && self.contract_hash == pin.0
+            && self.base_commit == pin.1
+            && Some(self.strategy_id.as_str()) == strategy
+            && strategy_id(task, strategy).is_some()
+            && (1..=1200).contains(&self.time_limit_sec)
+            && (1..=9_007_199_254_740_991).contains(&self.expires_at_ms)
+    }
+    fn remaining(&self) -> Option<Duration> {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .ok()?
+            .as_millis() as u64;
+        Some(
+            Duration::from_millis(self.expires_at_ms.checked_sub(now)?)
+                .min(Duration::from_secs(self.time_limit_sec)),
+        )
+    }
+}
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct Artifact {
+    lease_id: String,
+    sha256: String,
+    size_bytes: usize,
+    bytes_base64: String,
+}
+impl Artifact {
+    fn valid(&self, lease: &LeaseContext) -> bool {
+        if self.lease_id != lease.lease_id
+            || !hash(&self.sha256)
+            || !(1..=MAX_PACKAGE_BYTES).contains(&self.size_bytes)
+            || self.bytes_base64.len() != ((self.size_bytes + 2) / 3) * 4
+        {
+            return false;
+        }
+        let Ok(bytes) = STANDARD.decode(&self.bytes_base64) else {
+            return false;
+        };
+        bytes.len() == self.size_bytes
+            && STANDARD.encode(&bytes) == self.bytes_base64
+            && format!("{:x}", Sha256::digest(&bytes)) == self.sha256
+    }
+}
 #[derive(Clone, Copy)]
 struct Limits {
     deadline: Duration,
@@ -230,6 +312,8 @@ pub(crate) struct Operation {
     task_id: &'static str,
     // Fixed for the lifetime of the request.
     strategy_id: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    lease_context: Option<LeaseContext>,
     revision: u32,
     phase: Phase,
     outcome: Option<Outcome>,
@@ -272,6 +356,13 @@ fn code(value: &str) -> bool {
 // Rust mirror of the browser contract's validateTaskRunStatus for one
 // operation: every state this module publishes must satisfy it.
 fn valid_operation(op: &Operation) -> bool {
+    if op
+        .lease_context
+        .as_ref()
+        .is_some_and(|lease| !lease.valid(op.task_id, op.strategy_id))
+    {
+        return false;
+    }
     if !uuid(&op.request_id)
         || !uuid(&op.profile_id)
         || strategy_id(op.task_id, op.strategy_id) != Some(op.strategy_id)
@@ -359,6 +450,7 @@ impl End {
     }
 }
 struct Inner {
+    artifact: Option<Artifact>,
     status: Status,
     // Worker protocol state advances even when cancellation freezes the
     // public projection. Buffered observations still need normal validation.
@@ -379,6 +471,7 @@ impl Default for TaskRun {
             start_jobs: AtomicUsize::new(0),
             sessions: OnceLock::new(),
             inner: Mutex::new(Inner {
+                artifact: None,
                 status: Status {
                     schema_version: "1.0",
                     availability: "available",
@@ -406,6 +499,7 @@ pub(crate) fn link(runs: &Arc<TaskRun>, sessions: &Arc<ProfileSession>) {
     sessions.link_task_run(Arc::downgrade(runs));
 }
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(Clone, Serialize))]
 #[serde(deny_unknown_fields)]
 struct Start {
     schema_version: String,
@@ -416,6 +510,8 @@ struct Start {
     #[serde(deserialize_with = "nullable")]
     strategy_id: Option<String>,
     approved: bool,
+    #[serde(default, deserialize_with = "present")]
+    lease_context: Option<LeaseContext>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -449,7 +545,14 @@ enum Frame {
         cleanup: Cleanup,
         #[serde(deserialize_with = "nullable")]
         result: Option<TaskResult>,
+        #[serde(default, deserialize_with = "present")]
+        artifact: Option<Artifact>,
     },
+}
+fn present<'de, T: Deserialize<'de>, D: serde::Deserializer<'de>>(
+    input: D,
+) -> Result<Option<T>, D::Error> {
+    T::deserialize(input).map(Some)
 }
 fn nullable<'de, T: Deserialize<'de>, D: serde::Deserializer<'de>>(
     input: D,
@@ -466,6 +569,31 @@ fn progress(current: Phase, next: Phase) -> bool {
     ) || (next == Phase::Cleaning && !matches!(current, Phase::Cleaning | Phase::Finished))
 }
 impl TaskRun {
+    fn package(&self, request: Cancel) -> Result<serde_json::Value, &'static str> {
+        if request.schema_version != "1.0" || !uuid(&request.request_id) {
+            return Err(DENIED);
+        }
+        let inner = self.inner.lock().map_err(|_| DENIED)?;
+        let operation = inner.status.operation.as_ref().ok_or(DENIED)?;
+        if operation.request_id != request.request_id
+            || operation.revision != request.expected_revision
+            || operation.phase != Phase::Finished
+            || operation.outcome != Some(Outcome::Passed)
+            || operation.cleanup != Cleanup::Verified
+        {
+            return Err(DENIED);
+        }
+        let lease = operation.lease_context.as_ref().ok_or(DENIED)?;
+        let artifact = inner
+            .artifact
+            .as_ref()
+            .filter(|artifact| artifact.valid(lease))
+            .ok_or(DENIED)?;
+        Ok(
+            serde_json::json!({"schema_version":"1.0", "request_id": operation.request_id, "lease_id": artifact.lease_id,
+            "sha256":artifact.sha256, "size_bytes":artifact.size_bytes, "bytes_base64":artifact.bytes_base64}),
+        )
+    }
     fn start_slot(self: &Arc<Self>) -> Option<StartSlot> {
         let mut count = self.start_jobs.load(Ordering::Acquire);
         loop {
@@ -517,6 +645,13 @@ impl TaskRun {
         }
         let task = task_id(&request.task_id).ok_or(DENIED)?;
         let strategy = strategy_id(task, request.strategy_id.as_deref()).ok_or(DENIED)?;
+        if request
+            .lease_context
+            .as_ref()
+            .is_some_and(|lease| !lease.valid(task, strategy))
+        {
+            return Err(DENIED);
+        }
         let provider =
             profile_store::selected_provider(&store.join("managed-profiles"), &request.profile_id)
                 .map_err(|_| DENIED)?;
@@ -530,6 +665,7 @@ impl TaskRun {
                     && operation.provider == provider
                     && operation.task_id == task
                     && operation.strategy_id == strategy
+                    && operation.lease_context == request.lease_context
                 {
                     Ok(inner.status.clone())
                 } else {
@@ -544,6 +680,16 @@ impl TaskRun {
         if inner.requests.contains(&request.request_id) || inner.requests.len() >= 1024 {
             return Err(DENIED);
         }
+        let limits = if let Some(lease) = &request.lease_context {
+            Limits {
+                deadline: limits
+                    .deadline
+                    .min(lease.remaining().filter(|d| !d.is_zero()).ok_or(DENIED)?),
+                grace: limits.grace,
+            }
+        } else {
+            limits
+        };
         // Checked while holding this lock; the peer checks the same way.
         if self
             .sessions
@@ -559,6 +705,7 @@ impl TaskRun {
             provider,
             task_id: task,
             strategy_id: strategy,
+            lease_context: request.lease_context,
             revision: 0,
             phase: Phase::Starting,
             outcome: None,
@@ -576,6 +723,7 @@ impl TaskRun {
         inner.cancel = Some(tx);
         inner.cancel_requested = false;
         inner.worker_observation = Some(operation.clone());
+        inner.artifact = None;
         inner.status.operation = Some(operation.clone());
         let answer = inner.status.clone();
         drop(inner);
@@ -663,6 +811,11 @@ impl TaskRun {
                         Self::terminal(&mut next, End::review("worker_failed"));
                     }
                     *operation = next;
+                    if operation.outcome != Some(Outcome::Passed)
+                        || operation.cleanup != Cleanup::Verified
+                    {
+                        inner.artifact = None;
+                    }
                     inner.cancel = None;
                 }
             }
@@ -743,7 +896,25 @@ impl TaskRun {
                 error_code,
                 cleanup,
                 result: payload,
+                artifact,
             } if observation.phase == Phase::Cleaning => {
+                if let Some(package) = &artifact {
+                    if outcome != Outcome::Passed
+                        || cleanup != Cleanup::Verified
+                        || !observation
+                            .lease_context
+                            .as_ref()
+                            .is_some_and(|lease| package.valid(lease))
+                    {
+                        return false;
+                    }
+                }
+                if outcome == Outcome::Passed
+                    && observation.lease_context.is_some()
+                    && artifact.is_none()
+                {
+                    return false;
+                }
                 let end = End {
                     outcome,
                     error: error_code,
@@ -763,6 +934,7 @@ impl TaskRun {
                     return false;
                 }
                 *result = Some(end);
+                inner.artifact = artifact;
                 true
             }
             _ => false,
@@ -819,7 +991,10 @@ impl TaskRun {
                 }
             };
         let mut input = worker.child.stdin.take().unwrap();
-        let boot = serde_json::json!({"type":"task_run_boot", "schema_version":"1.0", "request_id":operation.request_id, "profile_id":operation.profile_id, "provider":operation.provider, "task_id":operation.task_id, "strategy_id":operation.strategy_id, "journal_root":journal, "assets_root":assets, "profile_registry_root":registry});
+        let mut boot = serde_json::json!({"type":"task_run_boot", "schema_version":"1.0", "request_id":operation.request_id, "profile_id":operation.profile_id, "provider":operation.provider, "task_id":operation.task_id, "strategy_id":operation.strategy_id, "journal_root":journal, "assets_root":assets, "profile_registry_root":registry});
+        if let Some(lease) = &operation.lease_context {
+            boot["lease_context"] = serde_json::to_value(lease).unwrap();
+        }
         if writeln!(input, "{}", boot).is_err() {
             worker.terminate();
             self.finish(id, End::review("worker_failed"));
@@ -954,6 +1129,7 @@ enum Shape {
     Start,
     Status,
     Cancel,
+    Package,
 }
 fn exact_object<'a>(
     value: &'a serde_json::Value,
@@ -979,10 +1155,14 @@ fn preflight(value: &serde_json::Value, shape: Shape) -> bool {
             "strategy_id",
             "approved",
         ],
-        Shape::Cancel => &["schema_version", "request_id", "expected_revision"],
+        Shape::Cancel | Shape::Package => &["schema_version", "request_id", "expected_revision"],
         Shape::Status => return false,
     };
-    let Some(request) = exact_object(&wrapper["request"], fields) else {
+    let mut allowed_fields = fields.to_vec();
+    if matches!(shape, Shape::Start) && wrapper["request"].get("lease_context").is_some() {
+        allowed_fields.push("lease_context");
+    }
+    let Some(request) = exact_object(&wrapper["request"], &allowed_fields) else {
         return false;
     };
     request["schema_version"].as_str() == Some("1.0")
@@ -1001,8 +1181,35 @@ fn preflight(value: &serde_json::Value, shape: Shape) -> bool {
                             _ => false,
                         })
                     && request["approved"].as_bool() == Some(true)
+                    && request.get("lease_context").is_none_or(|value| {
+                        if !exact_object(
+                            value,
+                            &[
+                                "lease_id",
+                                "attempt_id",
+                                "task_version",
+                                "contract_hash",
+                                "base_commit",
+                                "strategy_id",
+                                "time_limit_sec",
+                                "expires_at_ms",
+                            ],
+                        )
+                        .is_some()
+                        {
+                            return false;
+                        }
+                        serde_json::from_value::<LeaseContext>(value.clone())
+                            .ok()
+                            .is_some_and(|lease| {
+                                lease.valid(
+                                    request["task_id"].as_str().unwrap_or(""),
+                                    request["strategy_id"].as_str(),
+                                )
+                            })
+                    })
             }
-            Shape::Cancel => request["expected_revision"]
+            Shape::Cancel | Shape::Package => request["expected_revision"]
                 .as_u64()
                 .is_some_and(|revision| revision <= u64::from(MAX_REVISION)),
             Shape::Status => false,
@@ -1063,6 +1270,15 @@ pub(crate) async fn local_task_run_cancel<R: Runtime>(
 ) -> Result<Status, &'static str> {
     let value: Wrapper<Cancel> = decode(&webview, request, Shape::Cancel)?;
     runs.cancel(value.request)
+}
+#[tauri::command]
+pub(crate) async fn local_task_run_result_package<R: Runtime>(
+    webview: Webview<R>,
+    request: Request<'_>,
+    runs: State<'_, Arc<TaskRun>>,
+) -> Result<serde_json::Value, &'static str> {
+    let value: Wrapper<Cancel> = decode(&webview, request, Shape::Package)?;
+    runs.package(value.request)
 }
 
 #[cfg(test)]

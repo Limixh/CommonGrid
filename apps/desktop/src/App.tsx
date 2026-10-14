@@ -11,6 +11,8 @@ import { useTaskCatalog } from "./useTaskCatalog";
 import { WorkspacePage } from "./WorkspacePage";
 import { ManagedProfilesPanel } from "./ManagedProfilesPanel";
 import { controlledExecutionSelection, type ExecutionSelection } from "./execution-selection";
+import type { ExecutionCapability } from "./central-execution-client";
+import { useCentralTask } from "./useCentralTask";
 
 export function App() {
   const account = useAccount();
@@ -18,8 +20,9 @@ export function App() {
   const [page, setPage] = useState<Page>("workspace");
   // Ownership stays in App; account identities never reach task UI or native IPC.
   // Undefined denotes a public fixture/local selection, null an invalid private one.
-  const [storedExecutionSelection, setStoredExecutionSelection] = useState<{selection: ExecutionSelection; accountOwner?: string | null}>({selection: controlledExecutionSelection});
+  const [storedExecutionSelection, setStoredExecutionSelection] = useState<{selection: ExecutionSelection; accountOwner?: string | null; capability?: ExecutionCapability | null}>({selection: controlledExecutionSelection});
   const catalog = useTaskCatalog(account, settings.language);
+  const centralTask = useCentralTask(account, settings.taskMinutes * 60);
   const accountOwner = account.state.status === "authenticated"
     ? JSON.stringify([account.state.session.user.provider, account.state.session.user.id]) : null;
   const privateSelectionInvalid = storedExecutionSelection.accountOwner !== undefined &&
@@ -34,12 +37,15 @@ export function App() {
   }, [privateSelectionInvalid, accountOwner, catalog.status]);
   function prepareExecution(selection: ExecutionSelection) {
     setStoredExecutionSelection(selection.kind === "catalog" && catalog.source === "database"
-      ? {selection, accountOwner} : {selection});
+      ? {selection, accountOwner, capability: catalog.executionCapabilities.get(selection.task.id) ?? null} : {selection});
     setPage("agents");
   }
   const { doctor, loadDoctor } = useEnvironmentReadiness();
   const { projects, tasks, status, source, project, setProject } = catalog;
   const t = words[settings.language];
+  const centralRequired = !privateSelectionInvalid && storedExecutionSelection.accountOwner !== undefined && executionSelection.kind === "catalog";
+  const central = centralTask.control(centralRequired && executionSelection.kind === "catalog" ? executionSelection : null,
+    centralRequired ? storedExecutionSelection.capability ?? null : null, centralRequired);
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -130,7 +136,7 @@ export function App() {
         {page === "workspace" ? (
           <WorkspacePage catalog={catalog} settings={settings} t={t} setPage={setPage} onPrepareExecution={prepareExecution} />
         ) : page === "agents" ? (
-          <EnvironmentPage language={settings.language} doctor={doctor} loadDoctor={loadDoctor} managedProfiles={<ManagedProfilesPanel language={settings.language} selection={executionSelection} onSelectControlled={() => setStoredExecutionSelection({selection: controlledExecutionSelection})} />} />
+          <EnvironmentPage language={settings.language} doctor={doctor} loadDoctor={loadDoctor} managedProfiles={<ManagedProfilesPanel language={settings.language} selection={executionSelection} central={central} onSelectControlled={() => setStoredExecutionSelection({selection: controlledExecutionSelection})} />} />
         ) : page === "account" || page === "contributions" ? (
           <AccountPanel account={account} language={settings.language} contributions={page === "contributions"} resumeTarget={status === "ready" && catalog.task ? { task: catalog.task, strategyId: catalog.strategy } : null} />
         ) : (

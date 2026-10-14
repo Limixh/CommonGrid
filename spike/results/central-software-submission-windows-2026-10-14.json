@@ -1,0 +1,85 @@
+{
+  "schema_version": "1.0",
+  "checked_at": "2026-10-14T10:32:07.514Z",
+  "platform": "win32",
+  "base_commit": "6c1411b34ac3b53959607e5ecbaee9473475fa19",
+  "scope": "authenticated loopback development: software-bounds and software-intervals lease, native package export and explicit submission",
+  "source_sha256": {
+    "apps/desktop/native-worker/task-run.ts": "36f1f339071f5837562ae636b74954ddf50fb4739cd6e0f513862e2640561faa",
+    "apps/desktop/src-tauri/src/task_run.rs": "8726f7ee9d9e16513fd0b64c140b3dcf11164c8777c968be3d650d29650c2c57",
+    "apps/desktop/src-tauri/permissions/local-task-run.toml": "e7051710fcdc419c2b0dfb8a2187e445d4cf6a29c761cd6c3729f1ab96703100",
+    "apps/desktop/src/useCentralTask.ts": "e5059f10c818a2318d1b01cc29788809459dad6af8111bd489f920cb57147884",
+    "apps/desktop/src/central-execution-client.ts": "e1bb9397655c178476fb7dea2baaa01c714ac68c5c0eb270d6b0bcf62a531f36",
+    "apps/desktop/src/task-run-client.ts": "031e8c393d3266d08e46b7a224069886b4a163290f3fe0f7b5a067c16aa45bac",
+    "packages/agent-adapters/src/task-run-protocol.ts": "ff989e0e8eafce2eac149dcb395d0791671bac617ec4c8331f6e82e56a2f18c7",
+    "services/coordinator/internal/httpapi/execution.go": "cece1be13f512ebd0d59d4e6aa00d00f831042b69bdfc9de5fdd45fe18e3a7ad",
+    "services/coordinator/internal/store/leases.go": "a7291dcc96947926e3259c61ebf56e3e5e07fc300708fb560b6bace3b6d499ee",
+    "services/coordinator/internal/store/expiry.go": "a8e22ed042eb539375a1373df02832853a736d0a03e036f4b6977204f8390b2d",
+    "services/coordinator/cmd/coordinator/main.go": "1b5e52a25c097c1cc79b00927e108204ef397bbae014361b141da93ef69c775d"
+  },
+  "checks": {
+    "npm_check": "passed",
+    "final_build": "passed",
+    "worker_and_protocol_fixtures": {
+      "passed": 62,
+      "failed": 0
+    },
+    "rust_task_supervisor_and_ipc": {
+      "passed": 35,
+      "failed": 0,
+      "runtime": "Tauri mock runtime; no WebView2 claim"
+    },
+    "browser_fixtures": {
+      "related_tests_passed": 93,
+      "final_central_tests_repeated": 14,
+      "additional_scanner_503_retry_passed": 1,
+      "native_ipc": "fixture",
+      "api": "fixture"
+    },
+    "postgres": {
+      "server_version": "postgres (PostgreSQL) 18.6",
+      "passed": 121,
+      "skipped": 0,
+      "failed": 0,
+      "independent_artifact_scanner": "required_pinned_trivy",
+      "scanner_binary_sha256": "3b4fcf6fec53c4c73c325cfd518c7264100695b19e6c59c6a777e4a67dc9f0e6",
+      "report_sha256": "0a8a7aeff04493d48f2e4e2c87c6db92d1387338e1e6748be2ee84334cbfb0ad",
+      "critical_cases": [
+        "TestPostgresPinnedExecutionHTTPLeaseAndUploadedReceipt",
+        "TestPostgresHeartbeatCannotRenewExpiryOrChangeAccounting",
+        "TestPostgresExecutionExpiryReleasesOrphanWithoutResurrectingReplay"
+      ],
+      "cleanup": "verified",
+      "upload_and_submission": "real HTTP handlers, PostgreSQL, pinned Trivy and private vault; OAuth identity is fixture"
+    },
+    "initial_loaded_database_run": {
+      "success": false,
+      "failed_case": "TestPostgresPinnedExecutionHTTPLeaseAndUploadedReceipt",
+      "response_status": 503,
+      "error_code": "artifact_scanner_unavailable",
+      "concurrent_browser_and_build_checks": true,
+      "internal_scanner_cause": "not_observed",
+      "subsequent_run_without_other_heavy_checks": "121 passed; unchanged scanner/upload deadlines, no automatic test retry or fixture fallback"
+    }
+  },
+  "behavior": [
+    "Only exact compiled pinned contracts advertise execution capability",
+    "Same reservation/run/upload/submission identities survive lost responses within the application session",
+    "Native execution deadline and longer delivery lease are distinct",
+    "Verified package remains private until explicit Submit",
+    "Submission receipt stays submitted without trusted software resolver",
+    "Expired orphan reservations release budgets and capacity"
+  ],
+  "limitations": {
+    "packaged_custom_origin_auth_and_api_transport": "not_implemented",
+    "trusted_central_software_resolver": "not_implemented",
+    "transaction_recovery_after_full_application_restart": "not_implemented",
+    "combined_native_webview_to_database_e2e": "not_run; component evidence is separate",
+    "general_task_acceptance": "not_evaluated"
+  },
+  "real_account_tested": false,
+  "real_model_inference": false,
+  "paid_api_fallback": false,
+  "hosted_ci": "disabled_manually; not run",
+  "success": true
+}

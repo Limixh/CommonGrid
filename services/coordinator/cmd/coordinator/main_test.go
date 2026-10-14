@@ -65,3 +65,25 @@ func TestArtifactsRequireExplicitDevelopmentConfiguration(t *testing.T) {
 		}
 	}
 }
+
+func TestExecutionRequiresExplicitExactContractOptIn(t *testing.T) {
+	for _, raw := range []string{"true", "*", "software-bounds,", "software-bounds,software-bounds", " software-bounds", "software-bounds,unknown"} {
+		t.Setenv("CG_EXECUTION_CONTRACTS", raw)
+		if _, err := configuredExecutionContracts(true); err == nil {
+			t.Fatal("unsafe opt-in accepted", raw)
+		}
+	}
+	t.Setenv("CG_EXECUTION_CONTRACTS", "software-bounds,software-intervals")
+	if _, err := configuredExecutionContracts(false); err == nil {
+		t.Fatal("production execution enabled")
+	}
+	contracts, err := configuredExecutionContracts(true)
+	if err != nil || len(contracts) != 2 {
+		t.Fatal(contracts, err)
+	}
+	t.Setenv("CG_EXECUTION_CONTRACTS", "")
+	contracts, err = configuredExecutionContracts(false)
+	if err != nil || len(contracts) != 0 {
+		t.Fatal("default execution enabled")
+	}
+}

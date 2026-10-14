@@ -61,7 +61,15 @@ export const taskRunVerifierChecks: Readonly<Record<TaskRunTaskId, readonly [str
 });
 export interface TaskRunResult { verifier: TaskRunVerifier; candidate_sha256: string; patch_sha256: string | null; patch: string | null }
 export interface TaskRunModel { requested: string; observed: string | null }
-export interface TaskRunStartRequest { schema_version: "1.0"; request_id: string; profile_id: string; task_id: TaskRunTaskId; strategy_id: string | null; approved: true }
+export interface TaskRunLeaseContext {
+  lease_id: string; attempt_id: string; task_version: number; contract_hash: string; base_commit: string;
+  strategy_id: string; time_limit_sec: number; expires_at_ms: number;
+}
+export interface TaskRunStartRequest { schema_version: "1.0"; request_id: string; profile_id: string; task_id: TaskRunTaskId; strategy_id: string | null; approved: true; lease_context?: TaskRunLeaseContext }
+export const taskRunMaxPackageBytes = 16_384;
+export interface TaskRunResultPackageRequest { schema_version: "1.0"; request_id: string; expected_revision: number }
+export interface TaskRunResultPackage { schema_version: "1.0"; request_id: string; lease_id: string; sha256: string; size_bytes: number; bytes_base64: string }
+export type TaskRunArtifact = Pick<TaskRunResultPackage, "lease_id" | "sha256" | "size_bytes" | "bytes_base64">;
 export interface TaskRunCancelRequest { schema_version: "1.0"; request_id: string; expected_revision: number }
 export interface TaskRunOperation {
   request_id: string;
@@ -77,6 +85,7 @@ export interface TaskRunOperation {
   tool_calls: number;
   model: TaskRunModel;
   result: null | TaskRunResult;
+  lease_context?: TaskRunLeaseContext;
 }
 export interface TaskRunStatus { schema_version: "1.0"; availability: "available" | "unavailable"; operation: TaskRunOperation | null }
 
@@ -85,12 +94,13 @@ export interface TaskRunStatus { schema_version: "1.0"; availability: "available
 export interface TaskRunBoot {
   type: "task_run_boot"; schema_version: "1.0"; request_id: string; profile_id: string; provider: TaskRunProvider; task_id: TaskRunTaskId; strategy_id: string | null;
   journal_root: string; assets_root: string; profile_registry_root: string;
+  lease_context?: TaskRunLeaseContext;
 }
 export type TaskRunFrame =
   {type: "progress"; phase: "preparing" | "running" | "verifying" | "cleaning"} |
   {type: "activity"; tool_calls: number} |
   {type: "model"; observed: string} |
-  {type: "result"; outcome: TaskRunOutcome; error_code: TaskRunError | null; cleanup: "verified" | "unknown"; result: TaskRunResult | null};
+  {type: "result"; outcome: TaskRunOutcome; error_code: TaskRunError | null; cleanup: "verified" | "unknown"; result: TaskRunResult | null; artifact?: TaskRunArtifact};
 export const taskRunMaxFrameBytes = 65_536;
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -101,6 +111,39 @@ const count = (value: unknown): value is number => Number.isSafeInteger(value) &
 function exact(value: unknown, fields: readonly string[]): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value) &&
     Object.keys(value).length === fields.length && fields.every(field => Object.hasOwn(value, field));
+}
+function withLease(value: unknown, fields: readonly string[]): value is Record<string, unknown> {
+  return exact(value, fields) || exact(value, [...fields, "lease_context"]);
+}
+const serverId = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,95}$/;
+const baseCommits: Partial<Record<TaskRunTaskId, string>> = {"software-bounds": "7a06a3ea1880fec11033104223474b8f297cab6c", "software-intervals": "dcf0d103b825d9e2cdc41f5a0efa6811e694a069"};
+export function validateTaskRunLeaseContext(value: unknown, task: TaskRunTaskId, strategy: string | null): TaskRunLeaseContext {
+  const pin = taskRunCatalogPins[task];
+  if (!pin || !exact(value, ["lease_id", "attempt_id", "task_version", "contract_hash", "base_commit", "strategy_id", "time_limit_sec", "expires_at_ms"]) ||
+    typeof value.lease_id !== "string" || !serverId.test(value.lease_id) || typeof value.attempt_id !== "string" || !serverId.test(value.attempt_id) ||
+    value.task_version !== pin.task_version || value.contract_hash !== pin.contract_hash || value.base_commit !== baseCommits[task] ||
+    value.strategy_id !== strategy || !validTaskRunStrategy(task, value.strategy_id) ||
+    !Number.isSafeInteger(value.time_limit_sec) || Number(value.time_limit_sec) < 1 || Number(value.time_limit_sec) > 1200 ||
+    !Number.isSafeInteger(value.expires_at_ms) || Number(value.expires_at_ms) < 1) invalid();
+  return structuredClone(value) as unknown as TaskRunLeaseContext;
+}
+export function validateTaskRunResultPackageRequest(value: unknown): TaskRunResultPackageRequest {
+  if (!exact(value, ["schema_version", "request_id", "expected_revision"]) || value.schema_version !== "1.0" || !identity(value.request_id) || !revision(value.expected_revision)) invalid();
+  return structuredClone(value) as unknown as TaskRunResultPackageRequest;
+}
+export function validateTaskRunResultPackage(value: unknown): TaskRunResultPackage {
+  if (!exact(value, ["schema_version", "request_id", "lease_id", "sha256", "size_bytes", "bytes_base64"]) || value.schema_version !== "1.0" ||
+    !identity(value.request_id) || typeof value.lease_id !== "string" || !serverId.test(value.lease_id) || typeof value.sha256 !== "string" || !sha256.test(value.sha256) ||
+    !Number.isSafeInteger(value.size_bytes) || Number(value.size_bytes) < 1 || Number(value.size_bytes) > taskRunMaxPackageBytes ||
+    typeof value.bytes_base64 !== "string" || !canonicalPackageBase64(value.bytes_base64, Number(value.size_bytes))) invalid();
+  return structuredClone(value) as unknown as TaskRunResultPackage;
+}
+function canonicalPackageBase64(value: string, size: number): boolean {
+  if (value.length !== Math.ceil(size / 3) * 4 || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) return false;
+  const padding = value.endsWith("==") ? 2 : value.endsWith("=") ? 1 : 0;
+  if (value.length / 4 * 3 - padding !== size) return false;
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  return padding === 0 || (alphabet.indexOf(value[value.length - padding - 1]) & (padding === 2 ? 15 : 3)) === 0;
 }
 function oneOf<T extends string>(value: unknown, options: readonly T[]): value is T {
   return typeof value === "string" && options.includes(value as T);
@@ -137,9 +180,10 @@ function validModel(value: unknown, provider: TaskRunProvider): value is TaskRun
     (value.observed === null || (typeof value.observed === "string" && taskRunObservedModels[provider].includes(value.observed)));
 }
 export function validateTaskRunStart(value: unknown): TaskRunStartRequest {
-  if (!exact(value, ["schema_version", "request_id", "profile_id", "task_id", "strategy_id", "approved"]) || value.schema_version !== "1.0" ||
+  if (!withLease(value, ["schema_version", "request_id", "profile_id", "task_id", "strategy_id", "approved"]) || value.schema_version !== "1.0" ||
     !identity(value.request_id) || !identity(value.profile_id) || !oneOf(value.task_id, taskRunTaskIds) ||
     !validTaskRunStrategy(value.task_id, value.strategy_id) || value.approved !== true) invalid();
+  if (Object.hasOwn(value, "lease_context")) validateTaskRunLeaseContext(value.lease_context, value.task_id, value.strategy_id as string | null);
   return structuredClone(value) as unknown as TaskRunStartRequest;
 }
 export function validateTaskRunCancel(value: unknown): TaskRunCancelRequest {
@@ -153,11 +197,12 @@ export function validateTaskRunStatus(value: unknown): TaskRunStatus {
   const op = value.operation;
   if (value.availability === "unavailable" && op !== null) invalid();
   if (op !== null) {
-    if (!exact(op, ["request_id", "profile_id", "provider", "task_id", "strategy_id", "revision", "phase", "outcome", "error_code", "cleanup", "tool_calls", "model", "result"]) ||
+    if (!withLease(op, ["request_id", "profile_id", "provider", "task_id", "strategy_id", "revision", "phase", "outcome", "error_code", "cleanup", "tool_calls", "model", "result"]) ||
       !identity(op.request_id) || !identity(op.profile_id) || !oneOf(op.provider, ["claude", "codex"]) || !oneOf(op.task_id, taskRunTaskIds) ||
       !validTaskRunStrategy(op.task_id, op.strategy_id) ||
       !revision(op.revision) || !oneOf(op.phase, taskRunPhases) || !count(op.tool_calls) || !validModel(op.model, op.provider) ||
       !oneOf(op.cleanup, ["pending", "verified", "unknown"]) || (op.error_code !== null && !oneOf(op.error_code, taskRunErrors))) invalid();
+    if (Object.hasOwn(op, "lease_context")) validateTaskRunLeaseContext(op.lease_context, op.task_id, op.strategy_id as string | null);
     if (op.phase !== "finished") {
       if (op.outcome !== null || op.error_code !== null || op.cleanup !== "pending" || op.result !== null) invalid();
       if (op.phase === "starting" && (op.tool_calls !== 0 || op.model.observed !== null)) invalid();
@@ -185,6 +230,9 @@ function canonical(value: unknown): unknown {
   return value && typeof value === "object" && !Array.isArray(value)
     ? Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical((value as Record<string, unknown>)[key])])) : value;
 }
+export function sameTaskRunLeaseContext(a: TaskRunLeaseContext | undefined, b: TaskRunLeaseContext | undefined): boolean {
+  return JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
+}
 function sameOperation(a: TaskRunOperation, b: TaskRunOperation): boolean {
   return JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
 }
@@ -195,7 +243,7 @@ export function acceptTaskRunUpdate(previous: TaskRunStatus | null, incoming: un
   if (!before) return next;
   if (before.phase === "finished" && after?.request_id !== before.request_id) return next;
   if (!after || after.request_id !== before.request_id || after.profile_id !== before.profile_id || after.provider !== before.provider ||
-    after.task_id !== before.task_id || after.strategy_id !== before.strategy_id || after.revision < before.revision ||
+    after.task_id !== before.task_id || after.strategy_id !== before.strategy_id || !sameTaskRunLeaseContext(after.lease_context, before.lease_context) || after.revision < before.revision ||
     ((after.revision === before.revision || before.phase === "finished") && !sameOperation(before, after)) ||
     taskRunPhases.indexOf(after.phase) < taskRunPhases.indexOf(before.phase) || after.tool_calls < before.tool_calls ||
     (before.model.observed !== null && after.model.observed !== before.model.observed)) throw new Error("task_run_status_stale");

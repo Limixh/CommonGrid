@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -34,7 +35,7 @@ func main() {
 		defer cancel()
 		_ = server.Shutdown(shutdown)
 	}()
-	log.Printf("CommonGrid coordinator: http://%s — %s mode; execution disabled", server.Addr, mode)
+	log.Printf("CommonGrid coordinator: http://%s — %s mode; execution requires per-contract capability", server.Addr, mode)
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatal(err)
 	}
@@ -78,6 +79,10 @@ func coordinatorHandler(ctx context.Context) (http.Handler, func(), string, erro
 		uiOrigin = "http://127.0.0.1:1420"
 	}
 	development := os.Getenv("CG_ALLOW_LOOPBACK_AUTH") == "true"
+	executionContracts, err := configuredExecutionContracts(development)
+	if err != nil {
+		return fail("execution contract configuration invalid")
+	}
 	providers := make(map[string]auth.Provider)
 	for _, provider := range []string{"github", "google"} {
 		idKey, secretKey := "CG_GITHUB_CLIENT_ID", "CG_GITHUB_CLIENT_SECRET"
@@ -110,12 +115,35 @@ func coordinatorHandler(ctx context.Context) (http.Handler, func(), string, erro
 	if err != nil {
 		return fail("artifact storage or scanner configuration invalid")
 	}
-	handler, err := httpapi.NewAuthenticated(database, manager, httpapi.Config{PublicURL: publicURL, UIOrigin: uiOrigin, Development: development, Artifacts: artifacts})
+	handler, err := httpapi.NewAuthenticated(database, manager, httpapi.Config{PublicURL: publicURL, UIOrigin: uiOrigin, Development: development, Artifacts: artifacts, ExecutionContracts: executionContracts})
 	if err != nil {
 		closeArtifacts()
 		return fail("authenticated API configuration invalid")
 	}
-	return handler, func() { closeArtifacts(); database.Close() }, mode, nil
+	closeExpiry := func() {}
+	if len(executionContracts) != 0 {
+		closeExpiry = database.StartExpirySweeper(func() { log.Print("lease expiry unavailable; retrying on the next scheduled sweep") })
+	}
+	return handler, func() { closeExpiry(); closeArtifacts(); database.Close() }, mode, nil
+}
+
+func configuredExecutionContracts(development bool) ([]string, error) {
+	raw := os.Getenv("CG_EXECUTION_CONTRACTS")
+	if raw == "" {
+		return nil, nil
+	}
+	if !development {
+		return nil, store.ErrInvalid
+	}
+	contracts := strings.Split(raw, ",")
+	seen := map[string]bool{}
+	for _, id := range contracts {
+		if (id != "software-bounds" && id != "software-intervals") || seen[id] {
+			return nil, store.ErrInvalid
+		}
+		seen[id] = true
+	}
+	return contracts, nil
 }
 
 func configuredArtifacts(development bool) (*httpapi.ArtifactService, func(), error) {

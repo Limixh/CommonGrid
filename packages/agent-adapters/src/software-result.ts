@@ -1,8 +1,8 @@
 // Result package of a verified catalog software task run: the verified unified
 // patch is re-applied to the pinned baseline, the candidate hash is checked and
 // the single writable file is packed into a deterministic `cg-artifact/1`
-// bundle (artifact-bundle.ts). Nothing here uploads, stores or sends anything:
-// leases and execution are disabled, so the bundle only exists in memory.
+// bundle (artifact-bundle.ts). This builder only returns in-memory bytes;
+// the caller owns lease binding, private retention and explicit submission.
 //
 // Scanner: only the local text inspection that buildArtifactBundle itself runs
 // (UTF-8, control/bidi characters, secret patterns, forbidden patterns). That is

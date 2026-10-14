@@ -39,6 +39,19 @@ Bir profil seçtikten sonra **Seçili profilin CLI hesabı** panelinde hesabı k
 
 Windows başlatıcısı Docker Desktop Linux motorunun sabit yerel named pipe'ını veya varsayılan Docker pipe'ını kullanır; host Docker context/credential dosyalarını okumaz. Özel/uzak Docker endpoint'i arayüzden seçilemez. Unix'te varsayılan yerel daemon gerekir; rootless/özel context ve gerçek native UI kabulü ayrı sınanır.
 
+## Merkezi yazılım görevi gönderimi
+
+[Hesap/DB](AUTHENTICATION.md) ve [Trivy/vault](ARTIFACTS.md) kurulumundan sonra API terminalinde açıkça etkinleştirin:
+
+```powershell
+$env:CG_EXECUTION_CONTRACTS = 'software-bounds,software-intervals'
+npm run dev:api
+```
+
+Bu ayar yalnız `CG_COORDINATOR_MODE=authenticated`, `CG_ALLOW_LOOPBACK_AUTH=true`, loopback `CG_PUBLIC_URL`, migration uygulanmış DB ve hazır vault/scanner ile geçerlidir. Varsayılan örnek katalog merkezi kiralama oluşturmaz. API ayrı terminalde çalışırken `npm run desktop` geliştirme UI'sını kullanır; `CG_UI_ORIGIN=http://127.0.0.1:1420` ve `CG_PUBLIC_URL=http://127.0.0.1:8787` aynı hostname'i kullanmalıdır. Paketlenmiş uygulamanın custom-origin OAuth/API bağlantısı henüz tamamlanmadı.
+
+Katalogdan desteklenen görevi ve yaklaşımı hazırlayın, bağlı profili seçip Başlat'ı onaylayın. Merkezi kiralama ve süre bütçesi ayrıldıktan sonra native görev başlar. Süre sınırı en çok 1200 saniyedir; daha düşük kullanıcı/sunucu limiti uygulanır. Doğrulanmış diff oluşunca **Gönder** paketi zorunlu Trivy taramasından geçirip saklar ve teslim makbuzunu gösterir. `submitted`, merkezi bağımsız kabul değildir. Heartbeat süre uzatmaz; iptal/başarısızlık temizliği doğrulanınca lease kapanır, terk edilmiş lease süre sonunda sunucuda serbest bırakılır. Ayrıntılı sınırlar [ADR 0023](../spike/adr/0023-leased-software-submission.md) içindedir.
+
 ## Test komutları
 
 | Komut | Neyi sınar? |
