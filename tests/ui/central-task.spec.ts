@@ -26,11 +26,11 @@ const receipt = {
 };
 type NativeCall = {command: string; args: any};
 type MockWindow = Window & {isTauri: boolean; __centralNative: {calls: NativeCall[]; value: any; lostStart: boolean; tamperPackage: boolean}; __TAURI_INTERNALS__: {invoke(command: string, args: any): Promise<unknown>}};
-type API = {calls: {path: string; body: any; csrf: string | undefined}[]; reserveFail: boolean; lostReserve: boolean; lostUpload: boolean; lostSubmit: boolean; scannerUnavailable: boolean; capability: boolean; state: string; account: boolean; heartbeatState: string};
+type API = {calls: {path: string; body: any; csrf: string | undefined}[]; reserveFail: boolean; lostReserve: boolean; lostUpload: boolean; lostSubmit: boolean; scannerUnavailable: boolean; capability: boolean; strategyId: string; state: string; account: boolean; heartbeatState: string};
 
 async function setup(page: Page, options: Partial<API> = {}) {
   const api: API = {calls: [], reserveFail: false, lostReserve: false, lostUpload: false, lostSubmit: false, scannerUnavailable: false,
-    capability: true, state: "reserved", account: true, heartbeatState: "active", ...options};
+    capability: true, strategyId: "boundary-first", state: "reserved", account: true, heartbeatState: "active", ...options};
   await page.clock.install({time}); await page.clock.pauseAt(new Date(time.getTime() + 1000));
   await page.addInitScript(({profileId, bytes, sha256, leaseId}) => {
     const target = window as MockWindow; target.isTauri = true;
@@ -76,14 +76,15 @@ async function setup(page: Page, options: Partial<API> = {}) {
       execution_capabilities: api.capability ? {[task.id]: {task_version: task.task_version, contract_hash: task.contract_hash,
         base_commit: task.workspace.commit, max_limit_sec: 1200, strategies: task.strategies.map((s: {id: string}) => s.id)}} : {}}});
     if (pathname.endsWith("/leases") && request.method() === "POST") {
+      api.strategyId = request.postDataJSON().strategy_id;
       if (api.reserveFail) return route.fulfill({status: 409, json: {code: "budget_exhausted"}});
       if (api.lostReserve) { api.lostReserve = false; return route.abort("failed"); }
-      return fulfill(route, {...lease, state: api.state}, 200, true);
+      return fulfill(route, {...lease, strategy_id: api.strategyId, state: api.state}, 200, true);
     }
-    if (pathname === `/api/v1/leases/${leaseId}/start`) { api.state = "active"; return fulfill(route, {...lease, state: api.state, started_at: time.toISOString()}, 200, true); }
-    if (pathname === `/api/v1/leases/${leaseId}/heartbeat`) { api.state = api.heartbeatState; return fulfill(route, {...lease, state: api.state, started_at: time.toISOString()}, 200, true); }
-    if (pathname === `/api/v1/leases/${leaseId}/stop`) { api.state = "stop_requested"; return fulfill(route, {...lease, state: api.state}); }
-    if (pathname === `/api/v1/leases/${leaseId}/end`) { api.state = "released"; return fulfill(route, {...lease, state: api.state, ended_at: time.toISOString()}); }
+    if (pathname === `/api/v1/leases/${leaseId}/start`) { api.state = "active"; return fulfill(route, {...lease, strategy_id: api.strategyId, state: api.state, started_at: time.toISOString()}, 200, true); }
+    if (pathname === `/api/v1/leases/${leaseId}/heartbeat`) { api.state = api.heartbeatState; return fulfill(route, {...lease, strategy_id: api.strategyId, state: api.state, started_at: time.toISOString()}, 200, true); }
+    if (pathname === `/api/v1/leases/${leaseId}/stop`) { api.state = "stop_requested"; return fulfill(route, {...lease, strategy_id: api.strategyId, state: api.state}); }
+    if (pathname === `/api/v1/leases/${leaseId}/end`) { api.state = "released"; return fulfill(route, {...lease, strategy_id: api.strategyId, state: api.state, ended_at: time.toISOString()}); }
     if (pathname === `/api/v1/leases/${leaseId}/artifacts`) {
       if (api.scannerUnavailable) { api.scannerUnavailable = false; return route.fulfill({status: 503, json: {code: "artifact_scanner_unavailable"}}); }
       if (api.lostUpload) { api.lostUpload = false; return route.abort("failed"); }
@@ -94,7 +95,7 @@ async function setup(page: Page, options: Partial<API> = {}) {
       if (api.lostSubmit) { api.lostSubmit = false; return route.abort("failed"); }
       return fulfill(route, receipt);
     }
-    if (pathname === `/api/v1/leases/${leaseId}`) return fulfill(route, {...lease, state: api.state});
+    if (pathname === `/api/v1/leases/${leaseId}`) return fulfill(route, {...lease, strategy_id: api.strategyId, state: api.state});
     return route.fulfill({status: 404, json: {code: "not_found"}});
   });
   await page.goto("/");
@@ -171,6 +172,36 @@ test("budget rejection reports the central limit without starting a provider", a
   await panel.getByRole("checkbox").check(); await panel.getByRole("button", {name: "Başlat", exact: true}).click();
   await expect(panel.getByTestId("central-execution-error")).toContainText("süre bütçesi yetersiz");
   expect(api.calls).toHaveLength(1); expect((await nativeCalls(page)).some(call => call.command === "local_task_run_start")).toBe(false);
+});
+
+test("a definitive pre-lease budget rejection does not block another strategy from starting", async ({page}) => {
+  const {api, panel} = await setup(page, {reserveFail: true});
+  await panel.getByRole("checkbox").check(); await panel.getByRole("button", {name: "Başlat", exact: true}).click();
+  await expect(panel.getByTestId("central-execution-error")).toContainText("süre bütçesi yetersiz");
+  // No lease and no native attempt exist, so there is nothing to retry or settle.
+  await expect(panel.getByRole("button", {name: "Aynı başlatmayı tekrar dene", exact: true})).toHaveCount(0);
+  api.reserveFail = false;
+  await page.getByRole("navigation").getByRole("button", {name: /^Çalışma alanı/}).click();
+  await page.locator("#strategy").selectOption("invariant");
+  await page.getByRole("button", {name: "Profil seçimini hazırla", exact: true}).click();
+  await expect(panel).toHaveAttribute("aria-busy", "false");
+  await expect(panel).not.toContainText("merkezi çalıştırma kullanılamıyor");
+  const request = await run(page, panel);
+  expect(request.strategy_id).toBe("invariant");
+  expect(api.calls.filter(call => call.path.endsWith("/leases"))).toHaveLength(2);
+  expect(api.calls.filter(call => call.path.endsWith("/leases"))[1].body).toMatchObject({strategy_id: "invariant"});
+  await expect(panel.getByTestId("central-lease-budget")).toContainText("active");
+  expect((await nativeCalls(page)).filter(call => call.command === "local_task_run_start")).toHaveLength(1);
+});
+
+test("a definitive budget rejection also allows a fresh start for the same strategy", async ({page}) => {
+  const {api, panel} = await setup(page, {reserveFail: true});
+  await panel.getByRole("checkbox").check(); await panel.getByRole("button", {name: "Başlat", exact: true}).click();
+  await expect(panel.getByTestId("central-execution-error")).toBeVisible();
+  api.reserveFail = false;
+  await run(page, panel);
+  const reserves = api.calls.filter(call => call.path.endsWith("/leases")); expect(reserves).toHaveLength(2);
+  expect(reserves[1].body.request_key).not.toBe(reserves[0].body.request_key);
 });
 
 test("lost native start response retries the exact approved run and immutable lease context", async ({page}) => {
@@ -252,6 +283,18 @@ test("captured native deadline stops an unfinished run and releases the central 
   await expect.poll(async () => (await nativeCalls(page)).filter(call => call.command === "local_task_run_cancel").length).toBe(1);
   await page.clock.fastForward(15001); await expect.poll(() => api.state).toBe("released");
   expect(api.calls.some(call => /artifacts|result/.test(call.path))).toBe(false);
+});
+
+test("a deadline_exceeded lease run uses neutral wording instead of blaming the central limit", async ({page}) => {
+  const {panel} = await setup(page); await run(page, panel);
+  await page.evaluate(() => {
+    const mock = (window as MockWindow).__centralNative;
+    mock.value = {...mock.value, operation: {...mock.value.operation, revision: 7, phase: "finished", outcome: "failed", error_code: "deadline_exceeded", cleanup: "verified"}};
+  });
+  await page.getByRole("button", {name: "Görev durumunu yenile", exact: true}).click();
+  const result = page.locator(".task-run-result");
+  await expect(result).toContainText("Görev etkin süre sınırına ulaştı.");
+  await expect(result).not.toContainText("merkezi süre sınırı");
 });
 
 test("logout clears private central receipt controls while the actual native run remains observable", async ({page}) => {

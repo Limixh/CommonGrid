@@ -6,7 +6,7 @@ import {
 import type { ManagedProfile } from "@commongrid/agent-adapters/managed-profiles";
 import { cancelTaskRun, readTaskRun, startTaskRun, taskRunNative } from "./task-run-client";
 import { useRunLimits } from "./useRunLimits";
-import type { CentralTaskControl } from "./useCentralTask";
+import { isDefinitiveReserveRefusal, type CentralTaskControl } from "./useCentralTask";
 
 type TaskWords = {title: string; text: string; limits: string[]; checks: readonly [string, string]};
 type Words = {
@@ -185,7 +185,10 @@ export function TaskRunPanel({language, profile, taskId, strategyId, allowStart,
   // native supervisor enforces them again when the run starts.
   const runLimits = useRunLimits();
   const localLimits = runLimits.status?.availability === "available" ? runLimits.status : null;
-  const limitBlocked = !!localLimits && !localLimits.effective.startable && !central?.retryable;
+  // In the desktop app a start waits for a known limits answer: a pending first read or an unreadable record blocks it
+  // (the supervisor would still refuse, but the interface must not invite a run it cannot predict).
+  const limitsUnknown = taskRunNative() && (!localLimits || runLimits.pending);
+  const limitBlocked = (limitsUnknown || !!localLimits && !localLimits.effective.startable) && !central?.retryable;
 
   async function cancelWithResync(operation: TaskRunOperation, signal: AbortSignal) {
     try {
@@ -230,14 +233,16 @@ export function TaskRunPanel({language, profile, taskId, strategyId, allowStart,
       if (incoming && incoming.phase !== "finished" || kind === "start") setApproved(false);
       if (kind !== "read" || operation?.request_id !== incoming?.request_id) { pollCount.current = 0; pollStarted.current = Date.now(); setPaused(false); }
       if (kind === "cancel" && operation && central?.required) await central.cancel(operation, controller.signal);
-    } catch {
-      if (waiting.current === controller) { setError(true); setPaused(true); }
+    } catch (caught) {
+      // A definitive central refusal already has its own message and leaves nothing to resynchronize.
+      const refusal = kind === "start" && central?.required && isDefinitiveReserveRefusal(caught);
+      if (waiting.current === controller && !refusal) { setError(true); setPaused(true); }
     } finally {
       window.clearTimeout(timeout);
       if (waiting.current === controller) { waiting.current = null; mutation.current = false; setPending(null); }
     }
   }
-  function refresh() { pollCount.current = 0; pollStarted.current = Date.now(); setPaused(false); void observe("read"); }
+  function refresh() { pollCount.current = 0; pollStarted.current = Date.now(); setPaused(false); void observe("read"); void runLimits.refresh(); }
   // Leaving the panel only stops observation; the native-owned run continues.
   useEffect(() => {
     void observe("read");
@@ -332,9 +337,8 @@ export function TaskRunPanel({language, profile, taskId, strategyId, allowStart,
       <span>{t.lastTask}: <code>{finished.task_id}</code> · {taskRunPatchPaths[finished.task_id]}</span>
       {finished.strategy_id && <span>{t.strategy}: <code>{finished.strategy_id}</code></span>}
       <strong>{t.outcomes[finished.outcome!]}</strong>
-      {finished.error_code && finished.error_code !== "cancelled" && finished.error_code !== "candidate_rejected" && <p>{finished.error_code === "deadline_exceeded" && finished.lease_context
-        ? language === "tr" ? `Görev ${finished.lease_context.time_limit_sec} saniyelik merkezi süre sınırına ulaştı.` : `The task reached its ${finished.lease_context.time_limit_sec} second central time limit.`
-        : t.errors(requestedModel)[finished.error_code]}</p>}
+      {/* The run may have been capped by the central lease or by a native local limit; the text names neither. */}
+      {finished.error_code && finished.error_code !== "cancelled" && finished.error_code !== "candidate_rejected" && <p>{t.errors(requestedModel)[finished.error_code]}</p>}
       {finished.tool_calls > 0 && <span>{t.toolCalls}: {finished.tool_calls} / {taskRunMaxToolCalls}</span>}
       {finished.model.observed && <span>{t.observed}: <code>{finished.model.observed}</code></span>}
       {verified && <p>{t.verifier}: {(verified.verifier.passed ? t.verifierPassed : t.verifierRejected)(verified.verifier.cases,

@@ -10,6 +10,7 @@ import {
   type ArtifactReceipt, type ExecutionCapability, type TimedLeaseDetail,
 } from "./central-execution-client";
 import { cancelTaskRun, exportTaskRunResultPackage, readTaskRun, startTaskRun } from "./task-run-client";
+import { readRunLimits } from "./run-limits-client";
 
 export type CentralTaskView = {
   requestId: string; profileId: string; taskId: string; lease: LeaseDetail | null;
@@ -18,7 +19,7 @@ export type CentralTaskView = {
 };
 type Transaction = {
   owner: string; selection: CatalogExecutionSelection; capability: ExecutionCapability; profile: ManagedProfile;
-  requestId: string; reserveKey: string; uploadKey: string; submitKey: string; limitSec: number;
+  requestId: string; reserveKey: string; uploadKey: string; submitKey: string; limitSec: number; limitClamped: boolean;
   lease: TimedLeaseDetail | null; nativeRequest: TaskRunStartRequest | null; nativeAttempted: boolean; startConfirmed: boolean;
   artifact: ArtifactReceipt | null; package: Awaited<ReturnType<typeof exportTaskRunResultPackage>> | null; submissionAttempted: boolean;
   stop: boolean; busy: boolean; phase: CentralTaskView["phase"]; error: string | null; receipt: SubmissionDetail | null;
@@ -31,6 +32,9 @@ export type CentralTaskControl = {
 };
 const ownerOf = (account: Account) => account.state.status === "authenticated"
   ? JSON.stringify([account.state.session.user.provider, account.state.session.user.id]) : null;
+// Coordinator answers to a reserve that prove no lease was created (see httpapi apiError).
+const definitiveReserveRefusals = new Set(["budget_exhausted", "capacity_exhausted", "stale_contract", "lease_or_task_closed", "invalid_request", "not_found", "idempotency_conflict"]);
+export const isDefinitiveReserveRefusal = (error: unknown) => error instanceof CentralExecutionError && definitiveReserveRefusals.has(error.code);
 const closed = (lease: LeaseDetail) => ["completed", "released", "expired"].includes(lease.state);
 
 // App owns this controller, so navigation does not abandon a budget lease.
@@ -72,7 +76,11 @@ export function useCentralTask(account: Account, localLimitSec: number) {
     if (tx.current !== value) return;
     if (error instanceof AccountExpired) { currentAccount.current.expire(); return; }
     value.error = error instanceof CentralExecutionError ? error.code : "request_failed";
-    value.phase = "error"; publish(value);
+    value.phase = "error";
+    // A definitive refusal before any lease exists leaves nothing to retry or settle: the transaction is terminal
+    // and a later start (same or another task) replaces it. A lost reserve response stays retryable by key.
+    if (!value.lease && !value.nativeAttempted && isDefinitiveReserveRefusal(error)) { value.stop = true; value.phase = "stopped"; }
+    publish(value);
   }
   async function settle(value: Transaction, signal: AbortSignal) {
     if (!value.lease) { value.phase = "stopped"; publish(value); return; }
@@ -170,7 +178,7 @@ export function useCentralTask(account: Account, localLimitSec: number) {
         if (!belongs || !run || run.receipt || run.phase === "stopped") {
           if (run && !run.receipt && run.phase !== "stopped") throw new CentralExecutionError("lease_pending");
           run = {owner: owner!, selection, capability, profile, requestId: crypto.randomUUID(), reserveKey: crypto.randomUUID(),
-            uploadKey: crypto.randomUUID(), submitKey: crypto.randomUUID(), limitSec: Math.max(1, Math.min(1200, capability.max_limit_sec, Math.floor(localLimitSec))),
+            uploadKey: crypto.randomUUID(), submitKey: crypto.randomUUID(), limitSec: Math.max(1, Math.min(1200, capability.max_limit_sec, Math.floor(localLimitSec))), limitClamped: false,
             lease: null, nativeRequest: null, nativeAttempted: false, startConfirmed: false,
             artifact: null, package: null, submissionAttempted: false, stop: false, busy: false, phase: "preparing", error: null, receipt: null};
           tx.current = run;
@@ -180,6 +188,16 @@ export function useCentralTask(account: Account, localLimitSec: number) {
         const captured = run;
         try {
           return await bounded(async inner => {
+            if (!captured.lease && !captured.limitClamped) {
+              // Cap the request by the native effective maximum once, so a retried reserve keeps an identical body.
+              // A missing or fail-closed answer leaves the request as is; native enforces its limits when the run starts.
+              try {
+                const native = await readRunLimits(inner);
+                if (native.availability === "available" && native.effective.startable && native.effective.reason !== "local_budget_unavailable")
+                  captured.limitSec = Math.max(1, Math.min(captured.limitSec, native.effective.max_sec));
+              } catch { inner.throwIfAborted(); }
+              captured.limitClamped = true;
+            }
             if (!captured.lease) checkLease(captured, await reserveCentralTask(selection.task.id, {
               task_version: selection.task.task_version, contract_hash: selection.task.contract_hash, strategy_id: selection.task.strategy_id,
               request_key: captured.reserveKey, limit_sec: captured.limitSec,

@@ -14,7 +14,7 @@ export function WorkspacePage({ catalog, settings, t, setPage, onPrepareExecutio
   const { projects, tasks, statuses, status, source, setSelected, query, setQuery, type, setType, project, setProject, statusFilter, setStatusFilter, tab, setTab, strategy, setStrategy, filtered, task, loadCatalog, pagers, duplicates, loadMoreTasks, loadMoreProjects, revealTask } = catalog;
   // The native ledger's effective maximum replaces the browser copy of the user limits when it answers.
   const runLimits = useRunLimits().status;
-  const nativeMaxSec = runLimits?.availability === "available" ? runLimits.effective.max_sec : null;
+  const nativeMaxSec = runLimits?.availability === "available" && runLimits.effective.reason !== "local_budget_unavailable" ? runLimits.effective.max_sec : null;
   const detailHeading = useRef<HTMLHeadingElement>(null);
   const focusDetail = useRef(false);
   const visibleIds = new Set(filtered.map((item) => item.id));

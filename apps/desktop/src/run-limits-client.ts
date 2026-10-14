@@ -37,8 +37,8 @@ export async function saveRunLimits(request: RunLimitsSaveRequest, signal: Abort
   let checked: RunLimitsSaveRequest;
   try { checked = validateRunLimitsSave(request); } catch { throw new Error("run_limits_contract_invalid"); }
   const status = await checkedInvoke("local_run_limits_save", {request: checked}, signal);
-  // A saved reply must echo the persisted limits exactly; a fail-closed reply is not a confirmation.
-  if (status.availability === "available" && status.effective.reason !== "local_budget_unavailable" &&
-    (status.limits.attempt_sec !== checked.attempt_sec || status.limits.daily_sec !== checked.daily_sec)) throw new Error("run_limits_contract_invalid");
+  // A saved reply must echo the persisted limits exactly; an unavailable or fail-closed reply is not a confirmation.
+  if (status.availability !== "available" || status.effective.reason === "local_budget_unavailable" ||
+    status.limits.attempt_sec !== checked.attempt_sec || status.limits.daily_sec !== checked.daily_sec) throw new Error("run_limits_contract_invalid");
   return status;
 }

@@ -888,17 +888,122 @@ test("the limits are read again after a run finishes", async ({page}) => {
   expect((await limitCalls(page)).length).toBeGreaterThan(before);
 });
 
-test("an unreadable native limits record is reported but native still decides", async ({page}) => {
-  await mockNative(page);
+// Test hooks over the shared native mock: a reply can be held, failed or replaced per command.
+type Gate = Window & {__limitsFail?: boolean; __limitsHold?: boolean; __held?: (() => void)[]; __saveHold?: boolean; __saveReply?: unknown; __saveCalls?: number; __releaseSave?: () => void};
+async function gateLimits(page: Page) {
   await page.addInitScript(() => {
-    const target = window as MockWindow, invoke = target.__TAURI_INTERNALS__.invoke;
-    target.__TAURI_INTERNALS__.invoke = (command, args) => command === "local_run_limits_status" ? Promise.reject(new Error("PRIVATE_NATIVE_DETAIL")) : invoke(command, args);
+    const target = window as unknown as MockWindow & Gate, invoke = target.__TAURI_INTERNALS__.invoke;
+    target.__held = []; target.__saveCalls = 0;
+    target.__TAURI_INTERNALS__.invoke = (command, args) => {
+      if (command === "local_run_limits_status") {
+        if (target.__limitsFail) return Promise.reject(new Error("PRIVATE_NATIVE_DETAIL"));
+        if (target.__limitsHold) return new Promise(resolve => target.__held!.push(() => resolve(invoke(command, args))));
+      }
+      if (command === "local_run_limits_save") {
+        target.__saveCalls!++;
+        if (target.__saveReply) return Promise.resolve(target.__saveReply);
+        if (target.__saveHold) return new Promise(resolve => { target.__releaseSave = () => resolve(invoke(command, args)); });
+      }
+      return invoke(command, args);
+    };
   });
+}
+const gateFlag = (page: Page, name: string, value: unknown) => page.evaluate(([name, value]) => { (window as unknown as Record<string, unknown>)[name as string] = value; }, [name, value] as const);
+const releaseHeld = (page: Page) => page.evaluate(() => { const target = window as unknown as Gate; target.__limitsHold = false; target.__held!.splice(0).forEach(release => release()); });
+
+test("an unreadable native limits record is reported and blocks Başlat until it can be read", async ({page}) => {
+  await mockNative(page); await gateLimits(page);
+  await page.addInitScript(() => { (window as unknown as Gate).__limitsFail = true; });
   const panel = await open(page);
   await expect(panel.getByTestId("run-limits-unreadable")).toContainText("Yerel süre sınırı kaydı okunamadı");
   await expect(panel).toContainText("20 dakika süre sınırı");
   await expect(panel).not.toContainText("PRIVATE_NATIVE_DETAIL");
+  await expect(panel.getByRole("checkbox")).toBeDisabled(); await expect(start(panel)).toBeDisabled();
+  await gateFlag(page, "__limitsFail", false); await refresh(page);
+  await expect(panel.getByTestId("run-limits-unreadable")).toHaveCount(0);
   await approve(panel); await expect(start(panel)).toBeEnabled();
+});
+
+test("Başlat waits for the first limits answer", async ({page}) => {
+  await mockNative(page); await gateLimits(page);
+  await page.addInitScript(() => { (window as unknown as Gate).__limitsHold = true; });
+  const panel = await open(page);
+  await expect(panel.getByRole("checkbox")).toBeDisabled(); await expect(start(panel)).toBeDisabled();
+  await expect(panel.getByTestId("run-limits-unreadable")).toHaveCount(0);
+  await releaseHeld(page);
+  await expect(panel.getByTestId("run-limits-effective")).toBeVisible();
+  await approve(panel); await expect(start(panel)).toBeEnabled();
+});
+
+test("a failed limits refresh drops the stale answer and blocks Başlat", async ({page}) => {
+  await mockNative(page); await gateLimits(page);
+  const panel = await open(page);
+  await expect(panel.getByTestId("run-limits-effective")).toBeVisible();
+  await approve(panel); await expect(start(panel)).toBeEnabled();
+  await gateFlag(page, "__limitsFail", true); await refresh(page);
+  await expect(panel.getByTestId("run-limits-unreadable")).toBeVisible();
+  await expect(panel.getByTestId("run-limits-effective")).toHaveCount(0);
+  await expect(start(panel)).toBeDisabled();
+  expect((await calls(page)).some(call => call.command === "local_task_run_start")).toBe(false);
+});
+
+test("the settings page never paints the limits as unreadable before the first read answers", async ({page}) => {
+  await mockNative(page); await gateLimits(page);
+  await page.addInitScript(() => { (window as unknown as Gate).__limitsHold = true; });
+  await page.goto("/"); await settingsButton(page).click();
+  const usage = page.getByTestId("run-limits-usage");
+  await expect(usage).toBeAttached(); await expect(usage).toHaveText("");
+  await releaseHeld(page);
+  await expect(usage).toContainText("kalan: 120 dk");
+});
+
+test("Save is ignored while a native save is pending and no false failure is shown", async ({page}) => {
+  await mockNative(page); await gateLimits(page); await page.goto("/");
+  await settingsButton(page).click();
+  await expect(page.getByTestId("run-limits-usage")).toContainText("kalan: 120 dk");
+  await gateFlag(page, "__saveHold", true);
+  await page.getByLabel("Tek deneme (dakika)").fill("15"); await page.getByLabel("Günlük aktif süre (dakika)").fill("90");
+  const save = page.getByRole("button", {name: "Tercihleri kaydet"});
+  await save.click();
+  await expect(save).toBeDisabled();
+  // A second submission by any route (keyboard, script) is dropped without aborting the first save.
+  await page.evaluate(() => (document.querySelector("form") as HTMLFormElement).requestSubmit());
+  await page.evaluate(() => (window as unknown as Gate).__releaseSave!());
+  await expect(page.getByRole("status")).toContainText("kaydedildi");
+  await expect(page.getByRole("status")).not.toContainText("kaydedilemedi");
+  await expect(save).toBeEnabled();
+  expect(await page.evaluate(() => (window as unknown as Gate).__saveCalls)).toBe(1);
+  expect((await limitCalls(page)).filter(call => call.command === "local_run_limits_save")).toHaveLength(1);
+});
+
+const failClosedLimits = (availability: "available" | "unavailable", reason: string | null) => ({schema_version: "1.0", availability,
+  limits: {attempt_sec: 1800, daily_sec: 7200, concurrency: 1}, usage: {used_sec: 0, open_sec: 0, remaining_sec: 0, window_seconds: 86400},
+  effective: {max_sec: 0, startable: false, reason}, paid_mode: "disabled"});
+for (const [name, reply] of [
+  ["an unavailable", failClosedLimits("unavailable", null)],
+  ["a fail-closed local_budget_unavailable", failClosedLimits("available", "local_budget_unavailable")],
+] as const) test(`${name} save reply is not a confirmation even when the limits echo the request`, async ({page}) => {
+  await mockNative(page); await gateLimits(page); await page.goto("/");
+  await settingsButton(page).click();
+  await expect(page.getByTestId("run-limits-usage")).toContainText("kalan: 120 dk");
+  // The request equals the defaults carried by the fail-closed shapes, so only the reply kind can reject it.
+  await page.evaluate(reply => { (window as unknown as Gate).__saveReply = reply; }, reply);
+  await page.getByRole("button", {name: "Tercihleri kaydet"}).click();
+  await expect(page.getByRole("status")).toContainText("Yerel süre sınırı kaydedilemedi");
+  expect(await page.evaluate(() => localStorage.getItem("commongrid.settings.v1"))).toBeNull();
+});
+
+test("a fail-closed native status does not show a 0 minute workspace time limit", async ({page}) => {
+  await mockNative(page); await gateLimits(page);
+  await page.addInitScript(reply => {
+    const target = window as unknown as MockWindow, invoke = target.__TAURI_INTERNALS__.invoke;
+    target.__TAURI_INTERNALS__.invoke = (command, args) => command === "local_run_limits_status" ? Promise.resolve(reply) : invoke(command, args);
+  }, failClosedLimits("available", "local_budget_unavailable"));
+  await page.goto("/");
+  await page.locator(".task-card").first().click();
+  const limit = page.locator(".resource-grid span").filter({hasText: "SÜRE LİMİTİ"});
+  await expect(limit).toContainText(/\d+\s*dk/i);
+  await expect(limit).not.toContainText(/(^|\D)0\s*dk/i);
 });
 
 test("saving the settings in the desktop app also saves the limits natively in seconds", async ({page}) => {

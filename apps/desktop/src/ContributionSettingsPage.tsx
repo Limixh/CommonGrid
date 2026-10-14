@@ -132,11 +132,11 @@ export function ContributionSettingsPage({ draft, setDraft, notice, setNotice, s
           </div>
         </div>
         <div className="save-row">
-          <button type="submit" className="primary-button">
+          <button type="submit" className="primary-button" disabled={notice === "saving"} aria-busy={notice === "saving"}>
             <Icon name="check" size={17} />
             {t.save}
           </button>
-          {notice && (
+          {notice && notice !== "saving" && (
             <span
               role="status"
               className={

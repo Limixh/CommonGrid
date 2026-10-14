@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { runLimitsNative } from "./run-limits-client";
 import { useRunLimits } from "./useRunLimits";
 import type { Settings } from "./ui-types";
@@ -47,6 +47,7 @@ export function useContributionSettings() {
   const [draft, setDraft] = useState<Settings>(settings);
   const [notice, setNotice] = useState("");
   const limits = useRunLimits();
+  const saving = useRef(false);
   useEffect(() => {
     document.documentElement.lang = settings.language;
   }, [settings.language]);
@@ -62,26 +63,34 @@ export function useContributionSettings() {
     setDraft(hydrate);
   }, [limits.status]);
   async function save() {
+    // Ignore Save while one is pending: a second call must not abort or reorder the first.
+    if (saving.current) return;
     if (!settingsValid(draft)) {
       setNotice("invalid");
       return;
     }
     let next = draft;
-    if (runLimitsNative()) {
-      // Native first: a rejected native save must not leave a local copy that disagrees with enforcement.
-      next = {...draft, concurrency: 1};
-      if (!(await limits.save(next.taskMinutes * 60, next.dailyMinutes * 60))) {
-        setNotice("native");
-        return;
-      }
-    }
+    saving.current = true;
     try {
-      localStorage.setItem("commongrid.settings.v1", JSON.stringify(next));
-      setSettings(next);
-      setDraft(next);
-      setNotice("saved");
-    } catch {
-      setNotice("storage");
+      if (runLimitsNative()) {
+        // Native first: a rejected native save must not leave a local copy that disagrees with enforcement.
+        next = {...draft, concurrency: 1};
+        setNotice("saving");
+        if (!(await limits.save(next.taskMinutes * 60, next.dailyMinutes * 60))) {
+          setNotice("native");
+          return;
+        }
+      }
+      try {
+        localStorage.setItem("commongrid.settings.v1", JSON.stringify(next));
+        setSettings(next);
+        setDraft(next);
+        setNotice("saved");
+      } catch {
+        setNotice("storage");
+      }
+    } finally {
+      saving.current = false;
     }
   }
 
