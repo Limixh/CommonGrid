@@ -5,8 +5,11 @@
 // workspace.commit: nothing is cloned or downloaded. The agent sees only the
 // bundle's package.json, one source file and its visible tests, and may change
 // the source file alone. Hidden cases and their expected answers stay on the
-// host; the verifier container is offline, read-only and throwaway. A task is
-// described by one plain SoftwareTaskSpec record; software-bounds is the default.
+// host; the verifier container is offline, read-only and throwaway. The security
+// boundary is that container plus a permission-restricted child process (see
+// the hidden driver below); forbidden_patterns is only a cheap contract-level
+// filter, not a boundary. A task is described by one plain SoftwareTaskSpec
+// record; software-bounds is the default.
 import assert from "node:assert/strict";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { Readable } from "node:stream";
@@ -40,7 +43,7 @@ export interface SoftwareBundle {
 export interface SoftwareHiddenSpec {
   cases(random?: Uint8Array): unknown[];
   oracle(item: any): unknown;
-  /** Source of the in-container driver (stdin: nonce and cases; prints one nonce-bearing result line). */
+  /** Source of the in-container parent driver (stdin: nonce and cases; prints one nonce-bearing result line). The candidate never runs in this process. */
   driver: string;
   /** Output cap of the hidden exec. */
   maxBytes: number;
@@ -57,7 +60,7 @@ export interface SoftwareTaskSpec {
   /** What the agent is told to run; the verifier adds a TAP reporter so it can read the test count. */
   testArgv: readonly string[];
   testCommand: string;
-  /** Substrings matched on the candidate source (catalog verification.forbidden_patterns). */
+  /** Substrings matched on the candidate source (catalog verification.forbidden_patterns). A contract-level filter that is trivially evaded; the sandbox, not this list, is the boundary. */
   forbiddenPatterns: readonly string[];
   /** Bounded by the Windows command line: the candidate travels as one docker exec argument. */
   candidateJsonLimit: number;
@@ -133,19 +136,60 @@ export function softwareHiddenCases(random: Uint8Array = randomBytes(2048)): Sof
   }
   return cases;
 }
-// Runs inside the verifier container. The cases and the result nonce arrive on
-// stdin before the candidate is imported; the real stdout writer and JSON are
-// captured first and the candidate's own output is discarded, so only this
-// script can print the nonce-bearing result line. Inputs are frozen.
-export const softwareHiddenDriver = "const write=process.stdout.write.bind(process.stdout),stringify=JSON.stringify,parse=JSON.parse,exit=process.exit.bind(process),concat=Buffer.concat,setPrototypeOf=Object.setPrototypeOf;" +
-  "const chunks=[];for await(const chunk of process.stdin)chunks[chunks.length]=chunk;" +
-  "const {nonce,cases}=parse(concat(chunks).toString('utf8'));" +
-  "process.stdout.write=()=>true;process.stderr.write=()=>true;" +
-  "for(const item of cases)Object.freeze(item.values);" +
-  "const {lowerBound}=await import('/task/src/search.ts');" +
-  "const results=setPrototypeOf([],null);let at=0;" +
-  "for(const item of cases){let value=null;try{const found=lowerBound(item.values,item.target);if(typeof found==='number')value=found}catch{}results[at++]=value}" +
-  "write('CGR '+nonce+' '+stringify(results)+'\\n',()=>exit(0));";
+// The hidden driver is two scripts. The parent holds the per-run nonce, hands
+// the child only the cases (never the nonce or any expected answer) and alone
+// prints the nonce-bearing result line. The child imports the candidate under
+// Node's permission model: no child processes, workers, inspector, addons or
+// file writes, and reads only below /task. It reports plain JSON on fd 3 (its
+// stdout and stderr go nowhere); the parent bounds its size and runtime,
+// validates its shape and rebuilds plain arrays from the numbers before it
+// prints. The candidate therefore never shares a process or heap with the
+// nonce, so heap snapshots, the inspector or /proc cannot reveal it. A
+// candidate can still detect this harness and answer differently under it, so
+// a pass means the harness observed correct outputs; the offline, read-only
+// container remains the sandbox. Node reads the nonce-free child source from a
+// base64 literal so quoting never depends on the Windows command line.
+interface HiddenDriverShape {
+  entry: string;
+  exportName: string;
+  /** Child statements that freeze the parsed `cases` before the candidate is imported. */
+  freeze: string;
+  /** Child statements run for each `item`; they set `value` to a plain result or leave it null. */
+  each: string;
+  /** Parent expression: `clean(raw)` returns the rebuilt plain results or null when the shape is invalid. */
+  clean: string;
+}
+const hiddenChildTimeoutMs = 7_000, hiddenChildOutputLimit = 65_536;
+function hiddenDriver(shape: HiddenDriverShape): string {
+  const child = "import{writeSync}from'node:fs';import{pathToFileURL}from'node:url';" +
+    "const stringify=JSON.stringify,parse=JSON.parse,concat=Buffer.concat,isArray=Array.isArray,freeze=Object.freeze,setPrototypeOf=Object.setPrototypeOf,exit=process.exit.bind(process),report=writeSync;" +
+    "const chunks=[];for await(const chunk of process.stdin)chunks[chunks.length]=chunk;" +
+    "const cases=parse(concat(chunks).toString('utf8'));" + shape.freeze +
+    `const {${shape.exportName}}=await import(pathToFileURL(root+'/'+entry).href);` +
+    "const results=setPrototypeOf([],null);let at=0;" +
+    `for(const item of cases){let value=null;try{${shape.each}}catch{}results[at++]=value}` +
+    "report(3,stringify(results));exit(0);";
+  return "import{spawn}from'node:child_process';" +
+    `const root='/task',entry='${shape.entry}',limit=${hiddenChildOutputLimit},wait=${hiddenChildTimeoutMs},source='${Buffer.from(child).toString("base64")}';` +
+    "const write=process.stdout.write.bind(process.stdout),exit=process.exit.bind(process),stringify=JSON.stringify,parse=JSON.parse;" +
+    "const chunks=[];for await(const chunk of process.stdin)chunks.push(chunk);" +
+    "const {nonce,cases}=parse(Buffer.concat(chunks).toString('utf8'));" +
+    "const child=spawn(process.execPath,['--permission','--allow-fs-read='+root,'--experimental-strip-types','--input-type=module','-e','const root='+stringify(root)+',entry='+stringify(entry)+';'+Buffer.from(source,'base64').toString('utf8')],{cwd:root,env:{},stdio:['pipe','ignore','ignore','pipe']});" +
+    "const parts=[];let size=0,broken=false;const stop=()=>{broken=true;child.kill('SIGKILL')};" +
+    "child.stdio[3].on('data',chunk=>{size+=chunk.length;if(size>limit)stop();else parts.push(chunk)});child.stdin.on('error',()=>{});child.stdin.end(stringify(cases));" +
+    "const timer=setTimeout(stop,wait);const code=await new Promise(done=>{child.on('error',()=>done(-1));child.on('close',done)});clearTimeout(timer);" +
+    "let raw=null;if(!broken&&code===0)try{raw=parse(Buffer.concat(parts).toString('utf8'))}catch{}" +
+    `const clean=raw=>{${shape.clean}};const results=raw===null?null:clean(raw);` +
+    "if(results===null)exit(1);write('CGR '+nonce+' '+stringify(results)+'\\n',()=>exit(0));";
+}
+
+// software-bounds: every answer is a number or null; the parent keeps numbers only.
+export const softwareHiddenDriver = hiddenDriver({
+  entry: "src/search.ts", exportName: "lowerBound",
+  freeze: "for(const item of cases)freeze(item.values);",
+  each: "const found=lowerBound(item.values,item.target);if(typeof found==='number')value=found",
+  clean: "if(!Array.isArray(raw)||raw.length!==cases.length)return null;const out=[];for(let i=0;i<cases.length;i++){const v=raw[i];if(v===null||typeof v==='number')out[i]=v;else return null}return out",
+});
 
 export const softwareBoundsSpec: SoftwareTaskSpec = makeSpec({
   id: softwareBoundsTaskId, bundle: softwareBoundsBundle, writablePath: "src/search.ts", visibleTestPath: "tests/search.test.ts",
@@ -190,24 +234,20 @@ export function softwareIntervalsHiddenCases(random: Uint8Array = randomBytes(20
   }
   return cases;
 }
-// Same stdin, nonce and stdout hardening as the bounds driver. Inputs (the list
-// and every pair) are deep-frozen, so a candidate that sorts or edits them in
-// place throws. The answer is accepted only if it is an array of 2-element
-// arrays of numbers that is no longer than the input; it is copied into plain
-// null-prototype arrays before stringify, so inherited toJSON hooks cannot
-// change the copied numeric results.
-export const softwareIntervalsHiddenDriver = "const write=process.stdout.write.bind(process.stdout),stringify=JSON.stringify,parse=JSON.parse,exit=process.exit.bind(process),concat=Buffer.concat,isArray=Array.isArray,freeze=Object.freeze,setPrototypeOf=Object.setPrototypeOf;" +
-  "const chunks=[];for await(const chunk of process.stdin)chunks[chunks.length]=chunk;" +
-  "const {nonce,cases}=parse(concat(chunks).toString('utf8'));" +
-  "process.stdout.write=()=>true;process.stderr.write=()=>true;" +
-  "for(const item of cases){for(const pair of item.intervals)freeze(pair);freeze(item.intervals)}" +
-  "const {mergeIntervals}=await import('/task/src/intervals.ts');" +
-  "const results=setPrototypeOf([],null);let at=0;" +
-  "for(const item of cases){let value=null;try{const found=mergeIntervals(item.intervals);" +
-  "if(isArray(found)){const size=found.length,copy=setPrototypeOf([],null);let valid=size<=item.intervals.length;" +
-  "for(let index=0;valid&&index<size;index++){const pair=found[index];if(isArray(pair)&&pair.length===2){const start=pair[0],end=pair[1];if(typeof start==='number'&&typeof end==='number')copy[index]=setPrototypeOf([start,end],null);else valid=false}else valid=false}" +
-  "if(valid)value=copy}}catch{}results[at++]=value}" +
-  "write('CGR '+nonce+' '+stringify(results)+'\\n',()=>exit(0));";
+// Inputs (the list and every pair) are deep-frozen, so a candidate that sorts or
+// edits them in place throws. The child accepts an answer only if it is an array
+// of 2-element arrays of numbers that is no longer than the input and copies it
+// into null-prototype arrays before stringify, so inherited toJSON hooks cannot
+// change the copied numbers; the parent then rebuilds plain arrays again.
+export const softwareIntervalsHiddenDriver = hiddenDriver({
+  entry: "src/intervals.ts", exportName: "mergeIntervals",
+  freeze: "for(const item of cases){for(const pair of item.intervals)freeze(pair);freeze(item.intervals)}",
+  each: "const found=mergeIntervals(item.intervals);" +
+    "if(isArray(found)){const size=found.length,copy=setPrototypeOf([],null);let valid=size<=item.intervals.length;" +
+    "for(let index=0;valid&&index<size;index++){const pair=found[index];if(isArray(pair)&&pair.length===2){const start=pair[0],end=pair[1];if(typeof start==='number'&&typeof end==='number')copy[index]=setPrototypeOf([start,end],null);else valid=false}else valid=false}" +
+    "if(valid)value=copy}",
+  clean: "if(!Array.isArray(raw)||raw.length!==cases.length)return null;const out=[];for(let i=0;i<cases.length;i++){const v=raw[i];if(v===null){out[i]=null;continue}if(!Array.isArray(v)||v.length>cases[i].intervals.length)return null;const list=[];for(const p of v){if(!Array.isArray(p)||p.length!==2||typeof p[0]!=='number'||typeof p[1]!=='number')return null;list[list.length]=[p[0],p[1]]}out[i]=list}return out",
+});
 
 export const softwareIntervalsSpec: SoftwareTaskSpec = makeSpec({
   id: softwareIntervalsTaskId, bundle: softwareIntervalsBundle, writablePath: "src/intervals.ts", visibleTestPath: "tests/intervals.test.ts",
@@ -338,6 +378,23 @@ export async function snapshotSoftwareCandidate(runtime: Parameters<typeof snaps
 
 export const softwareHashScript = "const fs=require('node:fs'),crypto=require('node:crypto'),out={};for(const name of JSON.parse(process.argv[1]))out[name]=crypto.createHash('sha256').update(fs.readFileSync('/task/'+name)).digest('hex');console.log(JSON.stringify(out));";
 
+// The visible tests run in Node's permission model: reads only below /task, no writes, workers, inspector or addons, and
+// the preload below freezes the exports of node:assert, node:assert/strict and node:test before the test file loads, so a
+// candidate cannot monkeypatch the assertions to make failing tests pass. The test runner needs --allow-child-process to
+// start one subprocess per test file (the candidate shares that child's permissions, so it can spawn there; nothing
+// secret exists in this phase and the container is offline and read-only). Candidate and test code still share a process,
+// so visible_tests_passed is a secondary signal: the hidden-case gate is the decisive one.
+export const softwareVisiblePreload = "import assert from'node:assert';import strict from'node:assert/strict';import test from'node:test';" +
+  "const isObject=value=>typeof value==='object'&&value!==null||typeof value==='function',skip=new Set([globalThis,process]);" +
+  "for(const key of Reflect.ownKeys(globalThis)){const found=Reflect.getOwnPropertyDescriptor(globalThis,key);if(found&&'value'in found&&isObject(found.value))skip.add(found.value)}" +
+  "const seen=new Set(),queue=[assert,strict,test];" +
+  "while(queue.length){const item=queue.pop();if(seen.has(item)||skip.has(item))continue;seen.add(item);for(const key of Reflect.ownKeys(item)){const found=Reflect.getOwnPropertyDescriptor(item,key);if(found&&'value'in found&&isObject(found.value))queue.push(found.value)}Object.freeze(item)}";
+/** The verifier's exec argv for the visible tests: the agent's test argv plus the permission model, the freezing preload and a TAP reporter. */
+export function softwareVisibleArgv(spec: SoftwareTaskSpec): string[] {
+  return [spec.testArgv[0], "--permission", "--allow-fs-read=/task", "--allow-child-process", ...spec.testArgv.slice(1, -1),
+    `--import=data:text/javascript,${encodeURIComponent(softwareVisiblePreload)}`, "--test-reporter=tap", spec.visibleTestPath];
+}
+
 export interface SoftwareVerifierResult { passed: boolean; cases: number; visible_tests_passed: boolean; hidden_cases_passed: boolean; candidate_sha256: string }
 type CommandResult = Awaited<ReturnType<ControlledTaskDocker["command"]>>;
 // The last summary lines belong to the test runner itself; candidate output is printed earlier.
@@ -349,6 +406,8 @@ function visibleSummary(result: CommandResult, expectedTests: number): boolean {
   };
   return last("tests") === expectedTests && last("pass") === expectedTests && last("fail") === 0;
 }
+// A failed docker command: the runtime's checked() throws a plain docker_failed error, the owned-process layer a typed one.
+const dockerExecFailure = (error: unknown) => error instanceof DockerCommandError ? error.reason !== "cancelled" : error instanceof Error && error.message === "docker_failed";
 function hiddenResult(result: CommandResult, nonce: string, expected: unknown[]): boolean {
   if (result.code !== 0) return false;
   const prefix = `CGR ${nonce} `, lines = result.stdout.split("\n").filter(line => line.startsWith(prefix));
@@ -364,7 +423,7 @@ export async function verifySoftwareCandidate(source: string, image: string, dep
     if (error instanceof AggregateError && error.message === "sandbox_cleanup_failed") throw new ControlledTaskCleanupError("verifier", [error]);
     throw error;
   }), id = randomUUID(), name = `cg-verifier-${id}`;
-  const visibleArgv = [...spec.testArgv.slice(0, -1), "--test-reporter=tap", spec.visibleTestPath];
+  const visibleArgv = softwareVisibleArgv(spec);
   // A candidate that hangs or floods output fails its check; cancellation and daemon errors still propagate.
   // After a timeout the runaway process can still occupy the container (the exec client is gone, the process is not),
   // so no further command is sent there; the verdict is already a rejection and the container is removed below.
@@ -390,15 +449,26 @@ export async function verifySoftwareCandidate(source: string, image: string, dep
     // expected answers never enter any container; the nonce is per run.
     const cases = spec.hidden.cases(), expected = cases.map(item => spec.hidden.oracle(item));
     const nonce = randomBytes(16).toString("hex");
-    const hiddenPassed = !wedged && hiddenResult(await run(["exec", "-i", name, "node", "--experimental-strip-types", "--input-type=module", "-e", spec.hidden.driver],
+    const hiddenPassed = !wedged && hiddenResult(await run(["exec", "-i", name, "node", "--input-type=module", "-e", spec.hidden.driver],
       {timeoutMs: 10_000, maxBytes: spec.hidden.maxBytes, stdin: Readable.from([Buffer.from(JSON.stringify({nonce, cases}))])}), nonce, expected);
-    if (wedged) return {passed: false, cases: cases.length, visible_tests_passed: visiblePassed, hidden_cases_passed: false, candidate_sha256: sha256(source)};
+    const verdict = {passed: visiblePassed && hiddenPassed, cases: cases.length, visible_tests_passed: visiblePassed, hidden_cases_passed: hiddenPassed, candidate_sha256: sha256(source)};
+    // A rejection stands as it is. The candidate ran in this container and can kill its keepalive or exhaust the pid limit,
+    // so the hash step below must never be able to turn a rejection into a verifier failure.
+    if (!verdict.passed) return verdict;
     const files = Object.fromEntries(spec.bundle.files.map(file => [file.path, file.path === spec.writablePath ? sha256(source) : file.sha256]));
-    const after = await deps.checked(["exec", name, "node", "-e", softwareHashScript, JSON.stringify(Object.keys(files))], 10_000);
+    let after: string;
+    try { after = await deps.checked(["exec", name, "node", "-e", softwareHashScript, JSON.stringify(Object.keys(files))], 10_000); }
+    catch (error) {
+      // Both checks passed, yet the container no longer answers although the daemon does: the candidate broke its own sandbox.
+      if (signal?.aborted || !dockerExecFailure(error)) throw error;
+      try { await deps.checked(["inspect", "--format", "{{.State.Status}}", name]); } catch { throw error; }
+      // The result protocol requires passed === visible && hidden, so the unconfirmed gate is reported as failed.
+      return {...verdict, passed: false, hidden_cases_passed: false};
+    }
     let same = false;
     try { assert.deepEqual(JSON.parse(after), files); same = true; } catch {}
     if (!same) throw new Error("verifier_candidate_mutated");
-    return {passed: visiblePassed && hiddenPassed, cases: cases.length, visible_tests_passed: visiblePassed, hidden_cases_passed: hiddenPassed, candidate_sha256: sha256(source)};
+    return verdict;
   } finally {
     const failures: unknown[] = [];
     try {

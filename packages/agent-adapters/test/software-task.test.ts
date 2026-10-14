@@ -8,12 +8,12 @@ import path from "node:path";
 import { test, type TestContext } from "node:test";
 import vm from "node:vm";
 import { contractHash } from "@commongrid/task-schema";
-import { ControlledTaskCleanupError, applyControlledPatch, buildControlledPatch, controlledBaseline, controlledTaskExecDescription, createControlledPatch, type ControlledVerifierDeps } from "../src/controlled-task.ts";
+import { ControlledTaskCleanupError, applyControlledPatch, buildControlledPatch, controlledBaseline, controlledTaskExecDescription, controlledVerifierDeps, createControlledPatch, type ControlledVerifierDeps } from "../src/controlled-task.ts";
 import { taskCandidateSnapshotScript } from "../src/controlled-task-artifact.ts";
 import { gitFixtureEpoch, gitFixtureIdentity, gitFixtureIds, gitFixtureMessage } from "../src/git-object-ids.mjs";
 import { SoftwareBundleError, assertSoftwareCandidate, lowerBoundOracle, mergeIntervalsOracle, seedSoftwareTask, snapshotSoftwareCandidate, softwareBaseline, softwareBoundsTask, softwareBoundsTaskId, softwareEntryFiles,
   findSoftwareStrategy, softwareForbiddenPatterns, softwareHarnessInstructions, softwareStrategyNotice, softwareHiddenCases, softwareSnapshotScript, softwareSnapshotSpec, softwareTaskPrompt, softwareTestArgv, softwareVerifierCases,
-  softwareVisibleTestCount, verifyCatalogSoftwareBundle, verifySoftwareBundle, verifySoftwareCandidate, softwareBoundsSpec, softwareIntervalsBaseline, softwareIntervalsHiddenCases, softwareIntervalsHiddenDriver, softwareIntervalsSpec, softwareIntervalsTask,
+  softwareVisibleTestCount, verifyCatalogSoftwareBundle, verifySoftwareBundle, verifySoftwareCandidate, softwareBoundsSpec, softwareIntervalsBaseline, softwareIntervalsHiddenCases, softwareIntervalsHiddenDriver, softwareIntervalsSpec, softwareIntervalsTask, softwareVisibleArgv, softwareVisiblePreload,
   softwareIntervalsTaskId, softwareTaskSpecFor, softwareTaskSpecs, type SoftwareBundlePin, type SoftwareIntervalsCase, type SoftwareTaskSpec } from "../src/software-task.ts";
 import { softwareBoundsBundle } from "../src/software-bounds-bundle.generated.ts";
 import { softwareIntervalsBundle } from "../src/software-intervals-bundle.generated.ts";
@@ -294,8 +294,9 @@ test("hidden cases are sorted integer arrays with fixed edges and random additio
 // ---- Verifier --------------------------------------------------------------
 
 // A node-backed stand-in for the offline verifier container. It runs the real
-// visible tests and the real hidden driver with the host's Node; only the
-// module path in the driver is replaced and exec arguments are interpreted.
+// visible tests and the real hidden driver (parent and permission-restricted
+// child) with the host's Node; only the /task root is replaced by a temporary
+// directory and exec arguments are interpreted.
 function verifierFixture(options: {mutate?: boolean; hiddenOverride?: (stdout: string) => string; spec?: SoftwareTaskSpec} = {}) {
   const spec = options.spec ?? softwareBoundsSpec, calls: string[] = [], state = {dir: "", created: [] as string[], stdin: "", fail: undefined as undefined | "container" | "staging"};
   const deps: ControlledVerifierDeps = {
@@ -323,12 +324,14 @@ function verifierFixture(options: {mutate?: boolean; hiddenOverride?: (stdout: s
     async command(args, commandOptions) {
       if (args.includes("--test-reporter=tap")) {
         calls.push("visible"); assert.equal(args[0], "exec");
-        return new Promise(resolve => execFile(process.execPath, args.slice(3), {cwd: state.dir, env: cleanEnv}, (error, stdout) => { resolve({code: error ? (typeof error.code === "number" ? error.code : 1) : 0, stdout}); }));
+        const hostArgs = args.slice(3).map(arg => arg === "--allow-fs-read=/task" ? "--allow-fs-read=" + state.dir : arg);
+        return new Promise(resolve => execFile(process.execPath, hostArgs, {cwd: state.dir, env: cleanEnv}, (error, stdout) => { resolve({code: error ? (typeof error.code === "number" ? error.code : 1) : 0, stdout}); }));
       }
       calls.push("hidden"); assert.deepEqual(args.slice(0, 2).concat(args[2]), ["exec", "-i", args[2]]); assert.ok(commandOptions.stdin);
-      const driver = args.at(-1)!.replace(`'/task/${spec.writablePath}'`, JSON.stringify(new URL("file:///" + path.join(state.dir, spec.writablePath).replaceAll("\\", "/")).href));
+      const driver = args.at(-1)!.replace("const root='/task'", `const root=${JSON.stringify(state.dir)}`);
+      assert.notEqual(driver, args.at(-1));
       return new Promise((resolve, reject) => {
-        const child = spawn(process.execPath, ["--experimental-strip-types", "--input-type=module", "-e", driver], {cwd: state.dir, stdio: ["pipe", "pipe", "ignore"]}), out: Buffer[] = [], input: Buffer[] = [];
+        const child = spawn(process.execPath, ["--input-type=module", "-e", driver], {cwd: state.dir, stdio: ["pipe", "pipe", "ignore"]}), out: Buffer[] = [], input: Buffer[] = [];
         child.stdout.on("data", chunk => out.push(chunk)); child.on("error", reject); child.stdin.on("error", () => {});
         child.on("close", code => resolve({code, stdout: options.hiddenOverride ? options.hiddenOverride(Buffer.concat(out).toString()) : Buffer.concat(out).toString()}));
         commandOptions.stdin!.on("data", (chunk: Buffer) => { input.push(chunk); child.stdin.write(chunk); }).on("end", () => { state.stdin = Buffer.concat(input).toString(); child.stdin.end(); });
@@ -338,13 +341,15 @@ function verifierFixture(options: {mutate?: boolean; hiddenOverride?: (stdout: s
   return {calls, deps, state};
 }
 const happyCalls = ["staging", "write", "write", "write", "create", "start", "visible", "hidden", "exec", "container", "close"];
+// A rejection is final: the candidate ran in the container, so the hash step (which a candidate can break) is skipped.
+const rejectedCalls = happyCalls.filter(call => call !== "exec");
 const verdict = (passed: boolean, visible: boolean, hidden: boolean, source: string) => ({passed, cases: 40, visible_tests_passed: visible, hidden_cases_passed: hidden, candidate_sha256: sha256(source)});
 
 test("verifier fails the baseline, accepts a correct fix and separates visible from hidden failures", async () => {
   for (const [name, source, expected] of [["baseline", softwareBaseline, [false, false, false]], ["fixed", fixed, [true, true, true]], ["visible-passing, hidden-failing", hiddenOnly, [false, true, false]]] as const) {
     const f = verifierFixture(), result = await verifySoftwareCandidate(source, image, f.deps);
     assert.deepEqual(result, verdict(expected[0], expected[1], expected[2], source), name);
-    assert.deepEqual(f.calls, happyCalls, name);
+    assert.deepEqual(f.calls, expected[0] ? happyCalls : rejectedCalls, name);
   }
 });
 test("verifier container is offline, read-only, unprivileged and mounts the staging volume read-only", async () => {
@@ -377,7 +382,7 @@ test("a candidate cannot forge the result: process.exit, fake TAP, fake result l
   for (const [name, source] of Object.entries(sources)) {
     const f = verifierFixture(), result = await verifySoftwareCandidate(source, image, f.deps);
     assert.equal(result.passed, false, name); assert.equal(result.hidden_cases_passed, false, name);
-    assert.deepEqual(f.calls, happyCalls, name);
+    assert.deepEqual(f.calls, rejectedCalls, name);
   }
   // A wrong implementation that survives its own noise: output is discarded and results still mismatch.
   const f = verifierFixture(), result = await verifySoftwareCandidate("for (let i = 0; i < 1000; i++) console.log('noise');\n" + softwareBaseline, image, f.deps);
@@ -394,8 +399,8 @@ test("a result line of a different run or a duplicated line is not accepted", as
 });
 test("timeouts and output floods fail the check, but cancellation and other Docker errors propagate", async () => {
   // A timeout can leave a runaway process in the container, so nothing else is sent there; a flood leaves the container usable.
-  for (const [reason, step, expected, tail] of [["timeout", "visible", verdict(false, false, false, fixed), ["visible", "container", "close"]], ["output_limit", "visible", verdict(false, false, true, fixed), ["visible", "hidden", "exec", "container", "close"]],
-    ["timeout", "hidden", verdict(false, true, false, fixed), ["visible", "hidden", "container", "close"]], ["output_limit", "hidden", verdict(false, true, false, fixed), ["visible", "hidden", "exec", "container", "close"]]] as const) {
+  for (const [reason, step, expected, tail] of [["timeout", "visible", verdict(false, false, false, fixed), ["visible", "container", "close"]], ["output_limit", "visible", verdict(false, false, true, fixed), ["visible", "hidden", "container", "close"]],
+    ["timeout", "hidden", verdict(false, true, false, fixed), ["visible", "hidden", "container", "close"]], ["output_limit", "hidden", verdict(false, true, false, fixed), ["visible", "hidden", "container", "close"]]] as const) {
     const f = verifierFixture(), command = f.deps.command;
     f.deps.command = async (args, options) => { if (args.includes("--test-reporter=tap") === (step === "visible")) { f.calls.push(step); throw new DockerCommandError(reason); } return command(args, options); };
     const result = await verifySoftwareCandidate(fixed, image, f.deps);
@@ -723,7 +728,7 @@ test("software-intervals: verifier fails the baseline, accepts a correct fix and
   for (const [name, source, expected] of [["baseline", softwareIntervalsBaseline, [false, false, false]], ["fixed", ivFixed, [true, true, true]], ["visible-passing, hidden-failing", ivHiddenOnly, [false, true, false]]] as const) {
     const f = ivFixture(), result = await ivVerify(source, f);
     assert.deepEqual(result, ivVerdict(expected[0], expected[1], expected[2], source), name);
-    assert.deepEqual(f.calls, happyCalls, name);
+    assert.deepEqual(f.calls, expected[0] ? happyCalls : rejectedCalls, name);
   }
 });
 test("software-intervals: other plausible wrong or in-place fixes are rejected by the verifier", async () => {
@@ -743,7 +748,7 @@ test("software-intervals: other plausible wrong or in-place fixes are rejected b
     assert.notEqual(source, ivFixed, name);
     const f = ivFixture(), result = await ivVerify(source, f);
     assert.equal(result.passed, false, name); assert.equal(result.hidden_cases_passed, false, name);
-    assert.deepEqual(f.calls, happyCalls, name);
+    assert.deepEqual(f.calls, rejectedCalls, name);
     assert.equal(result.visible_tests_passed, false, name);
   }
 });
@@ -755,8 +760,8 @@ test("software-intervals: verifier container is offline, read-only and unprivile
   const commands: string[][] = [];
   const g = ivFixture(), command = g.deps.command; g.deps.command = async (a, o) => { commands.push(a); return command(a, o); };
   await ivVerify(ivFixed, g);
-  assert.deepEqual(commands[0], ["exec", commands[0][1], "node", "--experimental-strip-types", "--test", "--test-reporter=tap", "tests/intervals.test.ts"]);
-  assert.equal(commands[1].at(-1), softwareIntervalsHiddenDriver); assert.ok(commands[1].at(-1)!.includes("/task/src/intervals.ts") && !commands[1].at(-1)!.includes("search.ts"));
+  assert.deepEqual(commands[0], ["exec", commands[0][1], ...softwareVisibleArgv(ivSpec)]);
+  assert.equal(commands[1].at(-1), softwareIntervalsHiddenDriver); assert.ok(commands[1].at(-1)!.includes("entry='src/intervals.ts'") && !commands[1].at(-1)!.includes("search.ts"));
 });
 test("software-intervals: hidden cases travel on stdin with a per-run nonce and never carry expected answers", async () => {
   const seen = [];
@@ -787,7 +792,7 @@ test("software-intervals: a candidate cannot forge the result", async () => {
     assert.notEqual(source, ivFixed, name);
     const f = ivFixture(), result = await ivVerify(source, f);
     assert.equal(result.passed, false, name); assert.equal(result.hidden_cases_passed, false, name);
-    assert.deepEqual(f.calls, happyCalls, name);
+    assert.deepEqual(f.calls, rejectedCalls, name);
   }
   const noisy = ivFixture(), accepted = await ivVerify("console.log('noise');\nconsole.error('noise');\n" + ivFixed, noisy);
   assert.equal(accepted.hidden_cases_passed, true);
@@ -825,7 +830,7 @@ for (const spec of [softwareBoundsSpec, ivSpec]) {
         const input = JSON.parse(f.state.stdin);
         assert.ok(output.startsWith(`CGR ${input.nonce} [`), "the trusted result remains an array");
         if (expected) assert.deepEqual(JSON.parse(output.slice(`CGR ${input.nonce} `.length)), input.cases.map((item: unknown) => spec.hidden.oracle(item)));
-        assert.deepEqual(f.calls, happyCalls);
+        assert.deepEqual(f.calls, expected ? happyCalls : rejectedCalls);
       }
     }
   });
@@ -837,8 +842,8 @@ test("software-intervals: a result line of a different run or a duplicated line 
   }
 });
 test("software-intervals: timeouts and output floods fail the check, but cancellation and other Docker errors propagate", async () => {
-  for (const [reason, step, expected, tail] of [["timeout", "visible", ivVerdict(false, false, false, ivFixed), ["visible", "container", "close"]], ["output_limit", "visible", ivVerdict(false, false, true, ivFixed), ["visible", "hidden", "exec", "container", "close"]],
-    ["timeout", "hidden", ivVerdict(false, true, false, ivFixed), ["visible", "hidden", "container", "close"]], ["output_limit", "hidden", ivVerdict(false, true, false, ivFixed), ["visible", "hidden", "exec", "container", "close"]]] as const) {
+  for (const [reason, step, expected, tail] of [["timeout", "visible", ivVerdict(false, false, false, ivFixed), ["visible", "container", "close"]], ["output_limit", "visible", ivVerdict(false, false, true, ivFixed), ["visible", "hidden", "container", "close"]],
+    ["timeout", "hidden", ivVerdict(false, true, false, ivFixed), ["visible", "hidden", "container", "close"]], ["output_limit", "hidden", ivVerdict(false, true, false, ivFixed), ["visible", "hidden", "container", "close"]]] as const) {
     const f = ivFixture(), command = f.deps.command;
     f.deps.command = async (args, options) => { if (args.includes("--test-reporter=tap") === (step === "visible")) { f.calls.push(step); throw new DockerCommandError(reason); } return command(args, options); };
     const result = await ivVerify(ivFixed, f);
@@ -895,4 +900,208 @@ test("software-intervals: the reference fix agrees with the host oracle on every
     }
     assert.ok(disagreements >= 3, `the hidden-only variant must fail several hidden cases (failed ${disagreements})`);
   } finally { await rm(root, {recursive: true, force: true}); }
+});
+
+// ============================================================================
+// Verifier hardening (both tasks): permission-restricted hidden child, frozen
+// assertions in the visible run, and rejections that survive a broken sandbox
+// ============================================================================
+
+const hardenedSpecs = [softwareBoundsSpec, ivSpec] as const;
+const referenceFor = (spec: SoftwareTaskSpec) => spec === ivSpec ? ivFixed : fixed;
+async function verifyWith(spec: SoftwareTaskSpec, source: string, options: {hiddenOverride?: (stdout: string) => string} = {}) {
+  const f = verifierFixture({...options, spec});
+  return {f, result: await verifySoftwareCandidate(source, image, f.deps, undefined, spec)};
+}
+// Candidate code can tell the hidden child apart from the visible run: only the hidden child is started with --input-type.
+const inHidden = `const hidden = process.execArgv.some(arg => arg.startsWith("--input-type"));\n`;
+
+test("the visible run uses the permission model, the freezing preload and a TAP reporter; the hidden parent never shares a process with the candidate", async () => {
+  for (const spec of hardenedSpecs) {
+    const argv = softwareVisibleArgv(spec);
+    assert.deepEqual(argv.slice(0, 5), ["node", "--permission", "--allow-fs-read=/task", "--allow-child-process", "--experimental-strip-types"]);
+    assert.equal(argv[5], "--test"); const preload = argv[6];
+    assert.ok(preload.startsWith("--import=data:text/javascript,") && !preload.includes('"') && !/\s/.test(preload), "the preload travels as an inert data URL");
+    assert.deepEqual(argv.slice(7), ["--test-reporter=tap", spec.visibleTestPath]);
+    assert.equal(decodeURIComponent(preload.slice("--import=data:text/javascript,".length)), softwareVisiblePreload);
+    const commands: string[][] = [], f = verifierFixture({spec}), command = f.deps.command;
+    f.deps.command = async (args, options) => { commands.push(args); return command(args, options); };
+    await verifySoftwareCandidate(referenceFor(spec), image, f.deps, undefined, spec);
+    assert.deepEqual(commands[0], ["exec", commands[0][1], ...argv]);
+    assert.deepEqual(commands[1].slice(0, 2), ["exec", "-i"]); assert.deepEqual(commands[1].slice(3, 6), ["node", "--input-type=module", "-e"]);
+    // The parent holds the nonce; the child's source and arguments never mention it, it gets an empty environment and only the cases on stdin.
+    const driver = spec.hidden.driver, encoded = /source='([A-Za-z0-9+/=]+)'/.exec(driver)![1], child = Buffer.from(encoded, "base64").toString("utf8");
+    assert.ok(!/nonce/i.test(child) && !child.includes("CGR"), spec.id);
+    assert.ok(driver.includes("'--permission','--allow-fs-read='+root") && driver.includes("env:{}") && driver.includes("stdio:['pipe','ignore','ignore','pipe']"), spec.id);
+    assert.ok(driver.includes(`entry='${spec.writablePath}'`) && driver.includes("child.stdin.end(stringify(cases))"), spec.id);
+  }
+});
+test("the hidden child imports the candidate with no process, worker, inspector, write or outside-read access", async () => {
+  // The honest fix answers correctly only if every forbidden operation was denied by the permission model.
+  const probe = inHidden + `const denied = async (run: () => unknown) => { try { await run(); return false; } catch (error) { return (error as {code?: string}).code === "ERR_ACCESS_DENIED"; } };
+const sandboxed = !hidden || (await Promise.all([
+  denied(async () => (await import("node:child_" + "process")).spawnSync(process.execPath, ["-e", "0"])),
+  denied(async () => new (await import("node:worker_threads")).Worker("0", {eval: true})),
+  denied(async () => new (await import("node:inspector")).Session().connect()),
+  denied(async () => (await import("fs")).writeFileSync((await import("os")).tmpdir() + "/cg-hidden-probe", "x")),
+  denied(async () => (await import("fs")).readFileSync(process.execPath)),
+])).every(Boolean);
+`;
+  for (const spec of hardenedSpecs) {
+    const marker = spec === ivSpec ? "return merged;" : "return low;", good = marker.slice(7, -1), bad = spec === ivSpec ? "[]" : "-1";
+    const source = probe + referenceFor(spec).replace(marker, `return sandboxed ? ${good} : ${bad};`);
+    assert.notEqual(source, probe + referenceFor(spec));
+    const {result} = await verifyWith(spec, source);
+    assert.equal(result.hidden_cases_passed, true, spec.id); assert.equal(result.visible_tests_passed, true, spec.id);
+  }
+});
+test("the review's heap-snapshot forger cannot produce a result line: the nonce is not in the candidate's process", async () => {
+  // The review's proof of concept, in hidden mode only: write a heap snapshot to the temp dir, scan it for 32-digit hex strings,
+  // print a forged result line for each (stdout, stderr and the result pipe), then exit before the cases run.
+  const forger = inHidden + `import {readFileSync, unlinkSync, writeSync} from "fs";
+import {tmpdir} from "os";
+import * as v8 from "node:v8";
+if (hidden) {
+  const file = v8.writeHeapSnapshot(tmpdir() + "/cg-forger.heapsnapshot"), text = readFileSync(file, "utf8");
+  unlinkSync(file);
+  for (const found of new Set(text.match(/"[0-9a-f]{32}"/g) ?? [])) for (const fd of [1, 2, 3]) { try { writeSync(fd, "CGR " + found.slice(1, -1) + " []\\n"); } catch {} }
+  process["exit"](0);
+}
+`;
+  // The same attack with a tolerant error path: whatever the snapshot yields, the lines it prints are forged and must not be accepted.
+  const tolerant = inHidden + `import {readFileSync, unlinkSync, writeSync} from "fs";
+import {tmpdir} from "os";
+import * as v8 from "node:v8";
+if (hidden) {
+  let text = "";
+  try { const file = v8.writeHeapSnapshot(tmpdir() + "/cg-forger.heapsnapshot"); text = readFileSync(file, "utf8"); unlinkSync(file); } catch {}
+  for (const found of new Set(text.match(/"[0-9a-f]{32}"/g) ?? [])) for (const fd of [1, 2, 3]) { try { writeSync(fd, "CGR " + found.slice(1, -1) + " []\\n"); } catch {} }
+  for (const fd of [1, 2, 3]) { try { writeSync(fd, "CGR " + "0".repeat(32) + " []\\n"); } catch {} }
+  process["exit"](0);
+}
+`;
+  for (const spec of hardenedSpecs) for (const attack of [forger, tolerant]) {
+    let output = "";
+    const {f, result} = await verifyWith(spec, attack + referenceFor(spec), {hiddenOverride: stdout => (output = stdout)});
+    assert.equal(result.hidden_cases_passed, false, spec.id); assert.equal(result.visible_tests_passed, true, spec.id);
+    assert.ok(!output.includes("CGR"), "no result line at all: " + spec.id); assert.deepEqual(f.calls, rejectedCalls);
+  }
+});
+test("process.exit, early result writes and exotic exits in the hidden child never produce a valid line", async () => {
+  const hiddenOnlyExit = (code: string) => inHidden + `if (hidden) { ${code} }\n`;
+  const attempts = {
+    exit: hiddenOnlyExit(`process["exit"](0);`),
+    kill: hiddenOnlyExit(`process["kill"](process.pid, "SIGKILL");`),
+    throwAtImport: hiddenOnlyExit(`throw new Error("boom");`),
+    // Anything that is not a numeric answer array of the right length on fd 3 is rejected by the parent.
+    wrongShape: hiddenOnlyExit(`(await import("fs")).writeSync(3, JSON.stringify(["a"])); process["exit"](0);`),
+    garbage: hiddenOnlyExit(`(await import("fs")).writeSync(3, "CGR deadbeef not json"); process["exit"](0);`),
+    stringAnswers: hiddenOnlyExit(`(await import("fs")).writeSync(3, JSON.stringify(Array.from({length: 40}, () => "0"))); process["exit"](0);`),
+  };
+  for (const spec of hardenedSpecs) for (const [name, prefix] of Object.entries(attempts)) {
+    let output = "";
+    const {result} = await verifyWith(spec, prefix + referenceFor(spec), {hiddenOverride: stdout => (output = stdout)});
+    assert.equal(result.hidden_cases_passed, false, `${spec.id}/${name}`); assert.ok(!output.includes("CGR"), `${spec.id}/${name}`);
+  }
+});
+test("an oversized result stream or a hung hidden child is killed by the parent and fails the check", async () => {
+  const flood = inHidden + `import {writeSync} from "fs";\nif (hidden) for (let i = 0; i < 400; i++) { try { writeSync(3, "x".repeat(1000)); } catch {} }\n`;
+  const {result} = await verifyWith(softwareBoundsSpec, flood + fixed); assert.equal(result.hidden_cases_passed, false); assert.equal(result.visible_tests_passed, true);
+  const started = Date.now(), hang = await verifyWith(softwareBoundsSpec, inHidden + "if (hidden) for (;;) {}\n" + fixed);
+  assert.equal(hang.result.hidden_cases_passed, false); assert.equal(hang.result.visible_tests_passed, true); assert.deepEqual(hang.f.calls, rejectedCalls);
+  assert.ok(Date.now() - started < 30_000, "the parent's own timer ends the hidden run");
+});
+
+// Replaces the assertion functions that the visible tests use: with working tampering every test below would pass.
+const tamperPrefix = `import assert from "node:assert/strict";
+import legacy from "node:assert";
+for (const target of [assert, legacy]) for (const key of ["equal", "deepEqual", "strictEqual", "deepStrictEqual", "ok", "notEqual", "notDeepEqual", "throws"]) {
+  try { (target as any)[key] = () => {}; } catch {}
+  try { Object.defineProperty(target, key, {value: () => {}}); } catch {}
+}
+`;
+test("a candidate that monkeypatches node:assert cannot make failing visible tests pass", async () => {
+  for (const spec of hardenedSpecs) {
+    const tampered = tamperPrefix + spec.baseline;
+    // Control: without the verifier's preload the same candidate does pass the unmodified visible tests.
+    const root = await mkdtemp(path.join(tmpdir(), "cg-software-tamper-"));
+    try {
+      for (const file of spec.bundle.files) { await mkdir(path.dirname(path.join(root, file.path)), {recursive: true}); await writeFile(path.join(root, file.path), file.path === spec.writablePath ? tampered : file.content); }
+      const control = await new Promise<string>(resolve => execFile(process.execPath, ["--experimental-strip-types", "--test", "--test-reporter=tap", spec.visibleTestPath], {cwd: root, env: cleanEnv}, (_error, stdout) => resolve(stdout)));
+      assert.match(control, /^# fail 0$/m, `${spec.id}: the tampering works against an unprotected runner`);
+    } finally { await rm(root, {recursive: true, force: true}); }
+    const {result} = await verifyWith(spec, tampered);
+    assert.equal(result.visible_tests_passed, false, spec.id); assert.equal(result.passed, false, spec.id);
+    // An uncaught assignment (the review's proof of concept) fails inside strict-mode module code and also fails the run.
+    const raw = await verifyWith(spec, `import assert from "node:assert/strict";\n(assert as any).equal = () => {};\n(assert as any).deepEqual = () => {};\n` + spec.baseline);
+    assert.equal(raw.result.visible_tests_passed, false, spec.id);
+    // An honest reference solution still passes every visible and hidden check under the same protections.
+    const honest = await verifyWith(spec, referenceFor(spec));
+    assert.deepEqual(honest.result, {passed: true, cases: 40, visible_tests_passed: true, hidden_cases_passed: true, candidate_sha256: sha256(referenceFor(spec))}, spec.id);
+  }
+});
+test("the visible run denies file writes to the candidate and keeps the TAP count check", async () => {
+  // A passing implementation that tries to write a file at import time: the permission model throws, so the run fails.
+  const writer = `import {writeFileSync} from "fs";\nwriteFileSync(process.cwd() + "/../cg-visible-probe", "x");\n`;
+  for (const spec of hardenedSpecs) {
+    const {result} = await verifyWith(spec, writer + referenceFor(spec));
+    assert.equal(result.visible_tests_passed, false, spec.id);
+    const exit = await verifyWith(spec, `process["exit"](0);\n` + referenceFor(spec));
+    assert.equal(exit.result.visible_tests_passed, false, spec.id);
+  }
+});
+
+test("a rejection never reaches the hash step, and a hash-step failure after passing checks rejects instead of failing the verifier", async () => {
+  const hashFailure = (make: () => Error) => {
+    const f = verifierFixture(), checked = f.deps.checked;
+    f.deps.checked = async (args, timeoutMs) => { if (args[0] === "exec") { f.calls.push("exec"); throw make(); } return checked(args, timeoutMs); };
+    return f;
+  };
+  // Rejected candidates: the hash step would fail but is never attempted.
+  for (const source of [softwareBaseline, hiddenOnly]) {
+    const f = hashFailure(() => new Error("docker_failed")), result = await verifySoftwareCandidate(source, image, f.deps);
+    assert.equal(result.passed, false); assert.ok(!f.calls.includes("exec"));
+  }
+  // Both checks passed, then the candidate killed its keepalive or exhausted the pids: the daemon still answers, so the candidate is rejected.
+  for (const make of [() => new DockerCommandError("failed"), () => new DockerCommandError("timeout"), () => new Error("docker_failed")]) {
+    const f = hashFailure(make), result = await verifySoftwareCandidate(fixed, image, f.deps);
+    assert.deepEqual(result, verdict(false, true, false, fixed)); assert.deepEqual(f.calls.slice(-4), ["exec", "inspect", "container", "close"]);
+  }
+  // A daemon that no longer answers, a cancellation or an unrelated error is not blamed on the candidate.
+  const down = hashFailure(() => new Error("docker_failed")), checked = down.deps.checked;
+  down.deps.checked = async (args, timeoutMs) => { if (args[0] === "inspect") throw new Error("docker_failed"); return checked(args, timeoutMs); };
+  await assert.rejects(verifySoftwareCandidate(fixed, image, down.deps), /docker_failed/); assert.equal(down.calls.at(-1), "close");
+  const controller = new AbortController(), cancelled = hashFailure(() => { controller.abort("cancelled"); return new DockerCommandError("failed"); });
+  await assert.rejects(verifySoftwareCandidate(fixed, image, cancelled.deps, controller.signal)); assert.equal(cancelled.calls.at(-1), "close");
+  const other = hashFailure(() => new Error("PRIVATE_BUG"));
+  await assert.rejects(verifySoftwareCandidate(fixed, image, other.deps), /PRIVATE_BUG/);
+  // A real hash mismatch still surfaces as a verifier error.
+  await assert.rejects(verifySoftwareCandidate(fixed, image, verifierFixture({mutate: true}).deps), /verifier_candidate_mutated/);
+});
+
+// Opt-in: runs the whole hardened verifier in real Docker. Needs the pinned image locally (it never pulls) and Docker running.
+//   CG_REAL_DOCKER_VERIFIER=1 [CG_REAL_DOCKER_IMAGE=node:22-bookworm-slim@sha256:...] npx tsx --test packages/agent-adapters/test/software-task.test.ts
+test("real Docker: honest fixes pass, baselines, forgers, assertion tampering and sandbox-killing candidates are rejected", {skip: process.env.CG_REAL_DOCKER_VERIFIER === "1" ? false : "set CG_REAL_DOCKER_VERIFIER=1 to run the verifier in real Docker"}, async () => {
+  const realImage = process.env.CG_REAL_DOCKER_IMAGE ?? "node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392";
+  const forger = inHidden + `import {writeSync} from "fs";\nimport * as v8 from "node:v8";\nif (hidden) { let text = ""; const keepAlive = setInterval(() => {}, 20); for await (const chunk of v8.getHeapSnapshot()) text += chunk.toString("latin1"); clearInterval(keepAlive);\n  for (const found of new Set(text.match(/"[0-9a-f]{32}"/g) ?? [])) { try { writeSync(1, "CGR " + found.slice(1, -1) + " []\\n"); } catch {} } process["exit"](0); }\n`;
+  for (const spec of hardenedSpecs) {
+    const reference = referenceFor(spec);
+    const run = (source: string) => verifySoftwareCandidate(source, realImage, undefined, undefined, spec);
+    assert.deepEqual(await run(reference), {passed: true, cases: 40, visible_tests_passed: true, hidden_cases_passed: true, candidate_sha256: sha256(reference)}, `${spec.id} reference`);
+    const baseline = await run(spec.baseline); assert.equal(baseline.passed, false); assert.equal(baseline.visible_tests_passed, false); assert.equal(baseline.hidden_cases_passed, false);
+    const forged = await run(forger + reference); assert.equal(forged.passed, false, `${spec.id} forger`); assert.equal(forged.hidden_cases_passed, false);
+    const tampered = await run(tamperPrefix + spec.baseline); assert.equal(tampered.visible_tests_passed, false, `${spec.id} tamper`); assert.equal(tampered.passed, false);
+    // Kills every process in the container (keepalive included) while the visible tests load it: a rejection, never a verifier failure.
+    const killer = await run(`try { process.kill(-1, "SIGKILL"); } catch {}\n` + reference); assert.equal(killer.passed, false, `${spec.id} killer`);
+    if (spec === softwareBoundsSpec) {
+      // The hidden child's own heap holds no 32-digit hex string at all (the nonce lives only in the parent): report the count as the first answer.
+      const census = inHidden + `import * as v8 from "node:v8";\nlet call = 0, found = 0;\nif (hidden) { const keepAlive = setInterval(() => {}, 20); let text = ""; for await (const chunk of v8.getHeapSnapshot()) text += chunk.toString("latin1"); clearInterval(keepAlive); found = new Set(text.match(/"[0-9a-f]{32}"/g) ?? []).size; }\n` + spec.baseline.replace("return low;", "return call++ === 0 ? found : 0;");
+      let captured = "";
+      const capture = {...controlledVerifierDeps, command: async (args: string[], options: Parameters<ControlledVerifierDeps["command"]>[1]) => { const result = await controlledVerifierDeps.command(args, options); if (args.includes("-i")) captured = result.stdout; return result; }};
+      await verifySoftwareCandidate(census, realImage, capture, undefined, spec);
+      assert.match(captured, /^CGR [0-9a-f]{32} \[0(,0)*\]\n$/, "the child's heap held no hex string that could be a nonce");
+    }
+    const hiddenKiller = await run(inHidden + `if (hidden) { try { process.kill(-1, "SIGKILL"); } catch {} }\n` + reference);
+    assert.equal(hiddenKiller.passed, false, `${spec.id} hidden killer`); assert.equal(hiddenKiller.visible_tests_passed, true); assert.equal(hiddenKiller.hidden_cases_passed, false);
+  }
 });
