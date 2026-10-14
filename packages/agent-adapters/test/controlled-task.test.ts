@@ -8,12 +8,22 @@ import { test } from "node:test";
 import vm from "node:vm";
 import { ControlledTaskCleanupError, applyControlledPatch, buildControlledPatch, controlledBaseline, controlledTaskPrompt, controlledTaskToolSchema, controlledVerifierCases, createControlledPatch,
   snapshotControlledCandidate, verifyControlledCandidate, type ControlledVerifierDeps } from "../src/controlled-task.ts";
-import { controlledCandidateSnapshotScript, validateControlledCandidateBytes, validateControlledCandidateSource } from "../src/controlled-task-artifact.ts";
+import { controlledCandidateSnapshotScript, taskCandidateSnapshotScript, validateControlledCandidateBytes, validateControlledCandidateSource } from "../src/controlled-task-artifact.ts";
 import { taskRunMaxPatchBytes, validTaskRunPatch } from "../src/task-run-protocol.ts";
 
 const correct = "export function sumIntegers(values) {\n  if (!Array.isArray(values)) throw new TypeError('Expected an array');\n  let total = 0;\n  for (const value of values) {\n    if (!Number.isSafeInteger(value)) throw new TypeError('Expected safe integers');\n    total += value;\n    if (!Number.isSafeInteger(total)) throw new RangeError('Unsafe sum');\n  }\n  return total;\n}\n";
 // Preserves immediate validation/addition order but skips empty slots.
 const skipsHoles = "export function sumIntegers(values) {\n  if (!Array.isArray(values)) throw new TypeError('Expected an array');\n  let total = 0;\n  values.forEach(value => {\n    if (!Number.isSafeInteger(value)) throw new TypeError('Expected safe integers');\n    total += value;\n    if (!Number.isSafeInteger(total)) throw new RangeError('Unsafe sum');\n  });\n  return total;\n}\n";
+// Invisible/format characters that must never reach a reviewed diff or an LLM reviewer.
+const invisibleCharacters: readonly [string, string][] = [
+  ["ZWSP", "\u200b"], ["ZWNJ", "\u200c"], ["ZWJ", "\u200d"], ["WORD JOINER", "\u2060"], ["BOM mid-text", "\ufeff"], ["SOFT HYPHEN", "\u00ad"],
+  ["ARABIC LETTER MARK", "\u061c"], ["LRM", "\u200e"], ["RLM", "\u200f"], ["LRE", "\u202a"], ["RLO", "\u202e"], ["LRI", "\u2066"], ["PDI", "\u2069"],
+  ["HANGUL CHOSEONG FILLER", "\u115f"], ["HANGUL JUNGSEONG FILLER", "\u1160"], ["HANGUL FILLER", "\u3164"], ["HALFWIDTH HANGUL FILLER", "\uffa0"],
+  ["LINE SEPARATOR", "\u2028"], ["PARAGRAPH SEPARATOR", "\u2029"], ["NEL (C1)", "\u0085"], ["C1 control", "\u009f"], ["COMBINING GRAPHEME JOINER", "\u034f"],
+  ["VARIATION SELECTOR-1", "\ufe00"], ["VARIATION SELECTOR-16", "\ufe0f"], ["MONGOLIAN FVS1", "\u180b"], ["VARIATION SELECTOR-17", "\u{e0100}"], ["VARIATION SELECTOR-256", "\u{e01ef}"],
+  ["TAG LANGUAGE", "\u{e0001}"], ["TAG SPACE", "\u{e0020}"], ["TAG LATIN A", "\u{e0041}"], ["CANCEL TAG", "\u{e007f}"],
+];
+const honestTexts = ["// \u00e7 \u011f \u0131 \u00f6 \u015f \u00fc \u00c7 \u011e \u0130 \u00d6 \u015e \u00dc\n", "const s = 'merhaba \u{1f642} \u4e16\u754c';\r\n\tx();\n", "a\u00a0b"];
 const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
 
 test("artifact policy accepts normal UTF-8 source and rejects unsafe or secret content without disclosing it", () => {
@@ -22,6 +32,14 @@ test("artifact policy accepts normal UTF-8 source and rejects unsafe or secret c
   validateControlledCandidateSource(source); validateControlledCandidateSource(" ".repeat(16384));
   for (const bytes of [Buffer.from([0xc3, 0x28]), Buffer.from([0xed, 0xa0, 0x80])]) assert.throws(() => validateControlledCandidateBytes(bytes), /candidate_invalid_utf8/);
   for (const text of ["a\0b", "a\x1bb", "a\u202eb", "a\u2066b"]) assert.throws(() => validateControlledCandidateSource(text), /candidate_unsafe_content/);
+  for (const [name, character] of invisibleCharacters) {
+    for (const text of [`// a${character}b\n`, character + "x", "x" + character]) {
+      assert.throws(() => validateControlledCandidateSource(text), error => (error as Error).message === "candidate_unsafe_content", name);
+      assert.throws(() => validateControlledCandidateBytes(Buffer.from(text)), error => (error as Error).message === "candidate_unsafe_content", name);
+    }
+  }
+  // Honest text stays accepted: tabs, newlines, CRLF, Turkish letters, simple emoji, CJK, NBSP.
+  for (const honest of honestTexts) { validateControlledCandidateSource(honest); assert.equal(validateControlledCandidateBytes(Buffer.from(honest)), honest); }
   assert.throws(() => validateControlledCandidateSource("\ud800"), /candidate_invalid_utf8/);
   assert.throws(() => validateControlledCandidateSource(" ".repeat(16385)), /candidate_limit/);
   const canary = "Bearer synthetic-canary-token-value";
@@ -30,6 +48,10 @@ test("artifact policy accepts normal UTF-8 source and rejects unsafe or secret c
 });
 test("exporter script embeds the validator without literal bidi characters and rejects before stdout", async () => {
   assert.ok(!new RegExp("[\\u202a-\\u202e\\u2066-\\u2069]").test(controlledCandidateSnapshotScript));
+  // No literal invisible/format characters in either embedded exporter script.
+  const hidden = new RegExp("[\\u0080-\\u009f\\p{Cf}\\u034f\\u115f\\u1160\\u180b-\\u180f\\u2028\\u2029\\u3164\\ufe00-\\ufe0f\\uffa0\\u{e0100}-\\u{e01ef}]", "u");
+  assert.ok(!hidden.test(controlledCandidateSnapshotScript));
+  assert.ok(!hidden.test(taskCandidateSnapshotScript({files: [{path: "sum.mjs", sha256: null}]})));
   const run = (setup: (directory: string) => Promise<void> | void) => mkdtemp(path.join(tmpdir(), "cg-controlled-export-")).then(async root => {
     const directory = path.join(root, "task"), output: string[] = [];
     try {
@@ -54,6 +76,8 @@ test("exporter script embeds the validator without literal bidi characters and r
     run(directory => writeFile(path.join(directory, "sum.mjs"), correct)).then(output => assert.deepEqual(output, [Buffer.from(correct).toString("base64")])),
     assert.rejects(run(directory => writeFile(path.join(directory, "sum.mjs"), "// \u202e hidden\n")), /candidate_unsafe_content/),
     assert.rejects(run(async directory => { await writeFile(path.join(directory, "sum.mjs"), correct); await writeFile(path.join(directory, "other.mjs"), "x"); }), /artifact_inventory/),
+    ...invisibleCharacters.map(([name, character]) => assert.rejects(run(directory => writeFile(path.join(directory, "sum.mjs"), correct.replace("values", `va${character}lues`))), /candidate_unsafe_content/, name)),
+    ...honestTexts.map(honest => run(directory => writeFile(path.join(directory, "sum.mjs"), honest)).then(output => assert.deepEqual(output, [Buffer.from(honest).toString("base64")]))),
   ]);
 });
 

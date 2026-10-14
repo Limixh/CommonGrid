@@ -262,6 +262,40 @@ func TestBundleBaselineSecretsAndUnsafeTextAreRedacted(t *testing.T) {
 	requireRejection(t, mustBundle(t, b, map[string][]byte{"src/a.ts": []byte("ok")}), task, b)
 }
 
+func TestCheckTextRejectsInvisibleCharactersAndAcceptsHonestText(t *testing.T) {
+	invisible := []rune{
+		0x200b, 0x200c, 0x200d, 0x2060, 0xfeff, 0x00ad, 0x061c, 0x200e, 0x200f, 0x202a, 0x202e, 0x2066, 0x2069,
+		0x115f, 0x1160, 0x3164, 0xffa0, 0x2028, 0x2029, 0x0085, 0x009f, 0x034f, 0xfe00, 0xfe0f, 0x180b, 0x180f,
+		0xe0100, 0xe01ef, 0xe0001, 0xe0020, 0xe0041, 0xe007f,
+	}
+	for _, r := range invisible {
+		for _, text := range []string{"// a" + string(r) + "b\n", string(r) + "x", "x" + string(r)} {
+			if err := checkText([]byte(text)); !errors.Is(err, ErrUnsafe) {
+				t.Fatalf("U+%04X accepted in %q: %v", r, text, err)
+			}
+		}
+	}
+	for _, honest := range []string{"// \u00e7 \u011f \u0131 \u00f6 \u015f \u00fc \u00c7 \u011e \u0130 \u00d6 \u015e \u00dc\n", "const s = 'merhaba \U0001f642 \u4e16\u754c';\r\n\tx();\n", "a\u00a0b"} {
+		if err := checkText([]byte(honest)); err != nil {
+			t.Fatalf("honest text rejected: %q: %v", honest, err)
+		}
+	}
+	b, task := bundleFixture()
+	for _, r := range invisible {
+		source := "const a = '" + string(r) + "';"
+		requireRejection(t, unsafeBundle(t, b, []zipEntry{{name: "src/a.ts", data: []byte(source)}}), task, b)
+		if _, err := Encode(b, map[string][]byte{"src/a.ts": []byte(source)}); !errors.Is(err, ErrUnsafe) {
+			t.Fatalf("encoder accepted U+%04X: %v", r, err)
+		}
+	}
+	if !validBinding(Binding{Purpose: "result", TaskID: "t", TaskVersion: 1, ContractHash: "h", LeaseID: "l", BaseCommit: "c", StrategyID: "s"}) {
+		t.Fatal("honest binding rejected")
+	}
+	if validBinding(Binding{Purpose: "result", TaskID: "t\u200b", TaskVersion: 1, ContractHash: "h", LeaseID: "l", BaseCommit: "c", StrategyID: "s"}) {
+		t.Fatal("zero-width binding accepted")
+	}
+}
+
 func TestBundleLimits(t *testing.T) {
 	b, task := bundleFixture()
 	if _, err := Encode(b, map[string][]byte{"src/a.ts": bytes.Repeat([]byte("a"), MaxFileBytes+1)}); !errors.Is(err, ErrInvalid) {

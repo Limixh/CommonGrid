@@ -253,8 +253,21 @@ func safePath(path string) bool {
 	return true
 }
 
+// bidi reports invisible or format characters that can conceal text from a
+// reviewer: every Unicode Cf character (zero-width, bidi, BOM, soft hyphen,
+// tags), U+2028/2029, variation selectors, the combining grapheme joiner and
+// Hangul fillers. Keep in lockstep with the TypeScript validators.
 func bidi(r rune) bool {
-	return r == 0x061c || r == 0x200e || r == 0x200f || (r >= 0x202a && r <= 0x202e) || (r >= 0x2066 && r <= 0x2069)
+	if unicode.Is(unicode.Cf, r) {
+		return true
+	}
+	switch {
+	case r == 0x034f, r == 0x115f, r == 0x1160, r == 0x2028, r == 0x2029, r == 0x3164, r == 0xffa0, r == 0x180f:
+		return true
+	case r >= 0x180b && r <= 0x180d, r >= 0xfe00 && r <= 0xfe0f, r >= 0xe0100 && r <= 0xe01ef:
+		return true
+	}
+	return false
 }
 
 var credentialPatterns = []*regexp.Regexp{

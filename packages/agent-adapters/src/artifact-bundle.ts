@@ -32,7 +32,11 @@ export function inspectArtifactText(bytes: Uint8Array): string {
   let text: string;
   try { text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes); }
   catch { return reject("artifact_invalid_utf8"); }
-  if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/u.test(text)) reject("artifact_unsafe_content");
+  // Keep in lockstep with the controlled-task validator and the coordinator's Go
+  // checkText: C0/C1 controls (except \t \n \r), every Unicode Cf format character
+  // (zero-width, bidi, BOM, soft hyphen, tags), U+2028/2029, variation selectors,
+  // combining grapheme joiner and Hangul fillers.
+  if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\p{Cf}\u034f\u115f\u1160\u180b-\u180d\u180f\u2028\u2029\u3164\ufe00-\ufe0f\uffa0\u{e0100}-\u{e01ef}]/u.test(text)) reject("artifact_unsafe_content");
   const secrets = [
     /-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----/i,
     /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/,

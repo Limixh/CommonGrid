@@ -24,7 +24,7 @@ Migration 0006 depolama kotasını byte yazılmadan `pending` kayıtla ayırır.
 | Yollar | Exact writable_paths; ASCII harf/rakam ve `_ . / -`, en çok 512 byte; glob/dizin genişlemesi yok |
 | İzinler | Absolute/traversal, Windows aliases, case/ancestor çakışması, credential paths, link/executable/special dosya reddi |
 | ZIP | Compression, descriptor, ZIP64, extra/comment, prefix/suffix/gap, çelişen local/central içerik reddi |
-| Kaynak | UTF-8; binary, TAB/LF/CR dışındaki C0/C1 control, bidi, bilinen credential biçimleri ve yasak literal metin reddi |
+| Kaynak | UTF-8; binary, TAB/LF/CR dışındaki C0/C1 control, tüm Unicode Cf biçim karakterleri (bidi, sıfır genişlikli, U+FEFF, U+00AD, tag), U+2028/2029, varyasyon seçicileri, Hangul doldurucuları (worker, `inspectArtifactText` ve Go `checkText` aynı kümeyi uygular), bilinen credential biçimleri ve yasak literal metin reddi |
 | Checkpoint | Kaynak snapshot'ı yalnız hard; handoff ve allow_workspace_snapshot açık olmalı |
 
 `Encode` test/araç üreticisidir; scanner veya yol yetkisi vermez. TS üretici ile Go parser ortak golden ZIP/binding/task fixture'ı kullanır. Soft checkpoint için ayrı untrusted metin/context formatı, binary varlık, diff/delete ve genel repository importer sonraki entegrasyonlardır; ürün kapsamından çıkarılmadı.

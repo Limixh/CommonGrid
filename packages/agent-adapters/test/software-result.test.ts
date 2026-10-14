@@ -77,14 +77,14 @@ test("a tampered contract is not an excuse to build: binding and task checks sta
   await assert.rejects(buildSoftwareResultBundle(task(), input(reference, { leaseId: "../lease" })), code("artifact_binding_mismatch"));
 });
 
-// Pins the policy gap: the worker candidate policy is weaker than the delivery
-// text policy, so a verifier-passed candidate can still be undeliverable.
-test("a candidate with U+200E passes the worker policy but cannot be delivered", async () => {
-  for (const mark of ["‎", "‏", "؜", "\u0085"]) {
+// The worker candidate policy and the delivery text policy reject the same
+// invisible/format characters (the patch cannot even be built for them; the
+// delivery layer is covered in artifact-bundle.test.ts).
+test("a candidate with invisible format characters is rejected by the worker policy and never becomes a patch", async () => {
+  for (const mark of ["\u200e", "\u200f", "\u061c", "\u0085", "\u200b", "\u2060", "\ufeff", "\u00ad", "\u3164", "\u2028", "\ufe0f", "\u{e0041}"]) {
     const candidate = reference + `// note${mark}\n`;
-    assert.doesNotThrow(() => assertSoftwareCandidate(candidate), `worker policy accepts ${JSON.stringify(mark)}`);
-    await assert.rejects(buildSoftwareResultBundle(task(), input(candidate)), code("candidate_not_deliverable"));
-    await assert.rejects(assertSoftwareResultDeliverable(task(), withoutLease(input(candidate))), code("candidate_not_deliverable"));
+    assert.throws(() => assertSoftwareCandidate(candidate), /candidate_unsafe_content/, `worker policy accepts ${JSON.stringify(mark)}`);
+    assert.throws(() => input(candidate), /candidate_unsafe_content/);
   }
 });
 

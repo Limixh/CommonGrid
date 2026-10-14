@@ -174,11 +174,15 @@ export function taskRunPatchHeader(taskId: TaskRunTaskId): string {
   const path = taskRunPatchPaths[taskId];
   return `diff --git a/${path} b/${path}\n`;
 }
+// The invisible-text set the candidate, artifact and coordinator policies reject
+// (ADR 0022), plus CR: C0/C1 controls except TAB/LF, Unicode Cf format
+// characters, line/paragraph separators, variation selectors and fillers.
+const unsafePatchText = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\p{Cf}\u034f\u115f\u1160\u180b-\u180d\u180f\u2028\u2029\u3164\ufe00-\ufe0f\uffa0\u{e0100}-\u{e01ef}]/u;
 // A unified diff of the task's single writable file: printable UTF-8 text
-// without NUL, bidi controls or carriage returns, beginning with its header.
+// without hidden or control characters, beginning with its header.
 export function validTaskRunPatch(value: unknown, taskId: TaskRunTaskId = taskRunControlledTaskId): value is string {
   return typeof value === "string" && value.length > 0 && bytes(value) <= taskRunMaxPatchBytes &&
-    value.startsWith(taskRunPatchHeader(taskId)) && !/[\0\r\u202a-\u202e\u2066-\u2069]/.test(value);
+    value.startsWith(taskRunPatchHeader(taskId)) && !unsafePatchText.test(value);
 }
 export function validateTaskRunResult(value: unknown, outcome: TaskRunOutcome, taskId: TaskRunTaskId = taskRunControlledTaskId): TaskRunResult {
   if (!exact(value, ["verifier", "candidate_sha256", "patch_sha256", "patch"]) || typeof value.candidate_sha256 !== "string" || !sha256.test(value.candidate_sha256)) invalid();

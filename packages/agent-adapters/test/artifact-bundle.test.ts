@@ -51,6 +51,15 @@ test("artifact binary hidden control secret and forbidden content never reaches 
   assert.equal(called, false);
 });
 
+test("artifact text rejects every invisible or format character and accepts honest non-ASCII text", () => {
+  const invisible = ["\u200b", "\u200c", "\u200d", "\u2060", "\ufeff", "\u00ad", "\u061c", "\u200e", "\u200f", "\u202a", "\u202e", "\u2066", "\u2069", "\u115f", "\u1160", "\u3164", "\uffa0",
+    "\u2028", "\u2029", "\u0085", "\u009f", "\u034f", "\ufe00", "\ufe0f", "\u180b", "\u{e0100}", "\u{e01ef}", "\u{e0001}", "\u{e0020}", "\u{e0041}", "\u{e007f}"];
+  for (const character of invisible) for (const text of [`// a${character}b\n`, character + "x", "x" + character]) {
+    assert.throws(() => inspectArtifactText(Buffer.from(text)), /^Error: artifact_unsafe_content$/, JSON.stringify(character));
+  }
+  for (const honest of ["// \u00e7 \u011f \u0131 \u00f6 \u015f \u00fc \u00c7 \u011e \u0130 \u00d6 \u015e \u00dc\n", "const s = 'merhaba \u{1f642} \u4e16\u754c';\r\n\tx();\n", "a\u00a0b"]) assert.equal(inspectArtifactText(Buffer.from(honest)), honest);
+});
+
 test("artifact scanner unavailable or failure returns no package and redacts scanner output", async () => {
   const value = task(), files = [{ path: "src/search.ts", bytes: Buffer.from("const x=1;") }];
   await assert.rejects(buildArtifactBundle(value, binding(value), files, undefined as never), /artifact_scanner_unavailable/);

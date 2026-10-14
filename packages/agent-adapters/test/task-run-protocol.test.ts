@@ -351,3 +351,12 @@ test("run limit status rejects extra, missing, mistyped and inconsistent data", 
     edit(budgetUnavailableRunLimits(), c => { c.effective.max_sec = 1200; })];
   for (const value of bad) assert.throws(() => validateRunLimitsStatus(value), /contract_invalid/, JSON.stringify(value));
 });
+
+test("patches reject the same hidden and control characters as the artifact policy", () => {
+  const header = "diff --git a/src/search.ts b/src/search.ts\n";
+  const honest = header + "+// Türkçe ç ğ ı ö ş ü 😀 東京  \t\n";
+  assert.equal(validTaskRunPatch(honest, "software-bounds"), true);
+  for (const mark of ["\0", "\r", "\u0007", "\u0085", "­", "؜", "​", "‍", "‎", "‮", "⁠", "⁦", "﻿",
+    " ", " ", "͏", "ᅟ", "ᅠ", "᠋", "ㅤ", "️", "ﾠ", "\u{e0001}", "\u{e0041}", "\u{e0100}"])
+    assert.equal(validTaskRunPatch(honest + `+x${mark}\n`, "software-bounds"), false, JSON.stringify(mark));
+});

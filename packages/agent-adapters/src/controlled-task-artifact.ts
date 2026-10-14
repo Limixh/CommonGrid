@@ -9,11 +9,14 @@ export function validateControlledCandidateBytes(bytes: Uint8Array): string {
   let source: string;
   try { source = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes); }
   catch { throw new Error("candidate_invalid_utf8"); }
-  // Allow normal source whitespace, but reject binary/control bytes and bidi
-  // overrides that can conceal source or credential text in the exported diff.
-  // Built from an escaped string so transpilers cannot print literal bidi
-  // characters into the exporter script that embeds this function's source.
-  if (new RegExp("[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f\\u202a-\\u202e\\u2066-\\u2069]", "u").test(source)) {
+  // Allow normal source whitespace, but reject binary/control bytes and every
+  // invisible or format character (all Unicode Cf: zero-width, bidi, BOM/ZWNBSP,
+  // soft hyphen, tags; U+2028/2029; variation selectors; Hangul fillers) that can
+  // conceal source or credential text in the exported diff or smuggle text to
+  // LLM reviewers. Built from an escaped string so transpilers cannot print
+  // literal invisible characters into the exporter script that embeds this
+  // function's source (Node 22 in the container supports \p{Cf}).
+  if (new RegExp("[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f-\\u009f\\p{Cf}\\u034f\\u115f\\u1160\\u180b-\\u180d\\u180f\\u2028\\u2029\\u3164\\ufe00-\\ufe0f\\uffa0\\u{e0100}-\\u{e01ef}]", "u").test(source)) {
     throw new Error("candidate_unsafe_content");
   }
   // Known credential shapes plus literal credential assignments. No matched
