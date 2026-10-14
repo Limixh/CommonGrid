@@ -44,6 +44,12 @@
   "authorization_url_recorded": false,
   "prompt_recorded": false,
   "observation": "The official CLI status check reported the isolated Claude session as authenticated before the task and again during failure cleanup, but the provider turn of the task ended with auth_required before any tool call. The session was authorized on 2026-10-13 and had passed tasks on 2026-10-13 and 2026-10-14 (01:26 local). The cause is unknown: no auth files were read and no provider error text was recorded.",
+  "model_free_analysis": {
+    "classification_paths": "With the model observed and zero tool calls, auth_required came from a stream event: a synthetic assistant API error or an is_error result, classified by classifyClaudeError (structured authentication_failed / oauth_org_not_allowed / status 401, else text fallback). session_expired also maps to auth_required.",
+    "status_semantics": "The repo checks only the JSON shape/exit code of `claude auth status --json`; three authenticated status checks around a stream auth failure suggest status does not prove the API accepts the token (e.g. expired access token with failed refresh). Not verified without running the CLI.",
+    "persisted_diagnostics": "None distinguish a real 401 from a text-fallback match: results and journals carry only the closed error_code.",
+    "known_classifier_weaknesses": "Broad auth text fallback ordered before network/tls/permission; non-401 statuses can fall through to text; oauth_org_not_allowed is folded into auth_required; newer quota wordings are unclassified. No code changed; a bounded diagnostic category and classifier hardening are proposed follow-ups."
+  },
   "scope_limits": [
     "This failed run is preserved as-is; it was not retried and no other model was used.",
     "It does not evaluate the hardened verifier: the run ended before verification.",
