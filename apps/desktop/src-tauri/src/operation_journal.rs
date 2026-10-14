@@ -248,6 +248,12 @@ impl State {
             active_namespaces: HashMap::new(),
         }
     }
+    /// Pending intents, a lease not yet released, or active namespaces remain.
+    fn unresolved(&self) -> bool {
+        !self.pending.is_empty()
+            || (self.lease.is_some() && !self.released)
+            || !self.active_namespaces.is_empty()
+    }
     fn apply(&mut self, event: &Event) -> Checked<()> {
         ensure(!self.terminal)?;
         if matches!(event, Event::Begin) {
@@ -580,6 +586,90 @@ pub(crate) fn read_operation_status(root: PathBuf) -> RecoveryStatus {
         }
         Err(error) => RecoveryStatus::result("blocked", Some(error.reason()), vec![]),
     }
+}
+
+/// Whether a runtime owner has an unresolved durable operation (ADR 0025).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum OwnerHold {
+    Clear,
+    Review,
+}
+
+/// Upper bound on root directory entries examined by the owner-scoped scan.
+const OWNER_SCAN_ENTRY_CAP: usize = 4096;
+
+/// Native durable start gate (ADR 0025): `Review` when `owner` has an unresolved
+/// durable operation journal under `root`, otherwise `Clear`.
+///
+/// Only `op-{owner}-*` directories are read (fully, via `read_state`: hash chain and
+/// canonical bytes); other owners' entries are never opened. A missing root is
+/// `Clear`. Everything unreadable or unexpected fails closed to `Review`: invalid
+/// owner, root/ancestor symlinks, non-directory or reparse entries with the prefix,
+/// malformed names, any validation failure, a different provider, or more than the
+/// entry cap. A valid terminal journal is `Clear`; a valid non-terminal one is
+/// `Review` only while `State::unresolved` (pending intents, a held lease, or active
+/// namespaces). Begin-only, rejected-before-dispatch without a lease, and a released
+/// lease before `Complete` stay `Clear` so a refusal cannot perpetuate itself.
+pub(crate) fn owner_hold(root: &Path, owner: &str, provider: &str) -> OwnerHold {
+    owner_hold_bounded(root, owner, provider, OWNER_SCAN_ENTRY_CAP)
+}
+
+fn owner_hold_bounded(root: &Path, owner: &str, provider: &str, cap: usize) -> OwnerHold {
+    match scan_owner(root, owner, provider, cap) {
+        Ok(hold) => hold,
+        Err(Failure::Missing) => OwnerHold::Clear,
+        Err(_) => OwnerHold::Review,
+    }
+}
+
+fn scan_owner(root: &Path, owner: &str, provider: &str, cap: usize) -> Checked<OwnerHold> {
+    ensure(uuid(owner))?;
+    ensure(
+        root.is_absolute()
+            && !root.components().any(|c| {
+                matches!(
+                    c,
+                    std::path::Component::ParentDir | std::path::Component::CurDir
+                )
+            }),
+    )?;
+    ancestors(root)?;
+    let prefix = format!("op-{owner}-");
+    let mut examined = 0usize;
+    let mut matched = vec![];
+    for entry in io(fs::read_dir(root))? {
+        if examined >= cap {
+            return Err(Failure::Overflow);
+        }
+        examined += 1;
+        let name = io(entry)?.file_name();
+        let name = name.to_string_lossy();
+        if !name.starts_with(&prefix) {
+            continue;
+        }
+        if matched.len() >= MAX_OPERATIONS {
+            return Err(Failure::Overflow);
+        }
+        matched.push(name.into_owned());
+    }
+    for name in matched {
+        ensure(valid_directory_name(&name))?;
+        let directory = root.join(&name);
+        let metadata = io(fs::symlink_metadata(&directory))?;
+        ensure(metadata.is_dir() && !reparse(&metadata))?;
+        let state = read_state(&directory, &name).map_err(|error| {
+            if matches!(error, Failure::Missing) {
+                Failure::Io
+            } else {
+                error
+            }
+        })?;
+        ensure(state.identity.owner == owner && state.identity.provider == provider)?;
+        if !state.terminal && state.unresolved() {
+            return Ok(OwnerHold::Review);
+        }
+    }
+    Ok(OwnerHold::Clear)
 }
 
 #[cfg(test)]

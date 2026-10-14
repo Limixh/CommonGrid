@@ -274,6 +274,24 @@ test("needs_review blocks every new start until reviewed", async ({page}) => {
   await expect(panel.getByTestId("task-run-diff")).toHaveCount(0);
 });
 
+test("a durable profile_needs_review refusal points to the Yerel işlem günlüğü panel in both languages and keeps Başlat blocked", async ({page}) => {
+  await freezeClock(page);
+  await mockNative(page, envelope(operation({revision: 1, phase: "finished", outcome: "needs_review", error_code: "profile_needs_review", cleanup: "unknown", tool_calls: 0, model: {requested: "gpt-6-luna", observed: null}})));
+  const panel = await open(page); const result = panel.locator(".task-run-result");
+  await expect(result).toContainText("Bu profilde önceki bir işlem kapanmadı veya doğrulanamadı; görev çalıştırılmadı.");
+  await expect(result).toContainText("Yerel işlem günlüğü"); await expect(result).not.toContainText("profile_needs_review");
+  await expect(panel.getByRole("checkbox")).toBeDisabled(); await expect(start(panel)).toBeDisabled();
+  await expect(panel.getByTestId("task-run-diff")).toHaveCount(0);
+  // The named panel really exists on this page.
+  await expect(page.getByRole("heading", {name: "Yerel işlem günlüğü", exact: true})).toBeVisible();
+  await page.getByRole("button", {name: "Change language", exact: true}).click();
+  await expect(result).toContainText("An earlier operation on this profile was not closed or could not be verified; the task did not run.");
+  await expect(result).toContainText("Local operation journal"); await expect(result).not.toContainText("profile_needs_review");
+  await expect(panel.getByRole("button", {name: "Start", exact: true})).toBeDisabled();
+  await expect(page.getByRole("heading", {name: "Local operation journal", exact: true})).toBeVisible();
+  expect((await calls(page)).some(call => call.command === "local_task_run_start")).toBe(false);
+});
+
 test("model_unavailable says the cheap model was unavailable and that nothing fell back (tr and en)", async ({page}) => {
   await mockNative(page, failed("model_unavailable")); const panel = await open(page);
   await expect(panel).toContainText("ucuz model (gpt-6-luna) kullanılamadı"); await expect(panel).toContainText("Ücretli veya varsayılan bir modele geçilmedi");

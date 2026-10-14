@@ -5,6 +5,8 @@
 use crate::{
     launcher::{node_name, resources, uuid},
     launcher_process::OwnedWorker,
+    operation_journal::{self, OwnerHold},
+    profile_binding::{self, Binding},
     profile_session::ProfileSession,
     profile_store::{self, Provider},
     run_limits,
@@ -449,6 +451,28 @@ impl End {
             error: Some(error.into()),
             cleanup,
             result: None,
+        }
+    }
+}
+// The refusal a profile's durable state imposes before any start, if any.
+fn start_gate(store: &std::path::Path, operation: &Operation) -> Option<End> {
+    match profile_binding::read(store, &operation.profile_id, operation.provider) {
+        // The worker reports profile_unbound itself.
+        Binding::Absent => None,
+        Binding::Invalid => Some(End::failed("profile_invalid")),
+        Binding::Reserved => Some(End::review("profile_needs_review")),
+        Binding::Ready(owner) => {
+            let provider = match operation.provider {
+                Provider::Claude => "claude",
+                Provider::Codex => "codex",
+            };
+            // Same journal root the worker receives in its boot frame.
+            (operation_journal::owner_hold(
+                &store.join("managed-operation-journal"),
+                &owner,
+                provider,
+            ) != OwnerHold::Clear)
+                .then(|| End::review("profile_needs_review"))
         }
     }
 }
@@ -971,6 +995,14 @@ impl TaskRun {
         limits: Limits,
     ) {
         let id = operation.request_id.as_str();
+        // Native durable start gate (ADR 0025): decided before the run-limits
+        // reservation, resources or a worker exist. A binding whose runtime
+        // owner has unresolved or unreadable durable operations never starts,
+        // whichever process or restart left them behind.
+        if let Some(end) = start_gate(&store, &operation) {
+            self.finish(id, end);
+            return;
+        }
         // Hold the run's time in the native ledger before anything else: an
         // exhausted or unreadable budget never reaches resources or a worker.
         let allowed = match run_limits::now_ms()

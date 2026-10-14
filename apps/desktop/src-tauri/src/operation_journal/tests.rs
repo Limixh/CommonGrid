@@ -199,3 +199,454 @@ fn identifier_validation_is_ascii_and_v4_only() {
     assert!(valid_directory_name(&operation()));
     assert!(!valid_directory_name(&"é".repeat(38)));
 }
+
+// ---- owner_hold (ADR 0025 native durable start gate) ----
+
+const FIXTURE_OWNER: &str = "00000000-0000-4000-8000-000000000001";
+const FIXTURE_PROVIDER: &str = "codex";
+const OTHER_OWNER: &str = "11111111-1111-4111-8111-111111111111";
+const FIXTURE_OPERATION_DIRECTORY: &str =
+    "op-00000000-0000-4000-8000-000000000001-00000000-0000-4000-8000-000000000002";
+
+fn fixture_manifest() -> Value {
+    serde_json::from_str(include_str!(
+        "../../../../../packages/agent-adapters/test/fixtures/operation-journal-contract.json"
+    ))
+    .unwrap()
+}
+fn fixture_files(manifest: &Value, name: &str) -> Vec<(String, String)> {
+    let case = manifest["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|case| case["name"] == name)
+        .unwrap_or_else(|| panic!("missing fixture {name}"));
+    case["files"]
+        .as_object()
+        .unwrap()
+        .iter()
+        .map(|(path, contents)| (path.clone(), contents.as_str().unwrap().to_owned()))
+        .collect()
+}
+fn journal_with(files: &[(String, String)]) -> Temporary {
+    let directory = Temporary::new();
+    for (relative, contents) in files {
+        directory.write(&format!("journal/{relative}"), contents);
+    }
+    directory
+}
+fn hold(directory: &Temporary) -> OwnerHold {
+    owner_hold(
+        &directory.0.join("journal"),
+        FIXTURE_OWNER,
+        FIXTURE_PROVIDER,
+    )
+}
+/// Fixture records with sequence `1..=count` of a case (a valid hash-chain prefix).
+fn prefix(manifest: &Value, name: &str, count: usize) -> Vec<(String, String)> {
+    fixture_files(manifest, name)
+        .into_iter()
+        .filter(|(path, _)| {
+            let file = path.rsplit('/').next().unwrap();
+            file[..6].parse::<usize>().unwrap() <= count
+        })
+        .collect()
+}
+
+#[test]
+fn owner_hold_follows_every_shared_contract_fixture() {
+    // Owner-scoped verdicts. Cases whose catalog-level failure concerns an entry that
+    // is not an `op-{owner}-*` directory are Clear here; every other blocked case, and
+    // every non-terminal journal with pending work, a held lease or active namespaces,
+    // is Review.
+    const CLEAR: &[&str] = &[
+        "missing_store",
+        "begin_process_crash",
+        "begin_file_and_directory_synced",
+        "lease_released_nonterminal",
+        "all_actions_and_roles_complete_process_crash",
+        "all_actions_and_roles_complete_file_and_directory_synced",
+        "two_valid_operations_sorted",
+        "unexpected_root_file",
+        "noncanonical_operation_directory",
+    ];
+    const REVIEW_NEEDS_REVIEW: &[&str] = &[
+        "lease_intent_pending_process_crash",
+        "lease_intent_pending_file_and_directory_synced",
+        "lease_capture_pending_process_crash",
+        "lease_capture_pending_file_and_directory_synced",
+        "lease_acquired_process_crash",
+        "lease_acquired_file_and_directory_synced",
+        "namespace_capture_pending_process_crash",
+        "namespace_capture_pending_file_and_directory_synced",
+        "namespace_exec_pending_process_crash",
+        "namespace_exec_pending_file_and_directory_synced",
+        "rejected_before_dispatch_retry_process_crash",
+        "rejected_before_dispatch_retry_file_and_directory_synced",
+        "lease_receipt_without_capture",
+        "namespace_receipt_without_capture",
+        "lease_release_pending",
+    ];
+    let manifest = fixture_manifest();
+    let (mut clear, mut review_needs, mut blocked) = (0, 0, 0);
+    for case in manifest["cases"].as_array().unwrap() {
+        let name = case["name"].as_str().unwrap();
+        let directory = journal_with(&fixture_files(&manifest, name));
+        let expected = if CLEAR.contains(&name) {
+            clear += 1;
+            OwnerHold::Clear
+        } else {
+            if REVIEW_NEEDS_REVIEW.contains(&name) {
+                assert_eq!(case["expected"]["status"], "available", "{name}");
+                review_needs += 1;
+            } else {
+                assert_eq!(case["expected"]["status"], "blocked", "unclassified {name}");
+                blocked += 1;
+            }
+            OwnerHold::Review
+        };
+        assert_eq!(hold(&directory), expected, "fixture {name}");
+    }
+    assert_eq!(clear, CLEAR.len());
+    assert_eq!(review_needs, REVIEW_NEEDS_REVIEW.len());
+    assert!(blocked > 50);
+}
+
+#[test]
+fn owner_hold_rejected_before_dispatch_without_lease_is_clear() {
+    let manifest = fixture_manifest();
+    let name = "rejected_before_dispatch_retry_process_crash";
+    // begin, lease intent, rejected receipt: no lease and nothing pending.
+    assert_eq!(
+        hold(&journal_with(&prefix(&manifest, name, 3))),
+        OwnerHold::Clear
+    );
+    // The retry then acquires the lease, which is unresolved again.
+    assert_eq!(
+        hold(&journal_with(&prefix(&manifest, name, 6))),
+        OwnerHold::Review
+    );
+}
+
+#[test]
+fn owner_hold_distinguishes_unresolved_from_resolved_prefixes() {
+    let manifest = fixture_manifest();
+    for (count, expected) in [
+        (1, OwnerHold::Clear),  // begin only
+        (2, OwnerHold::Review), // lease acquire pending
+        (4, OwnerHold::Review), // lease held
+        (5, OwnerHold::Review), // release pending
+        (6, OwnerHold::Clear),  // released before Complete (crash window)
+    ] {
+        let directory = journal_with(&prefix(&manifest, "lease_released_nonterminal", count));
+        assert_eq!(hold(&directory), expected, "first {count} records");
+    }
+}
+
+#[test]
+fn owner_hold_missing_root_is_clear_and_unusable_roots_are_review() {
+    let root = Temporary::new();
+    assert_eq!(
+        owner_hold(&root.0.join("missing"), FIXTURE_OWNER, FIXTURE_PROVIDER),
+        OwnerHold::Clear
+    );
+    assert_eq!(
+        owner_hold(&root.0, FIXTURE_OWNER, FIXTURE_PROVIDER),
+        OwnerHold::Clear
+    );
+    root.write("file", "synthetic");
+    assert_eq!(
+        owner_hold(&root.0.join("file"), FIXTURE_OWNER, FIXTURE_PROVIDER),
+        OwnerHold::Review
+    );
+    assert_eq!(
+        owner_hold(Path::new("relative"), FIXTURE_OWNER, FIXTURE_PROVIDER),
+        OwnerHold::Review
+    );
+}
+
+#[test]
+fn owner_hold_invalid_owner_is_review() {
+    let manifest = fixture_manifest();
+    let directory = journal_with(&prefix(&manifest, "begin_process_crash", 1));
+    let root = directory.0.join("journal");
+    assert_eq!(
+        owner_hold(&root, FIXTURE_OWNER, FIXTURE_PROVIDER),
+        OwnerHold::Clear
+    );
+    for owner in [
+        "",
+        "not-a-uuid",
+        "00000000-0000-1000-8000-000000000001",
+        "00000000-0000-4000-8000-00000000000A",
+        "../00000000-0000-4000-8000-000000000001",
+        "00000000-0000-4000-8000-000000000001/",
+    ] {
+        assert_eq!(
+            owner_hold(&root, owner, FIXTURE_PROVIDER),
+            OwnerHold::Review,
+            "owner {owner:?}"
+        );
+    }
+    // An invalid owner is refused even when the root is missing.
+    assert_eq!(
+        owner_hold(&directory.0.join("missing"), "bad", FIXTURE_PROVIDER),
+        OwnerHold::Review
+    );
+}
+
+#[test]
+fn owner_hold_ignores_other_owners_entries() {
+    let manifest = fixture_manifest();
+    let pending = journal_with(&prefix(&manifest, "lease_acquired_process_crash", 4));
+    let root = pending.0.join("journal");
+    assert_eq!(
+        owner_hold(&root, FIXTURE_OWNER, FIXTURE_PROVIDER),
+        OwnerHold::Review
+    );
+    assert_eq!(
+        owner_hold(&root, OTHER_OWNER, FIXTURE_PROVIDER),
+        OwnerHold::Clear
+    );
+    // Corrupt or unrelated entries of other owners are never opened.
+    pending.write(
+        &format!("journal/op-{OWNER}-{OPERATION}/000001.json"),
+        "garbage",
+    );
+    pending.write("journal/unrelated-file", "synthetic");
+    fs::create_dir(root.join("operation-directory-with-wrong-prefix")).unwrap();
+    assert_eq!(
+        owner_hold(
+            &root,
+            "33333333-3333-4333-8333-333333333333",
+            FIXTURE_PROVIDER
+        ),
+        OwnerHold::Clear
+    );
+    // The same garbage under the requested owner fails closed.
+    assert_eq!(
+        owner_hold(&root, OWNER, FIXTURE_PROVIDER),
+        OwnerHold::Review
+    );
+}
+
+#[test]
+fn owner_hold_renamed_or_mismatched_directories_are_review() {
+    let manifest = fixture_manifest();
+    let second = "00000000-0000-4000-8000-000000000009";
+    let mut files = prefix(&manifest, "begin_process_crash", 1);
+    files.extend(
+        prefix(&manifest, "lease_acquired_process_crash", 4)
+            .into_iter()
+            .map(|(path, contents)| {
+                (
+                    path.replace("00000000-0000-4000-8000-000000000002", second),
+                    contents,
+                )
+            }),
+    );
+    assert_eq!(hold(&journal_with(&files)), OwnerHold::Review);
+    // Several resolved operations of the same owner stay Clear.
+    assert_eq!(
+        hold(&journal_with(&fixture_files(
+            &manifest,
+            "two_valid_operations_sorted"
+        ))),
+        OwnerHold::Clear
+    );
+}
+
+#[test]
+fn owner_hold_wrong_provider_is_review() {
+    let manifest = fixture_manifest();
+    for (name, count) in [
+        ("begin_process_crash", 1),
+        ("lease_released_nonterminal", 6),
+        ("all_actions_and_roles_complete_process_crash", 39),
+        ("lease_acquired_process_crash", 4),
+    ] {
+        let directory = journal_with(&prefix(&manifest, name, count));
+        let root = directory.0.join("journal");
+        assert_eq!(
+            owner_hold(&root, FIXTURE_OWNER, FIXTURE_PROVIDER),
+            if name == "lease_acquired_process_crash" {
+                OwnerHold::Review
+            } else {
+                OwnerHold::Clear
+            },
+            "{name}"
+        );
+        for provider in ["claude", ""] {
+            assert_eq!(
+                owner_hold(&root, FIXTURE_OWNER, provider),
+                OwnerHold::Review,
+                "{name} as {provider:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn owner_hold_corrupt_hash_broken_and_non_canonical_journals_are_review() {
+    let manifest = fixture_manifest();
+    let good = prefix(&manifest, "begin_process_crash", 1);
+    assert_eq!(hold(&journal_with(&good)), OwnerHold::Clear);
+    let (path, contents) = good[0].clone();
+    let variants: Vec<(&str, String)> = vec![
+        ("truncated", contents[..contents.len() / 2].to_owned()),
+        ("no newline", contents.trim_end().to_owned()),
+        ("double newline", format!("{contents}\n")),
+        ("crlf", contents.replace('\n', "\r\n")),
+        ("empty", String::new()),
+        (
+            "spaced",
+            contents.replace("\"sequence\":1", "\"sequence\": 1"),
+        ),
+        (
+            "hash extended",
+            contents.replacen("\"hash\":\"", "\"hash\":\"f", 1),
+        ),
+        (
+            "hash changed",
+            contents.replacen(
+                "\"durability\":\"process_crash\"",
+                "\"durability\":\"file_and_directory_synced\"",
+                1,
+            ),
+        ),
+    ];
+    for (label, bad) in variants {
+        assert_eq!(
+            hold(&journal_with(&[(path.clone(), bad)])),
+            OwnerHold::Review,
+            "{label}"
+        );
+    }
+    // Unexpected extra file inside the owner's journal directory.
+    let mut extra = good;
+    extra.push((
+        format!("{FIXTURE_OPERATION_DIRECTORY}/.pending-synthetic"),
+        "synthetic".to_owned(),
+    ));
+    assert_eq!(hold(&journal_with(&extra)), OwnerHold::Review);
+    // Empty journal directory.
+    let empty = Temporary::new();
+    fs::create_dir_all(empty.0.join("journal").join(FIXTURE_OPERATION_DIRECTORY)).unwrap();
+    assert_eq!(hold(&empty), OwnerHold::Review);
+}
+
+#[test]
+fn owner_hold_prefixed_non_directories_and_bad_names_are_review() {
+    let file_instead = Temporary::new();
+    file_instead.write(
+        &format!("journal/{FIXTURE_OPERATION_DIRECTORY}"),
+        "synthetic",
+    );
+    assert_eq!(hold(&file_instead), OwnerHold::Review);
+    let bad_name = Temporary::new();
+    bad_name.write(
+        &format!("journal/op-{FIXTURE_OWNER}-not-an-operation/000001.json"),
+        "x",
+    );
+    assert_eq!(hold(&bad_name), OwnerHold::Review);
+    let extra_suffix = Temporary::new();
+    extra_suffix.write(
+        &format!("journal/{FIXTURE_OPERATION_DIRECTORY}x/000001.json"),
+        "x",
+    );
+    assert_eq!(hold(&extra_suffix), OwnerHold::Review);
+}
+
+#[cfg(unix)]
+#[test]
+fn owner_hold_symlinked_operation_or_root_is_review() {
+    use std::os::unix::fs::symlink;
+    let manifest = fixture_manifest();
+    // A fully valid, resolved journal behind a symlink must still fail closed.
+    let target = journal_with(&prefix(
+        &manifest,
+        "all_actions_and_roles_complete_process_crash",
+        39,
+    ));
+    assert_eq!(hold(&target), OwnerHold::Clear);
+    let target_directory = target.0.join("journal").join(FIXTURE_OPERATION_DIRECTORY);
+    let linked = Temporary::new();
+    fs::create_dir(linked.0.join("journal")).unwrap();
+    let link = linked.0.join("journal").join(FIXTURE_OPERATION_DIRECTORY);
+    if symlink(&target_directory, &link).is_err() {
+        return;
+    }
+    assert_eq!(hold(&linked), OwnerHold::Review);
+    let root_link = Temporary::new();
+    if symlink(target.0.join("journal"), root_link.0.join("journal")).is_err() {
+        return;
+    }
+    assert_eq!(hold(&root_link), OwnerHold::Review);
+}
+
+#[cfg(windows)]
+#[test]
+fn owner_hold_junctioned_operation_or_root_is_review() {
+    fn junction(link: &Path, target: &Path) -> bool {
+        std::process::Command::new("cmd.exe")
+            .args(["/d", "/c", "mklink", "/J"])
+            .arg(link)
+            .arg(target)
+            .output()
+            .map(|output| output.status.success())
+            .unwrap_or(false)
+    }
+    let manifest = fixture_manifest();
+    // A fully valid, resolved journal behind a junction must still fail closed.
+    let target = journal_with(&prefix(
+        &manifest,
+        "all_actions_and_roles_complete_process_crash",
+        39,
+    ));
+    assert_eq!(hold(&target), OwnerHold::Clear);
+    let target_directory = target.0.join("journal").join(FIXTURE_OPERATION_DIRECTORY);
+    let linked = Temporary::new();
+    fs::create_dir(linked.0.join("journal")).unwrap();
+    let link = linked.0.join("journal").join(FIXTURE_OPERATION_DIRECTORY);
+    if !junction(&link, &target_directory) {
+        return;
+    }
+    assert_eq!(hold(&linked), OwnerHold::Review);
+    fs::remove_dir(&link).unwrap();
+    let root_link = Temporary::new();
+    let linked_root = root_link.0.join("journal");
+    if !junction(&linked_root, &target.0.join("journal")) {
+        return;
+    }
+    assert_eq!(hold(&root_link), OwnerHold::Review);
+    fs::remove_dir(&linked_root).unwrap();
+    assert!(target_directory.join("000001.json").is_file());
+}
+
+#[test]
+fn owner_hold_entry_cap_fails_closed_and_is_owner_scoped() {
+    let root = Temporary::new();
+    for i in 0..4 {
+        root.write(&format!("unrelated-{i}"), "synthetic");
+    }
+    // Exactly at the cap is fine; one more entry examined fails closed.
+    assert_eq!(
+        owner_hold_bounded(&root.0, FIXTURE_OWNER, FIXTURE_PROVIDER, 4),
+        OwnerHold::Clear
+    );
+    assert_eq!(
+        owner_hold_bounded(&root.0, FIXTURE_OWNER, FIXTURE_PROVIDER, 3),
+        OwnerHold::Review
+    );
+    // The owner scan cap is independent of (and larger than) the catalog cap.
+    assert!(OWNER_SCAN_ENTRY_CAP > MAX_OPERATIONS);
+    let many = Temporary::new();
+    for i in 0..=MAX_OPERATIONS {
+        many.write(&format!("entry-{i}"), "synthetic");
+    }
+    assert_eq!(
+        owner_hold(&many.0, FIXTURE_OWNER, FIXTURE_PROVIDER),
+        OwnerHold::Clear,
+        "unrelated entries beyond the catalog cap do not block the owner"
+    );
+}

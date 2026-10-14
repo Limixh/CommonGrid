@@ -67,7 +67,7 @@ const words: Record<"tr" | "en", Words> = {
     errors: model => ({
       asset_missing: "Gerekli CLI dosyaları bulunamadı.", asset_invalid: "CLI dosyaları doğrulanamadı.", docker_unavailable: "Docker'a erişilemiyor. Docker'ı başlatıp tekrar dene.",
       image_missing: "Gerekli çalışma ortamı imajı bulunamadı. Ortam kurulumunu tamamlayıp tekrar dene.", profile_invalid: "Profil doğrulanamadı. Profilleri yenileyip tekrar dene.",
-      profile_needs_review: "Profil ortamı inceleme gerektiriyor.",
+      profile_needs_review: "Bu profilde önceki bir işlem kapanmadı veya doğrulanamadı; görev çalıştırılmadı. Ajanlar ve ortam sayfasındaki Yerel işlem günlüğü panelinden kayıtları incele.",
       profile_unbound: "Bu profil için bağlı bir hesap ortamı yok. Yukarıdaki panelden hesabını bağla.",
       auth_required: "Resmi CLI hesabına giriş gerekli. Yukarıdaki panelden hesabını bağla.",
       model_unavailable: `Test için seçilen ucuz model (${model}) kullanılamadı. Ücretli veya varsayılan bir modele geçilmedi; görev çalıştırılmadı.`,
@@ -126,7 +126,7 @@ const words: Record<"tr" | "en", Words> = {
     errors: model => ({
       asset_missing: "Required CLI files were not found.", asset_invalid: "CLI files could not be verified.", docker_unavailable: "Docker is unavailable. Start Docker and try again.",
       image_missing: "The required runtime image was not found. Complete environment setup and try again.", profile_invalid: "The profile could not be verified. Refresh profiles and try again.",
-      profile_needs_review: "The profile environment requires review.",
+      profile_needs_review: "An earlier operation on this profile was not closed or could not be verified; the task did not run. Review the records in the Local operation journal panel on the Agents & environment page.",
       profile_unbound: "This profile has no connected account environment. Connect the account in the panel above.",
       auth_required: "Sign in to the official CLI account. Connect the account in the panel above.",
       model_unavailable: `The cheap test model (${model}) was unavailable. Nothing fell back to a paid or default model; the task did not run.`,

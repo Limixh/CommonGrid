@@ -3672,3 +3672,311 @@ fn finishing_and_forced_review_both_settle_the_reservation() {
     assert_eq!(read_ledger(&fixture)["open"]["request_id"], OTHER);
     assert!(owner.inner.lock().unwrap().reservation.is_some());
 }
+
+// ADR 0025 native durable start gate: the binding and the owner's durable
+// operation journal are read before the ledger, resources or any worker.
+const GATE_OWNER: &str = "00000000-0000-4000-8000-000000000001";
+const GATE_OTHER_OWNER: &str = "00000000-0000-4000-8000-000000000009";
+fn bind(fixture: &Fixture, state: &str, owner: &str) {
+    let root = fixture.directory.join("managed-profile-sessions");
+    fs::create_dir_all(&root).unwrap();
+    fs::write(root.join(format!("{PROFILE}.json")), json!({"schema_version":"1.0", "profile_id":PROFILE, "provider":"codex", "owner":owner, "state":state}).to_string()).unwrap();
+}
+// Writes one shared contract journal case (owner ...0001, provider codex)
+// exactly as the native journal reader's own fixtures do.
+fn journal(fixture: &Fixture, case: &str) {
+    let manifest: Value = serde_json::from_str(include_str!(
+        "../../../../../packages/agent-adapters/test/fixtures/operation-journal-contract.json"
+    ))
+    .unwrap();
+    let case = manifest["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["name"] == case)
+        .unwrap();
+    for (relative, contents) in case["files"].as_object().unwrap() {
+        let path = fixture
+            .directory
+            .join("managed-operation-journal")
+            .join(relative);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, contents.as_str().unwrap()).unwrap();
+    }
+}
+fn marker(fixture: &Fixture) -> PathBuf {
+    fixture.directory.join("worker-spawned.marker")
+}
+// The fake worker proves it was spawned by writing a marker file.
+fn marking_worker(fixture: &Fixture, body: &str) -> String {
+    let path = serde_json::to_string(marker(fixture).to_str().unwrap()).unwrap();
+    worker(
+        "codex",
+        &format!("(await import('node:fs')).writeFileSync({path},'x');{body}"),
+    )
+}
+fn refused(operation: &Operation, outcome: Outcome, error: &str, cleanup: Cleanup) {
+    assert_eq!(operation.phase, Phase::Finished);
+    assert_eq!(
+        (
+            operation.outcome,
+            operation.error_code.as_deref(),
+            operation.cleanup
+        ),
+        (Some(outcome), Some(error), cleanup)
+    );
+    assert_eq!(operation.tool_calls, 0);
+    assert!(operation.model.observed.is_none() && operation.result.is_none());
+    assert!(valid_operation(operation), "{}", value(operation));
+}
+fn nothing_started(fixture: &Fixture, ledger: Option<&[u8]>) {
+    assert!(!marker(fixture).exists() && !fixture.home().exists());
+    match ledger {
+        Some(before) => assert_eq!(fs::read(ledger_path(fixture)).unwrap(), before),
+        None => assert!(!ledger_path(fixture).exists()),
+    }
+}
+fn gate_start(fixture: &Fixture, owner: &Owner, root: &Path, id: &str) -> Operation {
+    go(owner, fixture, root, id).unwrap();
+    wait(owner, Phase::Finished)
+}
+
+#[test]
+fn an_unresolved_owner_journal_refuses_every_start_across_restarts() {
+    let fixture = Fixture::new();
+    fixture.registry("codex");
+    let root = fixture.resources(&marking_worker(&fixture, PASS));
+    bind(&fixture, "ready", GATE_OWNER);
+    journal(&fixture, "lease_intent_pending_process_crash");
+    // Existing ledger bytes are left exactly as they were.
+    write_ledger(&fixture, 1800, 7200, json!([]), Value::Null);
+    let before = fs::read(ledger_path(&fixture)).unwrap();
+    for id in [ID, OTHER, "44444444-4444-4444-8444-444444444444"] {
+        // A fresh TaskRun is a restarted app: only disk state survives.
+        let owner = Owner::new();
+        let operation = gate_start(&fixture, &owner, &root, id);
+        refused(
+            &operation,
+            Outcome::NeedsReview,
+            "profile_needs_review",
+            Cleanup::Unknown,
+        );
+        nothing_started(&fixture, Some(&before));
+        // In memory a needs_review operation also denies any further start,
+        // and replaying the same request is idempotent.
+        assert_eq!(
+            go(
+                &owner,
+                &fixture,
+                &root,
+                "55555555-5555-4555-8555-555555555555"
+            )
+            .map(|_| ()),
+            Err(DENIED)
+        );
+        assert_eq!(
+            go(&owner, &fixture, &root, id)
+                .unwrap()
+                .operation
+                .unwrap()
+                .request_id,
+            id
+        );
+    }
+    nothing_started(&fixture, Some(&before));
+}
+
+#[test]
+fn a_benign_owner_journal_proceeds_and_passes() {
+    for case in [
+        "begin_process_crash",
+        "all_actions_and_roles_complete_process_crash",
+    ] {
+        let fixture = Fixture::new();
+        fixture.registry("codex");
+        let root = fixture.resources(&marking_worker(&fixture, PASS));
+        bind(&fixture, "ready", GATE_OWNER);
+        journal(&fixture, case);
+        let operation = gate_start(&fixture, &Owner::new(), &root, ID);
+        assert_eq!(operation.outcome, Some(Outcome::Passed), "{case}");
+        assert!(marker(&fixture).exists(), "{case}");
+        assert!(read_ledger(&fixture)["open"].is_null());
+        assert_eq!(
+            read_ledger(&fixture)["entries"].as_array().unwrap().len(),
+            1
+        );
+    }
+}
+
+#[test]
+fn another_owners_unresolved_journal_does_not_block() {
+    let fixture = Fixture::new();
+    fixture.registry("codex");
+    let root = fixture.resources(&marking_worker(&fixture, PASS));
+    bind(&fixture, "ready", GATE_OTHER_OWNER);
+    journal(&fixture, "lease_intent_pending_process_crash");
+    let operation = gate_start(&fixture, &Owner::new(), &root, ID);
+    assert_eq!(operation.outcome, Some(Outcome::Passed));
+    assert!(marker(&fixture).exists());
+}
+
+#[test]
+fn a_corrupt_owner_journal_blocks_the_start() {
+    for case in [
+        "hash_changed",
+        "unknown_record_field",
+        "record_gap",
+        "truncated_json",
+    ] {
+        let fixture = Fixture::new();
+        fixture.registry("codex");
+        let root = fixture.resources(&marking_worker(&fixture, PASS));
+        bind(&fixture, "ready", GATE_OWNER);
+        journal(&fixture, case);
+        let operation = gate_start(&fixture, &Owner::new(), &root, ID);
+        refused(
+            &operation,
+            Outcome::NeedsReview,
+            "profile_needs_review",
+            Cleanup::Unknown,
+        );
+        nothing_started(&fixture, None);
+    }
+}
+
+#[test]
+fn an_absent_binding_proceeds_so_the_worker_reports_profile_unbound() {
+    let fixture = Fixture::new();
+    fixture.registry("codex");
+    let root = fixture.resources(&marking_worker(
+        &fixture,
+        "P('preparing');P('cleaning');R('failed','profile_unbound','verified',null);",
+    ));
+    // Even an unresolved journal is irrelevant without a binding owner.
+    journal(&fixture, "lease_intent_pending_process_crash");
+    let operation = gate_start(&fixture, &Owner::new(), &root, ID);
+    assert_eq!(operation.outcome, Some(Outcome::Failed));
+    assert_eq!(operation.error_code.as_deref(), Some("profile_unbound"));
+    assert!(marker(&fixture).exists());
+    assert!(valid_operation(&operation));
+}
+
+#[test]
+fn an_invalid_binding_fails_with_profile_invalid_before_anything_starts() {
+    let invalid: [&dyn Fn(&Fixture); 3] = [
+        &|fixture| {
+            let root = fixture.directory.join("managed-profile-sessions");
+            fs::create_dir_all(&root).unwrap();
+            fs::write(root.join(format!("{PROFILE}.json")), "not json").unwrap();
+        },
+        &|fixture| bind(fixture, "unknown", GATE_OWNER),
+        // The owner may not be the profile id itself.
+        &|fixture| bind(fixture, "ready", PROFILE),
+    ];
+    for write in invalid {
+        let fixture = Fixture::new();
+        fixture.registry("codex");
+        let root = fixture.resources(&marking_worker(&fixture, PASS));
+        write(&fixture);
+        let operation = gate_start(&fixture, &Owner::new(), &root, ID);
+        refused(
+            &operation,
+            Outcome::Failed,
+            "profile_invalid",
+            Cleanup::Verified,
+        );
+        nothing_started(&fixture, None);
+    }
+    // A codex binding is invalid for a claude profile.
+    let fixture = Fixture::new();
+    fixture.registry("claude");
+    let root = fixture.resources(&marking_worker(&fixture, PASS));
+    bind(&fixture, "ready", GATE_OWNER);
+    let operation = gate_start(&fixture, &Owner::new(), &root, ID);
+    refused(
+        &operation,
+        Outcome::Failed,
+        "profile_invalid",
+        Cleanup::Verified,
+    );
+    nothing_started(&fixture, None);
+}
+
+#[test]
+fn a_verified_profile_invalid_failure_does_not_freeze_later_starts() {
+    let fixture = Fixture::new();
+    fixture.registry("codex");
+    let root = fixture.resources(&marking_worker(&fixture, PASS));
+    bind(&fixture, "unknown", GATE_OWNER);
+    let owner = Owner::new();
+    let first = gate_start(&fixture, &owner, &root, ID);
+    assert_eq!(first.error_code.as_deref(), Some("profile_invalid"));
+    bind(&fixture, "ready", GATE_OWNER);
+    let second = gate_start(&fixture, &owner, &root, OTHER);
+    assert_eq!(second.outcome, Some(Outcome::Passed));
+}
+
+#[test]
+fn a_reserved_binding_needs_review_before_anything_starts() {
+    let fixture = Fixture::new();
+    fixture.registry("codex");
+    let root = fixture.resources(&marking_worker(&fixture, PASS));
+    bind(&fixture, "reserved", GATE_OWNER);
+    let owner = Owner::new();
+    let operation = gate_start(&fixture, &owner, &root, ID);
+    refused(
+        &operation,
+        Outcome::NeedsReview,
+        "profile_needs_review",
+        Cleanup::Unknown,
+    );
+    nothing_started(&fixture, None);
+    assert_eq!(go(&owner, &fixture, &root, OTHER).map(|_| ()), Err(DENIED));
+}
+
+#[test]
+fn a_leased_run_is_gated_the_same_way() {
+    let leased = |id: &str| Start {
+        request_id: id.into(),
+        task_id: SOFTWARE_TASK.into(),
+        strategy_id: Some("invariant".into()),
+        lease_context: Some(lease_context()),
+        ..start(id)
+    };
+    let fixture = Fixture::new();
+    fixture.registry("codex");
+    let root = fixture.resources(&universal_worker());
+    bind(&fixture, "ready", GATE_OWNER);
+    journal(&fixture, "lease_intent_pending_process_crash");
+    let owner = Owner::new();
+    owner
+        .start(leased(ID), root.clone(), fixture.directory.clone())
+        .unwrap();
+    let operation = wait(&owner, Phase::Finished);
+    refused(
+        &operation,
+        Outcome::NeedsReview,
+        "profile_needs_review",
+        Cleanup::Unknown,
+    );
+    assert!(operation.lease_context.is_some());
+    nothing_started(&fixture, None);
+    assert!(owner
+        .start(leased(OTHER), root, fixture.directory.clone())
+        .is_err());
+    // The same lease with a clear journal starts a worker.
+    let fixture = Fixture::new();
+    fixture.registry("codex");
+    let root = fixture.resources(&universal_worker());
+    bind(&fixture, "ready", GATE_OWNER);
+    journal(&fixture, "begin_process_crash");
+    let owner = Owner::new();
+    owner
+        .start(leased(ID), root, fixture.directory.clone())
+        .unwrap();
+    wait(&owner, Phase::Preparing);
+    assert!(ledger_path(&fixture).exists());
+    owner.cancel(cancel(ID, current(&owner).revision)).unwrap();
+    let done = wait(&owner, Phase::Finished);
+    assert_eq!(done.outcome, Some(Outcome::Cancelled));
+}

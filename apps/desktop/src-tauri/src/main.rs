@@ -3,6 +3,7 @@ mod launcher;
 mod launcher_process;
 mod operation_journal;
 mod operation_status;
+mod profile_binding;
 mod profile_session;
 mod profile_store;
 mod run_limits;
