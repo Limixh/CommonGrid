@@ -5,12 +5,16 @@ import { TaskDependenciesPanel, StatusBadge } from "./TaskDependenciesPanel";
 import { kindLabel, statusOf, TASK_STATUSES, statusLabel } from "./task-dependencies";
 import type { Settings, Page } from "./ui-types";
 import type { TaskCatalog } from "./useTaskCatalog";
+import { useRunLimits } from "./useRunLimits";
 import { captureCatalogSelection, controlledExecutionSelection, type ExecutionSelection } from "./execution-selection";
 
 type WorkspacePageProps = { catalog: TaskCatalog; settings: Settings; t: UIWords; setPage: (page: Page) => void; onPrepareExecution: (selection: ExecutionSelection) => void };
 
 export function WorkspacePage({ catalog, settings, t, setPage, onPrepareExecution }: WorkspacePageProps) {
   const { projects, tasks, statuses, status, source, setSelected, query, setQuery, type, setType, project, setProject, statusFilter, setStatusFilter, tab, setTab, strategy, setStrategy, filtered, task, loadCatalog, pagers, duplicates, loadMoreTasks, loadMoreProjects, revealTask } = catalog;
+  // The native ledger's effective maximum replaces the browser copy of the user limits when it answers.
+  const runLimits = useRunLimits().status;
+  const nativeMaxSec = runLimits?.availability === "available" ? runLimits.effective.max_sec : null;
   const detailHeading = useRef<HTMLHeadingElement>(null);
   const focusDetail = useRef(false);
   const visibleIds = new Set(filtered.map((item) => item.id));
@@ -315,11 +319,13 @@ export function WorkspacePage({ catalog, settings, t, setPage, onPrepareExecutio
                     <span>
                       {t.limit}
                       <strong>
-                        {Math.min(
-                          task.environment.time_limit_sec / 60,
-                          settings.taskMinutes,
-                          settings.dailyMinutes,
-                        )}{" "}
+                        {nativeMaxSec !== null
+                          ? Math.floor(Math.min(task.environment.time_limit_sec, nativeMaxSec) / 60)
+                          : Math.min(
+                            task.environment.time_limit_sec / 60,
+                            settings.taskMinutes,
+                            settings.dailyMinutes,
+                          )}{" "}
                         <small>{t.min}</small>
                       </strong>
                     </span>

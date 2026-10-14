@@ -18,6 +18,8 @@ fn main() {
             "local_task_run_status",
             "local_task_run_cancel",
             "local_task_run_result_package",
+            "local_run_limits_status",
+            "local_run_limits_save",
         ]),
     ))
     .expect("CommonGrid desktop build failed");

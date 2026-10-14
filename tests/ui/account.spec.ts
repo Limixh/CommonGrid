@@ -57,6 +57,7 @@ async function mockSelectedExecutionProfile(page: Page) {
         selected_profile_id: "a0000000-0000-4000-8000-000000000001",
         profiles: [{ profile_id: "a0000000-0000-4000-8000-000000000001", provider: "codex", name: "Yerel profil" }],
       });
+      if (command === "local_run_limits_status") return Promise.resolve({schema_version: "1.0", availability: "available", limits: {attempt_sec: 1800, daily_sec: 7200, concurrency: 1}, usage: {used_sec: 0, open_sec: 0, remaining_sec: 7200, window_seconds: 86400}, effective: {max_sec: 1200, startable: true, reason: null}, paid_mode: "disabled"});
       if (["local_profile_session_status", "local_cli_check_status", "local_task_run_status"].includes(command))
         return Promise.resolve({ schema_version: "1.0", availability: "available", operation: null });
       if (command === "local_operation_status") return Promise.resolve({ status: "unavailable", reason: "operation_journal_missing", execution_enabled: false, automatic_recovery: false, worker_quiescence: "unknown", daemon_state: "unknown", operations: [] });

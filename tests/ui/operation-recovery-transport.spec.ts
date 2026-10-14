@@ -20,6 +20,7 @@ async function mockNative(page: Page, value: unknown = envelope, deferred = 0, r
     target.__TAURI_INTERNALS__ = {invoke: (command, args, options) => {
       if (command === "local_managed_profiles_status") return Promise.resolve({schema_version: "1.0", availability: "unavailable", revision: 0, profiles: [], selected_profile_id: null});
       if (command === "local_cli_check_status") return Promise.resolve({schema_version: "1.0", availability: "available", operation: null});
+      if (command === "local_run_limits_status") return Promise.resolve({schema_version: "1.0", availability: "unavailable", limits: {attempt_sec: 1800, daily_sec: 7200, concurrency: 1}, usage: {used_sec: 0, open_sec: 0, remaining_sec: 0, window_seconds: 86400}, effective: {max_sec: 0, startable: false, reason: null}, paid_mode: "disabled"});
       const mock = target.__operationMock;
       mock.calls.push({command, args, options});
       if (reject) return Promise.reject(new Error("private/auth/native-error"));

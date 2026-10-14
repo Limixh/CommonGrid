@@ -3419,3 +3419,256 @@ fn lease_admission_pins_context_and_replay_cannot_extend_or_replace_it() {
     context.expires_at_ms = 1;
     assert!(context.remaining().is_none());
 }
+
+// The native run-limits ledger is a file next to the profile registry.
+fn real_now() -> u64 {
+    run_limits::now_ms().unwrap()
+}
+fn ledger_path(fixture: &Fixture) -> PathBuf {
+    fixture.directory.join("run-limits.json")
+}
+fn write_ledger(fixture: &Fixture, attempt: u64, daily: u64, entries: Value, open: Value) {
+    fs::write(
+        ledger_path(fixture),
+        json!({"schema_version":"1.0","attempt_sec":attempt,"daily_sec":daily,"entries":entries,"open":open}).to_string(),
+    )
+    .unwrap();
+}
+fn read_ledger(fixture: &Fixture) -> Value {
+    serde_json::from_slice(&fs::read(ledger_path(fixture)).unwrap()).unwrap()
+}
+const BLOCKED: &str = "P('preparing');P('running');M(MODEL);A(1);await CANCELLED();await sleep(100);P('cleaning');R('cancelled','cancelled','verified',null);";
+
+#[test]
+fn an_exhausted_or_unreadable_budget_fails_before_any_worker_exists() {
+    let fixture = Fixture::new();
+    fixture.registry("codex");
+    let root = fixture.resources(&worker("codex", PASS));
+    let owner = Owner::new();
+    write_ledger(
+        &fixture,
+        1800,
+        7200,
+        json!([{"end_ms": real_now(), "used_ms": 7_200_000}]),
+        Value::Null,
+    );
+    let before = fs::read(ledger_path(&fixture)).unwrap();
+    go(&owner, &fixture, &root, ID).unwrap();
+    let exhausted = wait(&owner, Phase::Finished);
+    assert_eq!(
+        (exhausted.outcome, exhausted.cleanup),
+        (Some(Outcome::Failed), Cleanup::Verified)
+    );
+    assert_eq!(
+        exhausted.error_code.as_deref(),
+        Some("local_budget_exhausted")
+    );
+    assert!(exhausted.result.is_none() && valid_operation(&exhausted));
+    assert!(!fixture.home().exists());
+    assert_eq!(fs::read(ledger_path(&fixture)).unwrap(), before);
+    // Under a minute of daily budget left is exhausted too.
+    write_ledger(
+        &fixture,
+        1800,
+        7200,
+        json!([{"end_ms": real_now(), "used_ms": 7_140_001}]),
+        Value::Null,
+    );
+    go(&owner, &fixture, &root, OTHER).unwrap();
+    assert_eq!(
+        until(&owner, "second run", |op| op.request_id == OTHER
+            && op.phase == Phase::Finished)
+        .error_code
+        .as_deref(),
+        Some("local_budget_exhausted")
+    );
+    // An unreadable ledger fails closed, whatever is wrong with it.
+    for (index, text) in ["garbage", "{\"schema_version\":\"1.0\"}"]
+        .iter()
+        .enumerate()
+    {
+        fs::write(ledger_path(&fixture), text).unwrap();
+        let id = format!("4444444{index}-4444-4444-8444-444444444444");
+        go(&owner, &fixture, &root, &id).unwrap();
+        let unavailable = until(&owner, "unreadable ledger", |op| {
+            op.request_id == id && op.phase == Phase::Finished
+        });
+        assert_eq!(
+            (unavailable.outcome, unavailable.cleanup),
+            (Some(Outcome::Failed), Cleanup::Verified)
+        );
+        assert_eq!(
+            unavailable.error_code.as_deref(),
+            Some("local_budget_unavailable")
+        );
+        assert!(valid_operation(&unavailable));
+        assert!(!fixture.home().exists());
+        assert_eq!(&fs::read_to_string(ledger_path(&fixture)).unwrap(), text);
+    }
+}
+
+#[test]
+fn a_run_holds_its_reserved_time_and_settles_it_before_finishing() {
+    let fixture = Fixture::new();
+    fixture.registry("codex");
+    let root = fixture.resources(&worker("codex", BLOCKED));
+    // The attempt cap narrows the run's ceiling; a missing ledger elsewhere
+    // means the defaults (the other tests rely on 1200 s being granted).
+    write_ledger(&fixture, 60, 7200, json!([]), Value::Null);
+    let owner = Owner::new();
+    let began = real_now();
+    go_with(
+        &owner,
+        &fixture,
+        &root,
+        Limits {
+            deadline: Duration::from_secs(120),
+            grace: Duration::from_secs(20),
+        },
+    )
+    .unwrap();
+    wait(&owner, Phase::Running);
+    let held = read_ledger(&fixture);
+    assert_eq!(held["open"]["request_id"], ID);
+    assert_eq!(held["open"]["reserved_ms"], 60_000);
+    assert!(held["open"]["started_ms"].as_u64().unwrap() >= began);
+    assert_eq!(held["entries"], json!([]));
+    let running = current(&owner);
+    owner.cancel(cancel(ID, running.revision)).unwrap();
+    let done = wait(&owner, Phase::Finished);
+    assert_eq!(done.outcome, Some(Outcome::Cancelled));
+    // Settled before the finished state became visible.
+    let settled = read_ledger(&fixture);
+    assert!(settled["open"].is_null());
+    let entries = settled["entries"].as_array().unwrap();
+    assert_eq!(entries.len(), 1);
+    let used = entries[0]["used_ms"].as_u64().unwrap();
+    assert!((1000..=60_000).contains(&used) && used % 1000 == 0);
+    assert!(entries[0]["end_ms"].as_u64().unwrap() >= held["open"]["started_ms"].as_u64().unwrap());
+    drop(owner);
+    // A missing ledger grants the full task ceiling, and a passed run settles.
+    fs::remove_file(ledger_path(&fixture)).unwrap();
+    fixture.swap(&root, &worker("codex", PASS));
+    let owner = Owner::new();
+    go(&owner, &fixture, &root, ID).unwrap();
+    assert_eq!(wait(&owner, Phase::Finished).outcome, Some(Outcome::Passed));
+    let after = read_ledger(&fixture);
+    assert_eq!(
+        (after["attempt_sec"].clone(), after["daily_sec"].clone()),
+        (json!(1800), json!(7200))
+    );
+    assert!(after["open"].is_null() && after["entries"].as_array().unwrap().len() == 1);
+    // A start that fails on its assets still settles what it reserved.
+    let owner = Owner::new();
+    let missing = fixture.directory.join("missing-launcher");
+    go(&owner, &fixture, &missing, OTHER).unwrap();
+    assert_eq!(
+        wait(&owner, Phase::Finished).error_code.as_deref(),
+        Some("asset_missing")
+    );
+    let after = read_ledger(&fixture);
+    assert!(after["open"].is_null() && after["entries"].as_array().unwrap().len() == 2);
+}
+
+#[test]
+fn the_deadline_is_the_reserved_time_and_its_elapsed_time_is_recorded() {
+    let fixture = Fixture::new();
+    fixture.registry("codex");
+    let root = fixture.resources(&worker("codex", BLOCKED));
+    write_ledger(&fixture, 60, 7200, json!([]), Value::Null);
+    let owner = Owner::new();
+    go_with(
+        &owner,
+        &fixture,
+        &root,
+        Limits {
+            deadline: Duration::from_secs(5),
+            grace: Duration::from_secs(20),
+        },
+    )
+    .unwrap();
+    let reserved = Instant::now() + Duration::from_secs(20);
+    while read_ledger(&fixture)["open"].is_null() && Instant::now() < reserved {
+        thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(read_ledger(&fixture)["open"]["reserved_ms"], 5000);
+    // Under load the worker may still be starting when the deadline passes,
+    // so only the error code is pinned here.
+    let late = wait(&owner, Phase::Finished);
+    assert_eq!(late.error_code.as_deref(), Some("deadline_exceeded"));
+    let settled = read_ledger(&fixture);
+    assert!(settled["open"].is_null());
+    assert_eq!(settled["entries"].as_array().unwrap().len(), 1);
+    assert_eq!(settled["entries"][0]["used_ms"], 5000);
+}
+
+#[test]
+fn a_lease_narrows_the_reservation_and_a_cancelled_leased_run_settles() {
+    let fixture = Fixture::new();
+    fixture.registry("codex");
+    let root = fixture.resources(&universal_worker());
+    let owner = Owner::new();
+    let request = Start {
+        task_id: SOFTWARE_TASK.into(),
+        strategy_id: Some("invariant".into()),
+        lease_context: Some(lease_context()),
+        ..start(ID)
+    };
+    owner
+        .start(request, root, fixture.directory.clone())
+        .unwrap();
+    wait(&owner, Phase::Preparing);
+    let held = read_ledger(&fixture);
+    let reserved = held["open"]["reserved_ms"].as_u64().unwrap();
+    // min(task ceiling 1200 s, lease 120 s, attempt 1800 s, daily 7200 s).
+    assert!((100_000..=120_000).contains(&reserved), "{reserved}");
+    let preparing = current(&owner);
+    owner.cancel(cancel(ID, preparing.revision)).unwrap();
+    let done = wait(&owner, Phase::Finished);
+    assert_eq!(done.outcome, Some(Outcome::Cancelled));
+    let settled = read_ledger(&fixture);
+    assert!(settled["open"].is_null());
+    assert_eq!(settled["entries"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn finishing_and_forced_review_both_settle_the_reservation() {
+    let fixture = Fixture::new();
+    for forced in [false, true] {
+        fs::remove_file(ledger_path(&fixture)).ok();
+        let (owner, _rx) = primed(Provider::Codex, Phase::Running, 1, Some("gpt-6-luna"));
+        let (_, held) = run_limits::reserve(
+            &fixture.directory,
+            real_now(),
+            ID,
+            Duration::from_secs(1200),
+        )
+        .unwrap();
+        owner.inner.lock().unwrap().reservation = Some(held);
+        assert_eq!(read_ledger(&fixture)["open"]["request_id"], ID);
+        if forced {
+            owner.force_review();
+            assert_eq!(current(&owner).outcome, Some(Outcome::NeedsReview));
+        } else {
+            owner.finish(ID, End::failed("worker_failed"));
+            assert_eq!(current(&owner).outcome, Some(Outcome::Failed));
+        }
+        let settled = read_ledger(&fixture);
+        assert!(settled["open"].is_null(), "forced {forced}");
+        assert_eq!(settled["entries"][0]["used_ms"], 1000);
+        assert!(owner.inner.lock().unwrap().reservation.is_none());
+    }
+    // A reservation of another request is left alone.
+    let (owner, _rx) = primed(Provider::Codex, Phase::Running, 1, Some("gpt-6-luna"));
+    let (_, held) = run_limits::reserve(
+        &fixture.directory,
+        real_now(),
+        OTHER,
+        Duration::from_secs(1200),
+    )
+    .unwrap();
+    owner.inner.lock().unwrap().reservation = Some(held);
+    owner.finish(ID, End::failed("worker_failed"));
+    assert_eq!(read_ledger(&fixture)["open"]["request_id"], OTHER);
+    assert!(owner.inner.lock().unwrap().reservation.is_some());
+}

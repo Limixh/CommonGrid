@@ -59,16 +59,26 @@ type Call = {command: string; args: any};
 type Mock = {
   profiles: ManagedProfilesStatus; value: unknown; calls: Call[]; rejected: boolean; pending: ((value: unknown) => void)[];
   deferStart: boolean; cancelConflictValue: unknown | null; copied: string | null; copyFails: boolean;
+  limits: {attempt_sec: number; daily_sec: number; used_sec: number; open_sec: number}; limitCalls: Call[]; limitsSaveFails: boolean;
 };
 type MockWindow = Window & {isTauri: boolean; __taskMock: Mock; __pwned?: boolean; __TAURI_INTERNALS__: {invoke: (command: string, args: any) => Promise<unknown>}};
 async function freezeClock(page: Page) {
   const time = new Date("2026-10-11T12:00:00Z");
   await page.clock.install({time}); await page.clock.pauseAt(new Date(time.getTime() + 1000));
 }
-async function mockNative(page: Page, value: unknown = empty, profileState = profiles) {
-  await page.addInitScript(({value, profiles}) => {
+async function mockNative(page: Page, value: unknown = empty, profileState = profiles, limits: Partial<Mock["limits"]> = {}) {
+  await page.addInitScript(({value, profiles, limits}) => {
     const target = window as MockWindow; target.isTauri = true;
-    target.__taskMock = {value, profiles, calls: [], rejected: false, pending: [], deferStart: false, cancelConflictValue: null, copied: null, copyFails: false};
+    target.__taskMock = {value, profiles, calls: [], rejected: false, pending: [], deferStart: false, cancelConflictValue: null, copied: null, copyFails: false,
+      limits: {attempt_sec: 1800, daily_sec: 7200, used_sec: 0, open_sec: 0, ...limits}, limitCalls: [], limitsSaveFails: false};
+    // Mirrors the native computation: min(task ceiling, attempt cap, remaining 24 h budget).
+    const limitsStatus = () => {
+      const {attempt_sec, daily_sec, used_sec, open_sec} = target.__taskMock.limits;
+      const remaining = Math.max(0, daily_sec - used_sec - open_sec), max = Math.min(1200, attempt_sec, remaining), startable = max >= 60;
+      return {schema_version: "1.0", availability: "available", limits: {attempt_sec, daily_sec, concurrency: 1},
+        usage: {used_sec, open_sec, remaining_sec: remaining, window_seconds: 86400},
+        effective: {max_sec: max, startable, reason: startable ? null : "local_budget_exhausted"}, paid_mode: "disabled"};
+    };
     Object.defineProperty(navigator, "clipboard", {configurable: true, value: {writeText: (text: string) => {
       if (target.__taskMock.copyFails) return Promise.reject(new Error("denied"));
       target.__taskMock.copied = text; return Promise.resolve();
@@ -83,6 +93,14 @@ async function mockNative(page: Page, value: unknown = empty, profileState = pro
       if (command === "local_profile_session_status") return Promise.resolve({schema_version: "1.0", availability: "available", operation: null});
       if (command === "local_cli_check_status") return Promise.resolve({schema_version: "1.0", availability: "available", operation: null});
       if (command === "local_operation_status") return Promise.resolve({status: "unavailable", reason: "operation_journal_missing", execution_enabled: false, automatic_recovery: false, worker_quiescence: "unknown", daemon_state: "unknown", operations: []});
+      if (command === "local_run_limits_status" || command === "local_run_limits_save") {
+        mock.limitCalls.push({command, args});
+        if (command === "local_run_limits_save") {
+          if (mock.limitsSaveFails) return Promise.reject(new Error("PRIVATE_NATIVE_DETAIL"));
+          mock.limits.attempt_sec = args.request.attempt_sec; mock.limits.daily_sec = args.request.daily_sec;
+        }
+        return Promise.resolve(limitsStatus());
+      }
       if (!command.startsWith("local_task_run_")) return Promise.reject(new Error("unexpected_fixture_command"));
       mock.calls.push({command, args});
       if (mock.rejected) return Promise.reject(new Error("PRIVATE_PROVIDER_DETAIL"));
@@ -106,7 +124,7 @@ async function mockNative(page: Page, value: unknown = empty, profileState = pro
       }
       return Promise.resolve(mock.value);
     }};
-  }, {value, profiles: profileState});
+  }, {value, profiles: profileState, limits});
 }
 async function open(page: Page) {
   await page.goto("/"); await page.getByRole("button", {name: "Ajanlar ve ortam", exact: true}).click();
@@ -116,6 +134,7 @@ async function open(page: Page) {
 }
 async function setValue(page: Page, value: unknown) { await page.evaluate(value => { (window as MockWindow).__taskMock.value = value; }, value); }
 async function refresh(page: Page) { await page.getByRole("button", {name: "Görev durumunu yenile", exact: true}).click(); }
+async function limitCalls(page: Page) { return page.evaluate(() => (window as MockWindow).__taskMock.limitCalls); }
 async function calls(page: Page) { return page.evaluate(() => (window as MockWindow).__taskMock.calls); }
 const start = (panel: ReturnType<Page["locator"]>) => panel.getByRole("button", {name: "Başlat", exact: true});
 const cancel = (panel: ReturnType<Page["locator"]>) => panel.getByRole("button", {name: "İptal", exact: true});
@@ -138,7 +157,7 @@ test("the task card names the task, the exact model per provider, the limits and
   await mockNative(page); const panel = await open(page);
   await expect(panel).toContainText("Kontrollü doğrulama görevi: sum.mjs");
   await expect(panel.locator(".task-run-card code")).toHaveText("gpt-6-luna");
-  for (const text of ["Görev çalışma alanında ağ erişimi yok", "En fazla 16 araç çağrısı", "20 dakika süre sınırı", "34 örnekli bağımsız doğrulayıcı", "Yalnız doğrulanmış diff gösterilir", "kendi Claude veya Codex aboneliğinin kotasını"])
+  for (const text of ["Görev çalışma alanında ağ erişimi yok", "En fazla 16 araç çağrısı", "Etkin süre sınırı 20 dk (görev 20 dk · tek deneme 30 dk · son 24 saatte kalan 120 dk). Ücretli API kapalı.", "34 örnekli bağımsız doğrulayıcı", "Yalnız doğrulanmış diff gösterilir", "kendi Claude veya Codex aboneliğinin kotasını"])
     await expect(panel).toContainText(text);
   await page.locator(".managed-profile-list li").filter({hasText: "Claude profilim"}).getByRole("button", {name: "Bu profili seç", exact: true}).click();
   await expect(panel.locator(".task-run-card code")).toHaveText("haiku");
@@ -520,7 +539,7 @@ test("(pin) software-bounds prepared from the catalog explains the local bundle,
   await expect(panel).toHaveAttribute("aria-busy", "false");
   await expect(panel.locator(".task-run-card h4")).toHaveText("Yerel kaynak paketi görevi: src/search.ts");
   await expect(panel.locator(".task-run-card")).toContainText("lowerBound");
-  for (const text of ["Görev çalışma alanında ağ erişimi yok", "En fazla 16 araç çağrısı", "20 dakika süre sınırı", "Yalnız src/search.ts değiştirilebilir", "gizli örnekleri geçmeli", "Yalnız doğrulanmış diff gösterilir"])
+  for (const text of ["Görev çalışma alanında ağ erişimi yok", "En fazla 16 araç çağrısı", "Etkin süre sınırı 20 dk (görev 20 dk · tek deneme 30 dk · son 24 saatte kalan 120 dk). Ücretli API kapalı.", "Yalnız src/search.ts değiştirilebilir", "gizli örnekleri geçmeli", "Yalnız doğrulanmış diff gösterilir"])
     await expect(panel.locator(".task-run-card")).toContainText(text);
   await expect(panel.locator(".task-run-card")).not.toContainText("34 örnekli");
   await expect(panel.locator(".task-run-card code")).toHaveText(["boundary-first", "gpt-6-luna"]);
@@ -799,4 +818,112 @@ test("a software-intervals patch for the wrong file or another task's strategy i
     await expect(panel.getByRole("alert")).toContainText("Görev durumu doğrulanamadı");
     await expect(panel.getByTestId("task-run-diff")).not.toContainText("src/search.ts");
   }
+});
+
+// Native-owned local run limits (ADR 0024): wall time only, enforced natively.
+const settingsButton = (page: Page) => page.getByRole("button", {name: "Katkı ayarları", exact: true});
+
+test("the effective local limit is shown before Başlat and replaces the fixed 20 minute line", async ({page}) => {
+  await mockNative(page, empty, profiles, {attempt_sec: 600, daily_sec: 1500, used_sec: 600});
+  const panel = await open(page);
+  const line = panel.getByTestId("run-limits-effective");
+  await expect(line).toHaveText("Etkin süre sınırı 10 dk (görev 20 dk · tek deneme 10 dk · son 24 saatte kalan 15 dk). Ücretli API kapalı.");
+  await expect(panel).not.toContainText("20 dakika süre sınırı");
+  await expect(panel.getByTestId("run-limits-blocked")).toHaveCount(0);
+  await approve(panel); await expect(start(panel)).toBeEnabled();
+  const read = await limitCalls(page);
+  expect(read.length).toBeGreaterThan(0);
+  expect(read.every(call => call.command === "local_run_limits_status" && JSON.stringify(call.args) === "{}")).toBe(true);
+  await page.getByRole("button", {name: "Change language", exact: true}).click();
+  await expect(line).toHaveText("Effective time limit 10 min (task 20 min · per attempt 10 min · remaining in the last 24 hours 15 min). Paid API is off.");
+});
+
+test("an exhausted local budget disables Başlat with the explanation and never reaches the native start", async ({page}) => {
+  await mockNative(page, empty, profiles, {used_sec: 7200});
+  const panel = await open(page);
+  await expect(panel.getByTestId("run-limits-blocked")).toContainText("Son 24 saatteki yerel çalışma süresi doldu. Ayarlardan artırabilir veya bekleyebilirsin");
+  await expect(panel.getByTestId("run-limits-effective")).toContainText("Etkin süre sınırı 0 dk");
+  await expect(panel.getByRole("checkbox")).toBeDisabled(); await expect(start(panel)).toBeDisabled();
+  await start(panel).click({force: true});
+  expect((await calls(page)).some(call => call.command === "local_task_run_start")).toBe(false);
+});
+
+test("a run that finished with local_budget_exhausted or local_budget_unavailable explains it", async ({page}) => {
+  await mockNative(page, failed("local_budget_exhausted")); const panel = await open(page);
+  const result = panel.locator(".task-run-result");
+  await expect(result).toContainText("Görev tamamlanamadı");
+  await expect(result).toContainText("Son 24 saatteki yerel çalışma süresi doldu");
+  await setValue(page, envelope(operation({request_id: "c0000000-0000-4000-8000-000000000002", revision: 10, phase: "finished", outcome: "failed", error_code: "local_budget_unavailable", cleanup: "verified", tool_calls: 0, model: {requested: "gpt-6-luna", observed: null}})));
+  await refresh(page);
+  await expect(result).toContainText("Yerel süre sınırı kaydı okunamadı. Ayarları yeniden kaydet");
+  await page.getByRole("button", {name: "Change language", exact: true}).click();
+  await expect(result).toContainText("The local time-limit record could not be read");
+});
+
+test("the limits are read again after a run finishes", async ({page}) => {
+  await mockNative(page, running); const panel = await open(page);
+  const before = (await limitCalls(page)).length;
+  await page.evaluate(() => { (window as MockWindow).__taskMock.limits.used_sec = 1200; });
+  await setValue(page, passed); await refresh(page);
+  await expect(panel.locator(".task-run-result")).toContainText("Görev doğrulandı");
+  await expect(panel.getByTestId("run-limits-effective")).toContainText("son 24 saatte kalan 100 dk");
+  expect((await limitCalls(page)).length).toBeGreaterThan(before);
+});
+
+test("an unreadable native limits record is reported but native still decides", async ({page}) => {
+  await mockNative(page);
+  await page.addInitScript(() => {
+    const target = window as MockWindow, invoke = target.__TAURI_INTERNALS__.invoke;
+    target.__TAURI_INTERNALS__.invoke = (command, args) => command === "local_run_limits_status" ? Promise.reject(new Error("PRIVATE_NATIVE_DETAIL")) : invoke(command, args);
+  });
+  const panel = await open(page);
+  await expect(panel.getByTestId("run-limits-unreadable")).toContainText("Yerel süre sınırı kaydı okunamadı");
+  await expect(panel).toContainText("20 dakika süre sınırı");
+  await expect(panel).not.toContainText("PRIVATE_NATIVE_DETAIL");
+  await approve(panel); await expect(start(panel)).toBeEnabled();
+});
+
+test("saving the settings in the desktop app also saves the limits natively in seconds", async ({page}) => {
+  await mockNative(page); await page.goto("/");
+  await settingsButton(page).click();
+  await expect(page.getByLabel("Tek deneme (dakika)")).toHaveValue("30");
+  await expect(page.getByLabel("Günlük aktif süre (dakika)")).toHaveValue("120");
+  await expect(page.getByLabel("Eşzamanlı deneme")).toBeDisabled(); await expect(page.getByLabel("Eşzamanlı deneme")).toHaveValue("1");
+  await expect(page.getByTestId("concurrency-fixed")).toContainText("sabittir");
+  await expect(page.getByTestId("run-limits-usage")).toContainText("Son 24 saatte kullanılan yerel çalışma süresi: 0 dk · kalan: 120 dk");
+  await expect(page.getByTestId("run-limits-usage")).toContainText("token veya abonelik kullanımı değildir");
+  await page.getByLabel("Tek deneme (dakika)").fill("15"); await page.getByLabel("Günlük aktif süre (dakika)").fill("90");
+  await page.getByRole("button", {name: "Tercihleri kaydet"}).click();
+  await expect(page.getByRole("status")).toContainText("kaydedildi");
+  const saves = (await limitCalls(page)).filter(call => call.command === "local_run_limits_save");
+  expect(saves).toHaveLength(1);
+  expect(saves[0].args).toEqual({request: {schema_version: "1.0", attempt_sec: 900, daily_sec: 5400}});
+  await expect(page.getByTestId("run-limits-usage")).toContainText("kalan: 90 dk");
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("commongrid.settings.v1")!))).toMatchObject({taskMinutes: 15, dailyMinutes: 90, concurrency: 1});
+});
+
+test("a native save failure is reported and the stored preferences stay as they were", async ({page}) => {
+  await mockNative(page); await page.goto("/");
+  await settingsButton(page).click();
+  await page.evaluate(() => { (window as MockWindow).__taskMock.limitsSaveFails = true; });
+  await page.getByLabel("Tek deneme (dakika)").fill("15");
+  await page.getByRole("button", {name: "Tercihleri kaydet"}).click();
+  await expect(page.getByRole("status")).toContainText("Yerel süre sınırı kaydedilemedi");
+  await expect(page.locator("body")).not.toContainText("PRIVATE_NATIVE_DETAIL");
+  expect(await page.evaluate(() => localStorage.getItem("commongrid.settings.v1"))).toBeNull();
+});
+
+test("the native limits win over a drifted browser copy of the settings", async ({page}) => {
+  await page.addInitScript(() => localStorage.setItem("commongrid.settings.v1", JSON.stringify({language: "tr", cpu: 2, memoryMb: 4096, taskMinutes: 50, dailyMinutes: 400, concurrency: 3})));
+  await mockNative(page, empty, profiles, {attempt_sec: 600, daily_sec: 3600}); await page.goto("/");
+  await settingsButton(page).click();
+  await expect(page.getByLabel("Tek deneme (dakika)")).toHaveValue("10");
+  await expect(page.getByLabel("Günlük aktif süre (dakika)")).toHaveValue("60");
+  await expect(page.getByLabel("Eşzamanlı deneme")).toHaveValue("1");
+});
+
+test("the native effective maximum caps the workspace time limit", async ({page}) => {
+  await mockNative(page, empty, profiles, {attempt_sec: 300, daily_sec: 3600}); await page.goto("/");
+  await page.locator(".task-card").first().click();
+  await expect(page.locator(".resource-grid span").filter({hasText: "SÜRE LİMİTİ"})).toContainText(/5\s*dk/i);
 });

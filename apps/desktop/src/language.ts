@@ -86,6 +86,12 @@ export const words = {
     save: "Tercihleri kaydet",
     saved: "Tercihler bu cihazda kaydedildi.",
     invalid: "Geçerli tam sayılar girin; tek deneme günlük bütçeyi aşamaz.",
+    nativeFailed: "Yerel süre sınırı kaydedilemedi; tercihler değiştirilmedi. Tekrar dene.",
+    concurrencyFixed: "Yerelde eşzamanlı deneme sayısı 1'e sabittir.",
+    limitsUsage: "Son 24 saatte kullanılan yerel çalışma süresi",
+    limitsRemaining: "kalan",
+    limitsUnreadable: "Yerel süre sınırı kaydı okunamadı. Kaydederek yeniden oluşturabilirsin.",
+    limitsNote: "Bu yalnız duvar saati süresidir; token veya abonelik kullanımı değildir.",
     paid: "Ücretli API kullanımı kapalı",
     paidText:
       "Abonelik kotası dolduğunda otomatik ücretli kullanıma geçiş yapılmaz.",
@@ -229,6 +235,12 @@ export const words = {
     saved: "Preferences saved on this device.",
     invalid:
       "Enter valid whole numbers; attempt time cannot exceed the daily budget.",
+    nativeFailed: "The local time limit could not be saved; preferences were not changed. Try again.",
+    concurrencyFixed: "Concurrent attempts are fixed to 1 locally.",
+    limitsUsage: "Local run time used in the last 24 hours",
+    limitsRemaining: "remaining",
+    limitsUnreadable: "The local time-limit record could not be read. Saving will recreate it.",
+    limitsNote: "This is wall-clock time only, not token or subscription usage.",
     paid: "Paid API usage disabled",
     paidText:
       "Reaching a subscription quota never automatically switches to paid usage.",

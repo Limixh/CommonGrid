@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  acceptTaskRunUpdate, taskRunMaxToolCalls, taskRunPatchPaths, taskRunRequestedModels,
+  acceptTaskRunUpdate, runLimitsTaskCeilingSeconds, taskRunMaxToolCalls, taskRunPatchPaths, taskRunRequestedModels,
   type TaskRunError, type TaskRunOperation, type TaskRunOutcome, type TaskRunPhase, type TaskRunStatus, type TaskRunTaskId, type TaskRunVerifier,
 } from "@commongrid/agent-adapters/task-run";
 import type { ManagedProfile } from "@commongrid/agent-adapters/managed-profiles";
 import { cancelTaskRun, readTaskRun, startTaskRun, taskRunNative } from "./task-run-client";
+import { useRunLimits } from "./useRunLimits";
 import type { CentralTaskControl } from "./useCentralTask";
 
 type TaskWords = {title: string; text: string; limits: string[]; checks: readonly [string, string]};
@@ -18,6 +19,7 @@ type Words = {
   historyTitle: string; historyDescription: string; activeTask: string; lastTask: string;
   phases: Record<Exclude<TaskRunPhase, "finished">, string>; outcomes: Record<TaskRunOutcome, string>;
   errors: (model: string) => Record<TaskRunError, string>;
+  localLimit: (effective: number, task: number, attempt: number, remaining: number) => string;
 };
 const words: Record<"tr" | "en", Words> = {
   tr: {
@@ -73,8 +75,11 @@ const words: Record<"tr" | "en", Words> = {
       provider_failed: "Sağlayıcının CLI'ı görevi tamamlayamadı.", tool_limit: `Ajan ${taskRunMaxToolCalls} araç çağrısı sınırına ulaştı.`,
       candidate_invalid: "Ajanın önerdiği değişiklik geçerli bir düzeltme olarak okunamadı.", candidate_rejected: "Bağımsız doğrulayıcı adayı reddetti.",
       verifier_failed: "Bağımsız doğrulayıcı çalıştırılamadı.", worker_failed: "Görev işlemi tamamlanamadı.", cleanup_failed: "Görev ortamı kapatılamadı.",
-      deadline_exceeded: "Görev 20 dakikalık süre sınırına ulaştı.", cancelled: "Görev iptal edildi.",
+      deadline_exceeded: "Görev etkin süre sınırına ulaştı.", cancelled: "Görev iptal edildi.",
+      local_budget_exhausted: "Son 24 saatteki yerel çalışma süresi doldu. Ayarlardan artırabilir veya bekleyebilirsin; görev çalıştırılmadı.",
+      local_budget_unavailable: "Yerel süre sınırı kaydı okunamadı. Ayarları yeniden kaydet; görev çalıştırılmadı.",
     }),
+    localLimit: (effective, task, attempt, remaining) => `Etkin süre sınırı ${effective} dk (görev ${task} dk · tek deneme ${attempt} dk · son 24 saatte kalan ${remaining} dk). Ücretli API kapalı.`,
   },
   en: {
     title: "Approved task", description: "Run one approved, controlled task in an isolated environment with the selected profile whose account is connected, and see only the verified result.",
@@ -129,8 +134,11 @@ const words: Record<"tr" | "en", Words> = {
       provider_failed: "The provider's CLI could not complete the task.", tool_limit: `The agent reached the limit of ${taskRunMaxToolCalls} tool calls.`,
       candidate_invalid: "The agent's change could not be read as a valid fix.", candidate_rejected: "The independent verifier rejected the candidate.",
       verifier_failed: "The independent verifier could not run.", worker_failed: "The task operation could not complete.", cleanup_failed: "The task environment could not close.",
-      deadline_exceeded: "The task reached its 20 minute time limit.", cancelled: "Task cancelled.",
+      deadline_exceeded: "The task reached its effective time limit.", cancelled: "Task cancelled.",
+      local_budget_exhausted: "The local run time of the last 24 hours is used up. Raise it in settings or wait; the task did not run.",
+      local_budget_unavailable: "The local time-limit record could not be read. Save the settings again; the task did not run.",
     }),
+    localLimit: (effective, task, attempt, remaining) => `Effective time limit ${effective} min (task ${task} min · per attempt ${attempt} min · remaining in the last 24 hours ${remaining} min). Paid API is off.`,
   },
 };
 
@@ -173,6 +181,11 @@ export function TaskRunPanel({language, profile, taskId, strategyId, allowStart,
   const mutation = useRef(false);
   const pollCount = useRef(0);
   const pollStarted = useRef(Date.now());
+  // Native-owned local limits (ADR 0024). Display and a pre-check only: the
+  // native supervisor enforces them again when the run starts.
+  const runLimits = useRunLimits();
+  const localLimits = runLimits.status?.availability === "available" ? runLimits.status : null;
+  const limitBlocked = !!localLimits && !localLimits.effective.startable && !central?.retryable;
 
   async function cancelWithResync(operation: TaskRunOperation, signal: AbortSignal) {
     try {
@@ -192,7 +205,7 @@ export function TaskRunPanel({language, profile, taskId, strategyId, allowStart,
     if (mutation.current) return;
     const before = snapshot.current;
     const operation = before?.operation;
-    if (kind === "start" && (!allowStart || central?.required && !central.available || !before || before.availability !== "available" || !(approved || central?.retryable) ||
+    if (kind === "start" && (!allowStart || limitBlocked || central?.required && !central.available || !before || before.availability !== "available" || !(approved || central?.retryable) ||
       operation && (operation.phase !== "finished" || operation.outcome === "needs_review"))) return;
     if (kind === "cancel" && (!operation || operation.profile_id !== profile.profile_id || operation.phase === "finished" || operation.phase === "cleaning")) return;
     if (kind !== "read") mutation.current = true;
@@ -239,8 +252,11 @@ export function TaskRunPanel({language, profile, taskId, strategyId, allowStart,
     const timeout = window.setTimeout(() => { pollCount.current++; void observe("read"); }, 1000);
     return () => window.clearTimeout(timeout);
   }, [active, status, pending, paused, error]);
+  // The ledger moves when a run starts and when it settles.
+  const limitsKey = operation ? `${operation.request_id}:${operation.phase === "finished"}` : "";
+  useEffect(() => { if (limitsKey) runLimits.refresh(); }, [limitsKey]);
   const centralSubmitting = central?.view?.phase === "submitting";
-  const blocked = !allowStart || central?.required && !central.available || status?.availability !== "available" || active || !!pending ||
+  const blocked = !allowStart || limitBlocked || central?.required && !central.available || status?.availability !== "available" || active || !!pending ||
     centralSubmitting || error && !central?.retryable || operation?.outcome === "needs_review";
   const finished = ours && operation.phase === "finished" ? operation : null;
   const passedResult = finished?.outcome === "passed" ? finished.result : null;
@@ -260,8 +276,14 @@ export function TaskRunPanel({language, profile, taskId, strategyId, allowStart,
       <dl>
         {strategyId && <div><dt>{t.strategy}</dt><dd><code>{strategyId}</code><p className="muted-note">{t.strategyNote}</p></dd></div>}
         <div><dt>{t.model}</dt><dd><code>{requestedModel}</code></dd></div>
-        <div><dt>{t.limitsTitle}</dt><dd><ul>{card.limits.map(limit => <li key={limit}>{central?.required && limit === (language === "tr" ? "20 dakika süre sınırı." : "20 minute time limit.")
-          ? language === "tr" ? "En fazla 20 dakika; merkezi bütçe daha kısa bir süre ayırabilir." : "At most 20 minutes; the central budget may allocate a shorter limit." : limit}</li>)}</ul></dd></div>
+        <div><dt>{t.limitsTitle}</dt><dd><ul>{card.limits.map(limit => <li key={limit}>{limit === (language === "tr" ? "20 dakika süre sınırı." : "20 minute time limit.")
+          ? central?.required
+            ? language === "tr" ? "En fazla 20 dakika; merkezi bütçe daha kısa bir süre ayırabilir." : "At most 20 minutes; the central budget may allocate a shorter limit."
+            : localLimits && localLimits.effective.reason !== "local_budget_unavailable"
+              ? <span data-testid="run-limits-effective">{t.localLimit(Math.floor(localLimits.effective.max_sec / 60), runLimitsTaskCeilingSeconds / 60,
+                Math.floor(localLimits.limits.attempt_sec / 60), Math.floor(localLimits.usage.remaining_sec / 60))}</span>
+              : limit
+          : limit}</li>)}</ul></dd></div>
       </dl>
       <p className="task-run-quota">{t.quota}</p>
     </div>}
@@ -273,6 +295,10 @@ export function TaskRunPanel({language, profile, taskId, strategyId, allowStart,
       {allowStart && <button className="primary-button" disabled={blocked || !(approved || central?.retryable)} onClick={() => void observe("start")}>{central?.retryable ? language === "tr" ? "Aynı başlatmayı tekrar dene" : "Retry the same start" : t.start}</button>}
       {ours && active && <button className="secondary-button" disabled={!!pending || operation.phase === "cleaning"} onClick={() => void observe("cancel")}>{t.cancel}</button>}
     </div>
+    {allowStart && localLimits && !localLimits.effective.startable && localLimits.effective.reason &&
+      <p role="status" data-testid="run-limits-blocked">{t.errors(requestedModel)[localLimits.effective.reason]}</p>}
+    {allowStart && !localLimits && taskRunNative() && runLimits.error && !runLimits.pending &&
+      <p role="status" data-testid="run-limits-unreadable">{t.errors(requestedModel).local_budget_unavailable}</p>}
     {status?.availability === "unavailable" && <p role="status">{t.unavailable}</p>}
     {pending === "read" && !status && <p role="status">{t.loading}</p>}
     {pending === "start" && <p role="status">{t.submitting}</p>}

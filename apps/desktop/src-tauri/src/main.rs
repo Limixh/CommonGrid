@@ -5,6 +5,7 @@ mod operation_journal;
 mod operation_status;
 mod profile_session;
 mod profile_store;
+mod run_limits;
 mod task_run;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -46,7 +47,9 @@ fn main() {
             task_run::local_task_run_start,
             task_run::local_task_run_status,
             task_run::local_task_run_cancel,
-            task_run::local_task_run_result_package
+            task_run::local_task_run_result_package,
+            run_limits::local_run_limits_status,
+            run_limits::local_run_limits_save
         ])
         .build(application_context())
         .expect("CommonGrid desktop could not start")

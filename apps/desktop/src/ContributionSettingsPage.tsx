@@ -1,11 +1,20 @@
-import type { Dispatch, SetStateAction } from "react";
+import { useEffect, type Dispatch, type SetStateAction } from "react";
 import { Icon } from "./Icon";
 import type { UIWords } from "./language";
+import { runLimitsNative } from "./run-limits-client";
 import type { Settings } from "./ui-types";
+import { useRunLimits } from "./useRunLimits";
 
 type ContributionSettingsPageProps = { draft: Settings; setDraft: Dispatch<SetStateAction<Settings>>; notice: string; setNotice: Dispatch<SetStateAction<string>>; save: () => void; t: UIWords };
 
+const minutes = (seconds: number) => Math.floor(seconds / 60);
+
 export function ContributionSettingsPage({ draft, setDraft, notice, setNotice, save, t }: ContributionSettingsPageProps) {
+  const native = runLimitsNative();
+  const limits = useRunLimits();
+  // A completed save changes the ledger view (limits and remaining time).
+  useEffect(() => { if (notice === "saved" && native) void limits.refresh(); }, [notice]);
+  const ledger = limits.status?.availability === "available" && limits.status.effective.reason !== "local_budget_unavailable" ? limits.status : null;
   return (
     <div className="settings-content">
       <div className="eyebrow">{t.local}</div>
@@ -31,7 +40,8 @@ export function ContributionSettingsPage({ draft, setDraft, notice, setNotice, s
                     max={
                       key === "cpu" ? 64 : key === "memoryMb" ? 262144 : 8
                     }
-                    value={Number.isFinite(draft[key]) ? draft[key] : ""}
+                    value={key === "concurrency" && native ? 1 : Number.isFinite(draft[key]) ? draft[key] : ""}
+                    disabled={key === "concurrency" && native}
                     onChange={(e) => {
                       setDraft({
                         ...draft,
@@ -46,6 +56,7 @@ export function ContributionSettingsPage({ draft, setDraft, notice, setNotice, s
             )}
           </div>
         </div>
+        {native && <p className="muted-note" data-testid="concurrency-fixed">{t.concurrencyFixed}</p>}
         <div className="settings-box">
           <h2>{t.budget}</h2>
           <div className="form-grid">
@@ -108,6 +119,11 @@ export function ContributionSettingsPage({ draft, setDraft, notice, setNotice, s
             </label>
           </div>
         </div>
+        {native && <p className="muted-note" role="note" data-testid="run-limits-usage">
+          {ledger
+            ? `${t.limitsUsage}: ${minutes(ledger.usage.used_sec + ledger.usage.open_sec)} ${t.min} · ${t.limitsRemaining}: ${minutes(ledger.usage.remaining_sec)} ${t.min}. ${t.limitsNote}`
+            : limits.pending ? "" : t.limitsUnreadable}
+        </p>}
         <div className="paid-note">
           <Icon name="lock" size={20} />
           <div>
@@ -127,9 +143,9 @@ export function ContributionSettingsPage({ draft, setDraft, notice, setNotice, s
                 notice === "saved" ? "saved-message" : "error-message"
               }
             >
-              {notice === "storage"
+              {notice === "native" ? t.nativeFailed : notice === "storage"
                 ? "Local storage unavailable"
-                : t[notice as "saved" | "invalid"]}
+                : t[notice as "saved" | "invalid" | "nativeFailed"]}
             </span>
           )}
         </div>

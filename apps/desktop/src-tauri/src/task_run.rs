@@ -7,6 +7,7 @@ use crate::{
     launcher_process::OwnedWorker,
     profile_session::ProfileSession,
     profile_store::{self, Provider},
+    run_limits,
 };
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde::{Deserialize, Serialize};
@@ -350,6 +351,8 @@ fn code(value: &str) -> bool {
         "cleanup_failed",
         "deadline_exceeded",
         "cancelled",
+        "local_budget_exhausted",
+        "local_budget_unavailable",
     ]
     .contains(&value)
 }
@@ -459,6 +462,9 @@ struct Inner {
     cancel_requested: bool,
     shutting_down: bool,
     requests: HashSet<String>,
+    // Time held in the native run-limits ledger; settled before the run's
+    // terminal state is published.
+    reservation: Option<run_limits::Reservation>,
 }
 pub(crate) struct TaskRun {
     inner: Mutex<Inner>,
@@ -482,6 +488,7 @@ impl Default for TaskRun {
                 cancel_requested: false,
                 shutting_down: false,
                 requests: HashSet::new(),
+                reservation: None,
             }),
         }
     }
@@ -775,6 +782,7 @@ impl TaskRun {
     }
     pub fn force_review(&self) {
         if let Ok(mut inner) = self.inner.try_lock() {
+            Self::settle(&mut inner, None);
             if let Some(operation) = &mut inner.status.operation {
                 if operation.phase != Phase::Finished {
                     Self::terminal(operation, End::review("cleanup_failed"));
@@ -791,8 +799,22 @@ impl TaskRun {
         operation.cleanup = end.cleanup;
         operation.result = end.result;
     }
+    // Settle the run's reservation (when it belongs to this request) before
+    // any terminal state becomes visible. Best effort and never fatal.
+    fn settle(inner: &mut Inner, id: Option<&str>) {
+        if inner
+            .reservation
+            .as_ref()
+            .is_some_and(|held| id.is_none_or(|id| held.request_id() == id))
+        {
+            if let Some(held) = inner.reservation.take() {
+                run_limits::settle(held, run_limits::now_ms().unwrap_or(0));
+            }
+        }
+    }
     fn finish(&self, id: &str, mut end: End) {
         if let Ok(mut inner) = self.inner.lock() {
+            Self::settle(&mut inner, Some(id));
             // A requested cancellation outranks anything but a deadline, and
             // never leaves a result of the cancelled run visible.
             if inner.cancel_requested
@@ -949,7 +971,24 @@ impl TaskRun {
         limits: Limits,
     ) {
         let id = operation.request_id.as_str();
-        let deadline = Instant::now() + limits.deadline;
+        // Hold the run's time in the native ledger before anything else: an
+        // exhausted or unreadable budget never reaches resources or a worker.
+        let allowed = match run_limits::now_ms()
+            .ok_or("local_budget_unavailable")
+            .and_then(|now| run_limits::reserve(&store, now, id, limits.deadline))
+        {
+            Ok((allowed, held)) => {
+                if let Ok(mut inner) = self.inner.lock() {
+                    inner.reservation = Some(held);
+                }
+                allowed
+            }
+            Err(code) => {
+                self.finish(id, End::failed(code));
+                return;
+            }
+        };
+        let deadline = Instant::now() + limits.deadline.min(allowed);
         if !resources(&root) {
             let absent = [root.join("manifest.json"), root.join(node_name()), root.join("worker.mjs")].iter().any(|path| matches!(fs::symlink_metadata(path), Err(error) if error.kind() == std::io::ErrorKind::NotFound));
             self.finish(

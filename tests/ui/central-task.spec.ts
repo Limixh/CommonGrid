@@ -36,6 +36,7 @@ async function setup(page: Page, options: Partial<API> = {}) {
     const target = window as MockWindow; target.isTauri = true;
     target.__centralNative = {calls: [], value: {schema_version: "1.0", availability: "available", operation: null}, lostStart: false, tamperPackage: false};
     target.__TAURI_INTERNALS__ = {invoke(command, args) {
+      if (command === "local_run_limits_status") return Promise.resolve({schema_version: "1.0", availability: "available", limits: {attempt_sec: 1800, daily_sec: 7200, concurrency: 1}, usage: {used_sec: 0, open_sec: 0, remaining_sec: 7200, window_seconds: 86400}, effective: {max_sec: 1200, startable: true, reason: null}, paid_mode: "disabled"});
       const mock = target.__centralNative; mock.calls.push({command, args});
       if (command === "local_managed_profiles_status") return Promise.resolve({schema_version: "1.0", availability: "available", revision: 1,
         selected_profile_id: profileId, profiles: [{profile_id: profileId, provider: "codex", name: "Codex profilim"}]});

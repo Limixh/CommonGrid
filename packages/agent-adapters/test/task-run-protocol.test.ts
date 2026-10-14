@@ -5,6 +5,7 @@ import {
   taskRunRequestedModels, taskRunStrategyIds, taskRunTaskIds, taskRunVerifierChecks, unavailableTaskRun, validTaskRunStrategy, validTaskRunPatch, validateTaskRunCancel, validateTaskRunResult,
   validateTaskRunStart, validateTaskRunStatus, type TaskRunOperation, type TaskRunStatus,
   validateTaskRunResultPackage, validateTaskRunResultPackageRequest, sameTaskRunLeaseContext,
+  validateRunLimitsSave, validateRunLimitsStatus, unavailableRunLimits, budgetUnavailableRunLimits, taskRunErrors, runLimitsDefaults, type RunLimitsStatus,
 } from "../src/task-run-protocol.ts";
 import { claudeFunctionalTestModel, claudeFunctionalTestObservedModels, codexFunctionalTestModel } from "../testing/functional-test-models.ts";
 
@@ -276,4 +277,77 @@ test("software-intervals strategy ids are sort-first and sweep, never the bounds
   assert.ok(acceptTaskRunUpdate(running, intervals({strategy_id: "sort-first", revision: 9})));
   assert.throws(() => acceptTaskRunUpdate(running, intervals({strategy_id: "sweep", revision: 9})), /stale/);
   assert.throws(() => acceptTaskRunUpdate(running, software({strategy_id: "invariant", revision: 9})), /stale/);
+});
+
+const limitsStatus = (attempt_sec: number, daily_sec: number, used_sec: number, open_sec: number): RunLimitsStatus => {
+  const remaining_sec = Math.max(0, daily_sec - used_sec - open_sec), max_sec = Math.min(1200, attempt_sec, remaining_sec);
+  return {schema_version: "1.0", availability: "available", limits: {attempt_sec, daily_sec, concurrency: 1},
+    usage: {used_sec, open_sec, remaining_sec, window_seconds: 86400},
+    effective: {max_sec, startable: max_sec >= 60, reason: max_sec >= 60 ? null : "local_budget_exhausted"}, paid_mode: "disabled"};
+};
+const edit = (base: RunLimitsStatus, change: (copy: any) => void) => { const copy = structuredClone(base) as any; change(copy); return copy; };
+
+test("run limit errors are in the shared task run error list", () => {
+  for (const code of ["local_budget_exhausted", "local_budget_unavailable"]) assert.ok((taskRunErrors as readonly string[]).includes(code), code);
+  assert.equal(new Set(taskRunErrors).size, taskRunErrors.length);
+});
+
+test("run limit saves accept only exact integer bounds with attempt <= daily", () => {
+  for (const [attempt_sec, daily_sec] of [[60, 60], [1800, 7200], [1200, 86400], [86400, 86400], [60, 86400]])
+    assert.deepEqual(validateRunLimitsSave({schema_version: "1.0", attempt_sec, daily_sec}), {schema_version: "1.0", attempt_sec, daily_sec});
+  const ok = {schema_version: "1.0", attempt_sec: 600, daily_sec: 3600};
+  const bad: unknown[] = [null, [], "x", {}, {...ok, extra: 1}, {schema_version: "1.0", attempt_sec: 600}, {attempt_sec: 600, daily_sec: 3600},
+    {...ok, schema_version: "2.0"}, {...ok, attempt_sec: 59}, {...ok, attempt_sec: 0}, {...ok, attempt_sec: -60}, {...ok, daily_sec: 86401},
+    {...ok, attempt_sec: 3601}, {...ok, attempt_sec: 600.5}, {...ok, attempt_sec: "600"}, {...ok, daily_sec: null}, {...ok, daily_sec: Number.NaN},
+    {...ok, daily_sec: Infinity}, {...ok, daily_sec: Number.MAX_SAFE_INTEGER + 2}];
+  for (const value of bad) assert.throws(() => validateRunLimitsSave(value), /contract_invalid/, JSON.stringify(value));
+});
+
+test("run limit status accepts consistent available, exhausted and fail-closed shapes", () => {
+  const cases = [limitsStatus(1800, 7200, 0, 0), limitsStatus(1800, 7200, 3000, 600), limitsStatus(600, 7200, 0, 0), limitsStatus(1800, 7200, 7100, 0),
+    limitsStatus(1800, 7200, 7140, 0), limitsStatus(1800, 7200, 8000, 100), limitsStatus(60, 60, 0, 0), limitsStatus(86400, 86400, 0, 0)];
+  for (const value of cases) assert.deepEqual(validateRunLimitsStatus(value), value);
+  assert.deepEqual(cases[0].effective, {max_sec: 1200, startable: true, reason: null});
+  assert.deepEqual(cases[3].effective, {max_sec: 100, startable: true, reason: null});
+  assert.deepEqual(cases[4].effective, {max_sec: 60, startable: true, reason: null});
+  assert.deepEqual(limitsStatus(1800, 7200, 7141, 0).effective, {max_sec: 59, startable: false, reason: "local_budget_exhausted"});
+  assert.deepEqual(validateRunLimitsStatus(limitsStatus(1800, 7200, 7141, 0)).effective.reason, "local_budget_exhausted");
+  assert.equal(validateRunLimitsStatus(cases[5]).usage.remaining_sec, 0);
+  assert.deepEqual(validateRunLimitsStatus(unavailableRunLimits()), unavailableRunLimits());
+  assert.deepEqual(validateRunLimitsStatus(budgetUnavailableRunLimits()), budgetUnavailableRunLimits());
+  const unavailable = unavailableRunLimits();
+  assert.equal(unavailable.availability, "unavailable");
+  assert.deepEqual(unavailable.limits, {...runLimitsDefaults, concurrency: 1});
+  assert.deepEqual(unavailable.usage, {used_sec: 0, open_sec: 0, remaining_sec: 0, window_seconds: 86400});
+  assert.deepEqual(unavailable.effective, {max_sec: 0, startable: false, reason: null});
+  assert.equal(budgetUnavailableRunLimits().effective.reason, "local_budget_unavailable");
+  assert.equal(budgetUnavailableRunLimits().effective.startable, false);
+});
+
+test("run limit status rejects extra, missing, mistyped and inconsistent data", () => {
+  const base = limitsStatus(1800, 7200, 3000, 600);
+  const bad: unknown[] = [null, [], "x", {},
+    edit(base, c => { c.extra = 1; }), edit(base, c => { delete c.paid_mode; }), edit(base, c => { c.schema_version = "2.0"; }),
+    edit(base, c => { c.availability = "maybe"; }), edit(base, c => { c.paid_mode = "enabled"; }), edit(base, c => { c.paid_mode = null; }),
+    edit(base, c => { c.limits.extra = 1; }), edit(base, c => { delete c.limits.concurrency; }), edit(base, c => { c.limits.concurrency = 2; }),
+    edit(base, c => { c.limits.concurrency = 0; }), edit(base, c => { c.limits.attempt_sec = "1800"; }), edit(base, c => { c.limits.attempt_sec = 59; }),
+    edit(base, c => { c.limits.daily_sec = 86401; }), edit(base, c => { c.limits.attempt_sec = 7201; }), edit(base, c => { c.limits.attempt_sec = 1800.5; }),
+    edit(base, c => { c.usage.extra = 1; }), edit(base, c => { delete c.usage.open_sec; }), edit(base, c => { c.usage.window_seconds = 3600; }),
+    edit(base, c => { c.usage.used_sec = -1; }), edit(base, c => { c.usage.used_sec = 172801; }), edit(base, c => { c.usage.open_sec = 1.5; }),
+    edit(base, c => { c.usage.remaining_sec += 1; }), edit(base, c => { c.usage.remaining_sec -= 1; }),
+    edit(base, c => { c.effective.extra = 1; }), edit(base, c => { delete c.effective.reason; }), edit(base, c => { c.effective.max_sec += 1; }),
+    edit(base, c => { c.effective.max_sec = 1201; }), edit(base, c => { c.effective.startable = false; }), edit(base, c => { c.effective.startable = "yes"; }),
+    edit(base, c => { c.effective.reason = "other"; }), edit(base, c => { c.effective.reason = "local_budget_exhausted"; }),
+    // exhausted must be reported as such and never startable
+    edit(limitsStatus(1800, 7200, 7141, 0), c => { c.effective.reason = null; }),
+    edit(limitsStatus(1800, 7200, 7141, 0), c => { c.effective.startable = true; }),
+    edit(limitsStatus(1800, 7200, 7141, 0), c => { c.effective.reason = "local_budget_unavailable"; }),
+    edit(base, c => { c.effective.reason = "local_budget_unavailable"; }),
+    // fixed fail-closed shapes cannot be dressed up
+    edit(unavailableRunLimits(), c => { c.effective.startable = true; }), edit(unavailableRunLimits(), c => { c.effective.reason = "local_budget_unavailable"; }),
+    edit(unavailableRunLimits(), c => { c.usage.used_sec = 5; }), edit(unavailableRunLimits(), c => { c.limits.attempt_sec = 600; }),
+    edit(unavailableRunLimits(), c => { c.effective.max_sec = 60; }), edit(budgetUnavailableRunLimits(), c => { c.effective.startable = true; }),
+    edit(budgetUnavailableRunLimits(), c => { c.availability = "unavailable"; }), edit(budgetUnavailableRunLimits(), c => { c.usage.remaining_sec = 7200; }),
+    edit(budgetUnavailableRunLimits(), c => { c.effective.max_sec = 1200; })];
+  for (const value of bad) assert.throws(() => validateRunLimitsStatus(value), /contract_invalid/, JSON.stringify(value));
 });

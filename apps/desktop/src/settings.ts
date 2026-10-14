@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { runLimitsNative } from "./run-limits-client";
+import { useRunLimits } from "./useRunLimits";
 import type { Settings } from "./ui-types";
 
 const defaults: Settings = {
@@ -44,17 +46,39 @@ export function useContributionSettings() {
   const [settings, setSettings] = useState<Settings>(loadSettings);
   const [draft, setDraft] = useState<Settings>(settings);
   const [notice, setNotice] = useState("");
+  const limits = useRunLimits();
   useEffect(() => {
     document.documentElement.lang = settings.language;
   }, [settings.language]);
-  function save() {
+  // The native ledger owns the time limits: when it answers, it wins over a
+  // drifted browser copy. A fail-closed answer carries defaults and is ignored.
+  useEffect(() => {
+    const native = limits.status;
+    if (!native || native.availability !== "available" || native.effective.reason === "local_budget_unavailable") return;
+    const taskMinutes = Math.floor(native.limits.attempt_sec / 60), dailyMinutes = Math.floor(native.limits.daily_sec / 60);
+    const hydrate = (current: Settings): Settings => current.taskMinutes === taskMinutes && current.dailyMinutes === dailyMinutes && current.concurrency === 1
+      ? current : {...current, taskMinutes, dailyMinutes, concurrency: 1};
+    setSettings(hydrate);
+    setDraft(hydrate);
+  }, [limits.status]);
+  async function save() {
     if (!settingsValid(draft)) {
       setNotice("invalid");
       return;
     }
+    let next = draft;
+    if (runLimitsNative()) {
+      // Native first: a rejected native save must not leave a local copy that disagrees with enforcement.
+      next = {...draft, concurrency: 1};
+      if (!(await limits.save(next.taskMinutes * 60, next.dailyMinutes * 60))) {
+        setNotice("native");
+        return;
+      }
+    }
     try {
-      localStorage.setItem("commongrid.settings.v1", JSON.stringify(draft));
-      setSettings(draft);
+      localStorage.setItem("commongrid.settings.v1", JSON.stringify(next));
+      setSettings(next);
+      setDraft(next);
       setNotice("saved");
     } catch {
       setNotice("storage");

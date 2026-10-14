@@ -52,6 +52,8 @@ Bu ayar yalnız `CG_COORDINATOR_MODE=authenticated`, `CG_ALLOW_LOOPBACK_AUTH=tru
 
 Katalogdan desteklenen görevi ve yaklaşımı hazırlayın, bağlı profili seçip Başlat'ı onaylayın. Merkezi kiralama ve süre bütçesi ayrıldıktan sonra native görev başlar. Süre sınırı en çok 1200 saniyedir; daha düşük kullanıcı/sunucu limiti uygulanır. Doğrulanmış diff oluşunca **Gönder** paketi zorunlu Trivy taramasından geçirip saklar ve teslim makbuzunu gösterir. `submitted`, merkezi bağımsız kabul değildir. Heartbeat süre uzatmaz; iptal/başarısızlık temizliği doğrulanınca lease kapanır, terk edilmiş lease süre sonunda sunucuda serbest bırakılır. Ayrıntılı sınırlar [ADR 0023](../spike/adr/0023-leased-software-submission.md) içindedir.
 
+Yerel çalıştırmalar ayrıca native sahipli `run-limits.json` defteriyle sınırlanır: tek deneme üst sınırı (varsayılan 30 dk) ve kayan 24 saatlik duvar saati bütçesi (varsayılan 120 dk), eşzamanlılık 1. Etkin süre görev tavanı, lease, deneme sınırı ve kalan bütçenin en küçüğüdür; süre 60 saniyenin altındaysa `local_budget_exhausted`, defter okunamazsa `local_budget_unavailable` ile başlamaz. Bu token veya abonelik kullanımı değil, yalnız duvar saati süresidir; ayarlar Katkı ayarları sayfasından kaydedilir ([ADR 0024](../spike/adr/0024-local-run-limits.md)).
+
 ## Test komutları
 
 | Komut | Neyi sınar? |

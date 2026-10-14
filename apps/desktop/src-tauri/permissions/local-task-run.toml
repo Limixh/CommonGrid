@@ -1,4 +1,4 @@
 [[permission]]
 identifier = "local-task-run"
-description = "Start, observe, cancel and export a verified package of one approved task run on the saved selected local profile. No caller prompts, models, paths, credentials, shell or URL arguments."
-commands.allow = ["local_task_run_start", "local_task_run_status", "local_task_run_cancel", "local_task_run_result_package"]
+description = "Start, observe, cancel and export a verified package of one approved task run on the saved selected local profile, and read or edit the native-owned local run limits (attempt cap and rolling 24 hour budget). No caller prompts, models, paths, credentials, shell or URL arguments."
+commands.allow = ["local_task_run_start", "local_task_run_status", "local_task_run_cancel", "local_task_run_result_package", "local_run_limits_status", "local_run_limits_save"]

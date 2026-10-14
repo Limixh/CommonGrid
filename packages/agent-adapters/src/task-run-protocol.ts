@@ -37,6 +37,9 @@ export const taskRunErrors = [
   "asset_missing", "asset_invalid", "docker_unavailable", "image_missing", "profile_invalid", "profile_needs_review",
   "profile_unbound", "auth_required", "model_unavailable", "quota_exhausted", "provider_failed", "tool_limit",
   "candidate_invalid", "candidate_rejected", "verifier_failed", "worker_failed", "cleanup_failed", "deadline_exceeded", "cancelled",
+  // Native per-device run limits (rolling 24 h ledger): the remaining time is
+  // below one minute, or the persisted limits/ledger cannot be read (fail closed).
+  "local_budget_exhausted", "local_budget_unavailable",
 ] as const;
 export type TaskRunError = typeof taskRunErrors[number];
 export type TaskRunOutcome = "passed" | "rejected" | "cancelled" | "failed" | "needs_review";
@@ -88,6 +91,23 @@ export interface TaskRunOperation {
   lease_context?: TaskRunLeaseContext;
 }
 export interface TaskRunStatus { schema_version: "1.0"; availability: "available" | "unavailable"; operation: TaskRunOperation | null }
+
+// Native-owned local run limits (ADR 0024). The native supervisor persists them
+// and enforces min(task ceiling, lease, attempt cap, remaining rolling-24 h
+// budget) at run start; the UI only displays and edits them. Wall time only,
+// never token or subscription usage. Seconds throughout.
+export const runLimitsWindowSeconds = 86_400;
+export const runLimitsMinRunSeconds = 60;
+export const runLimitsDefaults = Object.freeze({attempt_sec: 1800, daily_sec: 7200});
+export interface RunLimitsSaveRequest { schema_version: "1.0"; attempt_sec: number; daily_sec: number }
+export interface RunLimitsStatus {
+  schema_version: "1.0";
+  availability: "available" | "unavailable";
+  limits: {attempt_sec: number; daily_sec: number; concurrency: 1};
+  usage: {used_sec: number; open_sec: number; remaining_sec: number; window_seconds: 86400};
+  effective: {max_sec: number; startable: boolean; reason: null | "local_budget_exhausted" | "local_budget_unavailable"};
+  paid_mode: "disabled";
+}
 
 // Native worker wire (worker stdout → native supervisor). One JSON object per
 // line; the supervisor owns revisions, cancellation and the public projection.
@@ -248,4 +268,68 @@ export function acceptTaskRunUpdate(previous: TaskRunStatus | null, incoming: un
     taskRunPhases.indexOf(after.phase) < taskRunPhases.indexOf(before.phase) || after.tool_calls < before.tool_calls ||
     (before.model.observed !== null && after.model.observed !== before.model.observed)) throw new Error("task_run_status_stale");
   return next;
+}
+
+// ---- Run limits wire validation (mirrored exactly by the native command) ----
+export const runLimitsMaxDailySeconds = runLimitsWindowSeconds;
+// Largest wall-time a single run may ever be granted (the per-task ceiling).
+export const runLimitsTaskCeilingSeconds = 1200;
+// Ledger sums are native-computed; anything above two windows is corrupt.
+export const runLimitsMaxUsageSeconds = 2 * runLimitsWindowSeconds;
+export const runLimitsMaxStatusBytes = 1024;
+const limitSeconds = (value: unknown): value is number =>
+  Number.isSafeInteger(value) && Number(value) >= runLimitsMinRunSeconds && Number(value) <= runLimitsMaxDailySeconds;
+const usageSeconds = (value: unknown): value is number =>
+  Number.isSafeInteger(value) && Number(value) >= 0 && Number(value) <= runLimitsMaxUsageSeconds;
+
+export function validateRunLimitsSave(value: unknown): RunLimitsSaveRequest {
+  if (!exact(value, ["schema_version", "attempt_sec", "daily_sec"]) || value.schema_version !== "1.0" ||
+    !limitSeconds(value.attempt_sec) || !limitSeconds(value.daily_sec) || value.attempt_sec > value.daily_sec) invalid();
+  return structuredClone(value) as unknown as RunLimitsSaveRequest;
+}
+
+// Fixed shape used whenever the local ledger cannot be consulted: no native
+// supervisor (browser) or unreadable persisted limits/ledger. Defaults, zero
+// usage, zero remaining, max_sec 0, startable false. Browser: availability
+// "unavailable", reason null. Native fail-closed: availability "available",
+// reason "local_budget_unavailable" (the native side cannot know its own state).
+function failClosedRunLimits(availability: "available" | "unavailable", reason: null | "local_budget_unavailable"): RunLimitsStatus {
+  return {
+    schema_version: "1.0", availability,
+    limits: {attempt_sec: runLimitsDefaults.attempt_sec, daily_sec: runLimitsDefaults.daily_sec, concurrency: 1},
+    usage: {used_sec: 0, open_sec: 0, remaining_sec: 0, window_seconds: 86400},
+    effective: {max_sec: 0, startable: false, reason},
+    paid_mode: "disabled",
+  };
+}
+export function unavailableRunLimits(): RunLimitsStatus { return failClosedRunLimits("unavailable", null); }
+export function budgetUnavailableRunLimits(): RunLimitsStatus { return failClosedRunLimits("available", "local_budget_unavailable"); }
+
+export function validateRunLimitsStatus(value: unknown): RunLimitsStatus {
+  if (!exact(value, ["schema_version", "availability", "limits", "usage", "effective", "paid_mode"]) || value.schema_version !== "1.0" ||
+    !oneOf(value.availability, ["available", "unavailable"]) || value.paid_mode !== "disabled") invalid();
+  const {limits, usage, effective} = value;
+  if (!exact(limits, ["attempt_sec", "daily_sec", "concurrency"]) || !limitSeconds(limits.attempt_sec) || !limitSeconds(limits.daily_sec) ||
+    limits.attempt_sec > limits.daily_sec || limits.concurrency !== 1 ||
+    !exact(usage, ["used_sec", "open_sec", "remaining_sec", "window_seconds"]) || !usageSeconds(usage.used_sec) || !usageSeconds(usage.open_sec) ||
+    !usageSeconds(usage.remaining_sec) || usage.window_seconds !== runLimitsWindowSeconds ||
+    !exact(effective, ["max_sec", "startable", "reason"]) || !Number.isSafeInteger(effective.max_sec) || Number(effective.max_sec) < 0 ||
+    Number(effective.max_sec) > runLimitsTaskCeilingSeconds || typeof effective.startable !== "boolean" ||
+    !(effective.reason === null || oneOf(effective.reason, ["local_budget_exhausted", "local_budget_unavailable"]))) invalid();
+  const reason = effective.reason;
+  if (value.availability === "unavailable" || reason === "local_budget_unavailable") {
+    // Fixed fail-closed shapes; "unavailable" never carries a reason and a
+    // budget-unavailable reason only exists on an available native side.
+    const fixed = value.availability === "unavailable" ? unavailableRunLimits() : budgetUnavailableRunLimits();
+    if (value.availability === "unavailable" && reason !== null) invalid();
+    if (JSON.stringify(canonical(value)) !== JSON.stringify(canonical(fixed))) invalid();
+  } else {
+    const remaining = Math.max(0, Number(limits.daily_sec) - Number(usage.used_sec) - Number(usage.open_sec));
+    const max = Math.min(runLimitsTaskCeilingSeconds, Number(limits.attempt_sec), remaining);
+    if (usage.remaining_sec !== remaining || effective.max_sec !== max ||
+      reason !== (max < runLimitsMinRunSeconds ? "local_budget_exhausted" : null) ||
+      effective.startable !== (max >= runLimitsMinRunSeconds && reason === null)) invalid();
+  }
+  if (bytes(JSON.stringify(value)) > runLimitsMaxStatusBytes) invalid();
+  return structuredClone(value) as unknown as RunLimitsStatus;
 }
