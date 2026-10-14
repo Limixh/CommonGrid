@@ -4,7 +4,7 @@ Tarih: 2026-10-08. Durum: **F0 referans uygulaması ve sentetik yerel kabul tama
 
 ## Karar
 
-Kullanıcı ticari ürün hedefini ve **katılımcının kendi aboneliğiyle resmi CLI çalıştırma** tasarımını koruyarak geliştirmeye devam etmeyi seçti. API/yerel model yönüne geçiş yapılmaz. Sağlayıcı uyumluluğu incelemesi [ayrı kayıt](../../docs/PROVIDER_COMPATIBILITY.md) olarak kalır; bu geliştirme kararı sağlayıcı kabulü veya production GO değildir. Tamamlanmış v1.0 kapsamı korunur.
+Kullanıcı ticari ürün hedefini ve **katılımcının kendi aboneliğiyle resmi CLI çalıştırma** tasarımını koruyarak geliştirmeye devam etmeyi seçti. API/yerel model yönüne geçiş yapılmaz. Sağlayıcı uyumluluğu incelemesi yerel ve Git dışı `docs-private/PROVIDER_COMPATIBILITY.md` kaydında kalır; bu geliştirme kararı sağlayıcı kabulü veya production GO değildir. Tamamlanmış v1.0 kapsamı korunur.
 
 Bir profile ait auth/tools hacimleri kalıcı olabilir; her runtime işlemi ayrı UUID ile sahiplenilir. Konteyner sahibi, işlem UUID'si, immutable Docker ID ve çalışır/durmuş durumu birlikte doğrulanır. Komut ve kontrol köprüsü doğrulanmış ID'ye gönderilir. Eski işlem temizliği yeni işlemin konteynerini silemez. Timeout/iptalde yalnız Docker istemcisini kapatmak yeterli olmadığından gönderilmiş ID'nin namespace'i kaldırılır; özel hacimler tutulur.
 

@@ -94,7 +94,7 @@ npm run spike:managed-session -- install-host-trust claude CLAUDE_UUID --host-tr
 
 `--host-trust-pem PATH` ve `--host-trust-proof PATH` birlikte zorunludur; yalnız Claude `prepare` veya `install-host-trust` komutlarında kabul edilir. Seçim sırasında proof en fazla 30 günlük olmalı, sertifika geçerli olmalıdır. Root, profile owner ve sertifika/PEM SHA-256 değerlerini taşıyan metadata ile bağlanır; seçilmiş içerik tools hacmine sabitlenir. Startup bu değişmez içeriği salt okunur hacimden doğrular, host PEM/proof dosyalarını yeniden okumaz. Sertifikanın geçerlilik süresi her startup'ta kontrol edilir; 30 günlük proof sınırı yeni seçim içindir.
 
-Root değiştiğinde neden incelenir ve açık seçimle yeni profile hazırlanır. Mevcut profile'ın root'u sessizce güncellenmez; bu yol genel CA rotation yönetimi değildir. Yerel certificate/proof `.local` altında kalır. 2026-10-08 tarihli Kaspersky HTTPS incelemesi bulgusu önceki makineye ait kanıttır; yeni makinelerin aynı root'u gerektirdiği veya otomatik keşfedileceği anlamına gelmez.
+Root değiştiğinde neden incelenir ve açık seçimle yeni profile hazırlanır. Mevcut profile'ın root'u sessizce güncellenmez; bu yol genel CA rotation yönetimi değildir. Yerel certificate/proof `.local` altında kalır. 2026-10-08 tarihli antivirüs HTTPS incelemesi bulgusu önceki makineye ait kanıttır; yeni makinelerin aynı root'u gerektirdiği veya otomatik keşfedileceği anlamına gelmez.
 
 ## Hesapsız güvenlik testleri
 

@@ -46,7 +46,7 @@ Bu **Windows'a özel, açıkça başlatılan yerel** geliştirici denemesidir; C
 - `gpt-6-sol` fixture profilinde code mode araçları `additional_tools` içinde geldi; top-level `tools` envanteri yeterli değildi. Kapalı envanter her iki alanı kapsar. Mevcut fixture profili başarıyla daraltıldı; yeni model/profil aynı kapıdan geçmeden desteklenmiş sayılmaz.
 - Native Codex bağlantısında kayıtlı modele bağlı kalan deneme başarısızdı; model/list seçimiyle geçti. İlk hatanın mesajı tutulmadığından bunun kesin kök nedeni çıkarılmaz.
 
-Host Windows 11 Home Single Language, yaklaşık 12 GiB RAM; Docker WSL2 Linux kernel `6.6.87.2`, engine belleği yaklaşık 5.7 GiB. Base Debian Bookworm Slim + Node 22 imajı `326104305` byte (~311 MiB). CLI ikilileri ek olarak Claude ~241 MiB, Codex ~272 MiB'dır. Rapordaki CLI setup süreleri public ikili aktarımını; cgroup memory peak bu tmpfs ikilisi, cache ve fixture süreçlerini de içerir. Task startup, local fixture turn ve memory ölçümleri bir warm-image yerel gözlemdir; gerçek inference gecikmesi, production kapasitesi veya karşılaştırmalı OS benchmark'ı değildir.
+Host Windows 11 x64; Docker WSL2 Linux kernel `6.6.87.2`, engine belleği yaklaşık 5.7 GiB. Base Debian Bookworm Slim + Node 22 imajı `326104305` byte (~311 MiB). CLI ikilileri ek olarak Claude ~241 MiB, Codex ~272 MiB'dır. Rapordaki CLI setup süreleri public ikili aktarımını; cgroup memory peak bu tmpfs ikilisi, cache ve fixture süreçlerini de içerir. Task startup, local fixture turn ve memory ölçümleri bir warm-image yerel gözlemdir; gerçek inference gecikmesi, production kapasitesi veya karşılaştırmalı OS benchmark'ı değildir.
 
 Son başarılı tekrarın tek örneği (CLI hazırlığı tekrar binary kopyalar; bu yük üretim için optimize edilmelidir):
 

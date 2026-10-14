@@ -8,7 +8,7 @@ Tam v1 kapsamı korunur. Yeni genel altyapı katmanlarından önce güncel resmi
 
 Gerçek işlev testleri Codex `gpt-6-luna`, Claude `haiku` kullanır. Ucuz model kullanılamıyorsa test durur; pahalı modele, hesap varsayılanına veya ücretli API'ye geçilmez. Kota kasıtlı tüketilmez. Limit/hata/deadline/cleanup önce yerel fixture ile sınanır; gerçek limit/reset davranışı normal kullanımda gözlenir. Salt okunur quota snapshot, Codex refresh isteği veya resume checkpoint doğal yenileme ve kota tükenmesi kanıtı sayılmaz.
 
-TLS için pinned imajın bundled roots listesi varsayılandır. Host CA keşfi otomatik yapılmaz. Ek Claude root, PEM ve proof açıkça seçilerek tek profile owner ve hash'lere bağlanır. Startup yalnız sabit tools hacmindeki seçim ve sertifika süresini doğrular; host dosyasını tekrar okumaz. Değişen root yeni açık profile seçimi gerektirir. Güncel komutlar [MANAGED_SESSIONS.md](../cli-session/MANAGED_SESSIONS.md) içindedir; tarihli Kaspersky bulgusu genel host gereksinimi değildir.
+TLS için pinned imajın bundled roots listesi varsayılandır. Host CA keşfi otomatik yapılmaz. Ek Claude root, PEM ve proof açıkça seçilerek tek profile owner ve hash'lere bağlanır. Startup yalnız sabit tools hacmindeki seçim ve sertifika süresini doğrular; host dosyasını tekrar okumaz. Değişen root yeni açık profile seçimi gerektirir. Güncel komutlar [MANAGED_SESSIONS.md](../cli-session/MANAGED_SESSIONS.md) içindedir; tarihli antivirüs TLS inceleme bulgusu genel host gereksinimi değildir.
 
 ## Kod, test ve kayıt sınırı
 
