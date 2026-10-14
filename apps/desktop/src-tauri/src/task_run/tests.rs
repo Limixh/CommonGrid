@@ -478,7 +478,7 @@ fn exact_preflight_rejects_nested_large_and_caller_owned_inputs() {
 fn patch_contract_matches_the_browser_validator() {
     assert!(valid_patch(PATCH, TASK_ID));
     assert!(valid_patch(
-        &format!("{PATCH}é漢\u{2029}\u{2060}\u{202f}\u{2065}\u{206a}\t"),
+        &format!("{PATCH}é漢ğüşıöçİ😀👩\u{202f}\u{2065}\u{2005}\u{a0}\u{fe10}\t"),
         TASK_ID
     ));
     let exact = format!(
@@ -518,6 +518,51 @@ fn patch_contract_matches_the_browser_validator() {
         format!("{PATCH}\u{2069}"),
     ] {
         assert!(!valid_patch(&bad, TASK_ID), "{bad:?}");
+    }
+}
+
+#[test]
+fn invisible_and_format_characters_are_rejected_in_patches() {
+    let singles = [
+        0x00u32, 0x01, 0x08, 0x0b, 0x0c, 0x0d, 0x1b, 0x1f, 0x7f, 0x80, 0x85, 0x9f, 0xad, 0x34f,
+        0x600, 0x605, 0x61c, 0x6dd, 0x70f, 0x890, 0x891, 0x8e2, 0x115f, 0x1160, 0x180b, 0x180c,
+        0x180d, 0x180e, 0x180f, 0x200b, 0x200c, 0x200d, 0x200e, 0x200f, 0x2028, 0x2029, 0x202a,
+        0x202e, 0x2060, 0x2061, 0x2064, 0x2066, 0x2069, 0x206a, 0x206f, 0x3164, 0xfe00, 0xfe0f,
+        0xfeff, 0xffa0, 0xfff9, 0xfffa, 0xfffb, 0x110bd, 0x110cd, 0x13430, 0x1343f, 0x1bca0,
+        0x1bca3, 0x1d173, 0x1d17a, 0xe0001, 0xe0020, 0xe0041, 0xe007f, 0xe0100, 0xe01ef,
+    ];
+    for code in singles {
+        let c = char::from_u32(code).unwrap();
+        assert!(invisible(c), "U+{code:04X}");
+        assert!(
+            !valid_patch(&format!("{PATCH}{c}"), TASK_ID),
+            "U+{code:04X}"
+        );
+        assert!(
+            !valid_patch(&format!("{PATCH}a{c}b\n"), TASK_ID),
+            "U+{code:04X}"
+        );
+    }
+    // Tab and newline stay, and so do neighbours of the rejected ranges.
+    for ok in [
+        '\t',
+        '\n',
+        ' ',
+        '~',
+        '\u{a0}',
+        '\u{ae}',
+        '\u{e0000}',
+        '\u{e0080}',
+        '\u{e01f0}',
+        '\u{2065}',
+        '\u{fe10}',
+        '\u{1d172}',
+    ] {
+        assert!(!invisible(ok), "U+{:04X}", ok as u32);
+    }
+    // Turkish letters, CJK and emoji (including a ZWJ-free sequence) are text.
+    for text in ["çğıöşüÇĞİÖŞÜ", "漢字かな", "😀🎉🇹🇷", "naïve café"] {
+        assert!(valid_patch(&format!("{PATCH}+{text}\n"), TASK_ID), "{text}");
     }
 }
 
@@ -1320,7 +1365,7 @@ fn result_frames_are_accepted_only_when_the_public_status_would_be_valid() {
             "passed",
             json!(null),
             "verified",
-            patch_of("é\u{202f}\u{2065}\u{206a}"),
+            patch_of("é\u{202f}\u{2065}\u{2005}"),
         ),
         result_frame(
             "passed",
@@ -2012,7 +2057,12 @@ fn deadline_is_enforced_with_an_independent_cleanup_grace() {
         grace: Duration::from_secs(20),
     };
     go_with(&owner, &fixture, &root, limits).unwrap();
-    wait(&owner, Phase::Running);
+    // Under a loaded full run, Windows process startup alone can use the whole
+    // deadline, so expiry may arrive before Running; either way it must be the
+    // same verified deadline failure.
+    until(&owner, "phase Running or later", |op| {
+        !matches!(op.phase, Phase::Starting | Phase::Preparing)
+    });
     let late = wait(&owner, Phase::Finished);
     assert_eq!(
         (late.outcome, late.cleanup),
@@ -3599,7 +3649,47 @@ fn the_deadline_is_the_reserved_time_and_its_elapsed_time_is_recorded() {
     let settled = read_ledger(&fixture);
     assert!(settled["open"].is_null());
     assert_eq!(settled["entries"].as_array().unwrap().len(), 1);
-    assert_eq!(settled["entries"][0]["used_ms"], 5000);
+    // The grace and stop wait are charged too, so the cleanup after the
+    // deadline can push the record past the reservation (bounded by it).
+    let used = settled["entries"][0]["used_ms"].as_u64().unwrap();
+    assert!(
+        (5000..=5000 + 20_000 + 2000).contains(&used) && used % 1000 == 0,
+        "{used}"
+    );
+}
+
+#[test]
+fn cleanup_time_past_the_deadline_is_charged_within_grace_and_stop_wait() {
+    let fixture = Fixture::new();
+    fixture.registry("codex");
+    // A worker that ignores cancellation is terminated only after the grace.
+    let root = fixture.resources(&worker(
+        "codex",
+        "P('preparing');P('running');onCancel=()=>{};await sleep(60000);",
+    ));
+    write_ledger(&fixture, 60, 7200, json!([]), Value::Null);
+    let owner = Owner::new();
+    go_with(
+        &owner,
+        &fixture,
+        &root,
+        Limits {
+            deadline: Duration::from_secs(5),
+            grace: Duration::from_secs(1),
+        },
+    )
+    .unwrap();
+    let stuck = wait(&owner, Phase::Finished);
+    assert_eq!(stuck.outcome, Some(Outcome::NeedsReview));
+    assert_eq!(stuck.error_code.as_deref(), Some("deadline_exceeded"));
+    let settled = read_ledger(&fixture);
+    assert!(settled["open"].is_null());
+    let used = settled["entries"][0]["used_ms"].as_u64().unwrap();
+    // Reserved 5 s; the run really lasted about deadline + grace.
+    assert!(
+        used > 5000 && used <= 5000 + 1000 + 2000 && used % 1000 == 0,
+        "{used}"
+    );
 }
 
 #[test]
@@ -3681,6 +3771,9 @@ fn bind(fixture: &Fixture, state: &str, owner: &str) {
     let root = fixture.directory.join("managed-profile-sessions");
     fs::create_dir_all(&root).unwrap();
     fs::write(root.join(format!("{PROFILE}.json")), json!({"schema_version":"1.0", "profile_id":PROFILE, "provider":"codex", "owner":owner, "state":state}).to_string()).unwrap();
+    // A ready binding is expected to have a journal root: a missing one is
+    // removed evidence and fails closed.
+    fs::create_dir_all(fixture.directory.join("managed-operation-journal")).unwrap();
 }
 // Writes one shared contract journal case (owner ...0001, provider codex)
 // exactly as the native journal reader's own fixtures do.
@@ -3762,18 +3855,7 @@ fn an_unresolved_owner_journal_refuses_every_start_across_restarts() {
             Cleanup::Unknown,
         );
         nothing_started(&fixture, Some(&before));
-        // In memory a needs_review operation also denies any further start,
-        // and replaying the same request is idempotent.
-        assert_eq!(
-            go(
-                &owner,
-                &fixture,
-                &root,
-                "55555555-5555-4555-8555-555555555555"
-            )
-            .map(|_| ()),
-            Err(DENIED)
-        );
+        // Replaying the same request is idempotent.
         assert_eq!(
             go(&owner, &fixture, &root, id)
                 .unwrap()
@@ -3781,6 +3863,19 @@ fn an_unresolved_owner_journal_refuses_every_start_across_restarts() {
                 .unwrap()
                 .request_id,
             id
+        );
+        // A gate refusal does not latch: another start is admitted and the
+        // still unresolved journal refuses it again.
+        let next = "55555555-5555-4555-8555-555555555555";
+        go(&owner, &fixture, &root, next).unwrap();
+        let again = until(&owner, "second refusal", |op| {
+            op.request_id == next && op.phase == Phase::Finished
+        });
+        refused(
+            &again,
+            Outcome::NeedsReview,
+            "profile_needs_review",
+            Cleanup::Unknown,
         );
     }
     nothing_started(&fixture, Some(&before));
@@ -3917,6 +4012,23 @@ fn a_verified_profile_invalid_failure_does_not_freeze_later_starts() {
 }
 
 #[test]
+fn a_ready_binding_without_its_journal_root_needs_review() {
+    let fixture = Fixture::new();
+    fixture.registry("codex");
+    let root = fixture.resources(&marking_worker(&fixture, PASS));
+    bind(&fixture, "ready", GATE_OWNER);
+    fs::remove_dir_all(fixture.directory.join("managed-operation-journal")).unwrap();
+    let operation = gate_start(&fixture, &Owner::new(), &root, ID);
+    refused(
+        &operation,
+        Outcome::NeedsReview,
+        "profile_needs_review",
+        Cleanup::Unknown,
+    );
+    nothing_started(&fixture, None);
+}
+
+#[test]
 fn a_reserved_binding_needs_review_before_anything_starts() {
     let fixture = Fixture::new();
     fixture.registry("codex");
@@ -3931,7 +4043,104 @@ fn a_reserved_binding_needs_review_before_anything_starts() {
         Cleanup::Unknown,
     );
     nothing_started(&fixture, None);
-    assert_eq!(go(&owner, &fixture, &root, OTHER).map(|_| ()), Err(DENIED));
+    // Not a latch: the next start is admitted (and refused again).
+    go(&owner, &fixture, &root, OTHER).unwrap();
+    let again = until(&owner, "second refusal", |op| {
+        op.request_id == OTHER && op.phase == Phase::Finished
+    });
+    refused(
+        &again,
+        Outcome::NeedsReview,
+        "profile_needs_review",
+        Cleanup::Unknown,
+    );
+}
+
+const PROFILE_B: &str = "66666666-6666-4666-8666-666666666666";
+fn two_profiles(fixture: &Fixture, selected: &str) {
+    let root = fixture.directory.join("managed-profiles");
+    fs::create_dir_all(&root).unwrap();
+    fs::write(root.join("profiles.json"), json!({"schema_version":"1.0", "revision":2, "profiles":[{"profile_id":PROFILE, "provider":"codex", "name":"A"}, {"profile_id":PROFILE_B, "provider":"codex", "name":"B"}], "selected_profile_id":selected}).to_string()).unwrap();
+}
+// Starts and waits for this very request, not the previous finished one.
+fn gate_start_as(fixture: &Fixture, owner: &Owner, root: &Path, id: &str) -> Operation {
+    go(owner, fixture, root, id).unwrap();
+    until(owner, "this request", |op| {
+        op.request_id == id && op.phase == Phase::Finished
+    })
+}
+
+#[test]
+fn a_gate_refusal_does_not_latch_other_profiles_or_a_resolved_journal() {
+    let fixture = Fixture::new();
+    let root = fixture.resources(&marking_worker(&fixture, PASS));
+    two_profiles(&fixture, PROFILE);
+    bind(&fixture, "ready", GATE_OWNER);
+    journal(&fixture, "lease_intent_pending_process_crash");
+    let owner = Owner::new();
+    // Profile A is refused by its unresolved journal.
+    let refusal = gate_start(&fixture, &owner, &root, ID);
+    refused(
+        &refusal,
+        Outcome::NeedsReview,
+        "profile_needs_review",
+        Cleanup::Unknown,
+    );
+    nothing_started(&fixture, None);
+    // Profile B (no binding, clean journal) is admitted without a restart.
+    two_profiles(&fixture, PROFILE_B);
+    let for_b = Start {
+        profile_id: PROFILE_B.into(),
+        ..start(OTHER)
+    };
+    owner
+        .start(for_b, root.clone(), fixture.directory.clone())
+        .unwrap();
+    let passed = until(&owner, "profile B", |op| {
+        op.request_id == OTHER && op.phase == Phase::Finished
+    });
+    assert_eq!(passed.outcome, Some(Outcome::Passed));
+    assert!(marker(&fixture).exists());
+    fs::remove_file(marker(&fixture)).unwrap();
+    // A's journal is still unresolved: the gate decides again and refuses.
+    two_profiles(&fixture, PROFILE);
+    let third = "55555555-5555-4555-8555-555555555551";
+    let again = gate_start_as(&fixture, &owner, &root, third);
+    refused(
+        &again,
+        Outcome::NeedsReview,
+        "profile_needs_review",
+        Cleanup::Unknown,
+    );
+    assert!(!marker(&fixture).exists());
+    // Resolving the journal frees A on the same running app.
+    fs::remove_dir_all(fixture.directory.join("managed-operation-journal")).unwrap();
+    journal(&fixture, "all_actions_and_roles_complete_process_crash");
+    let fourth = "55555555-5555-4555-8555-555555555552";
+    let resolved = gate_start_as(&fixture, &owner, &root, fourth);
+    assert_eq!(resolved.outcome, Some(Outcome::Passed));
+    assert!(marker(&fixture).exists());
+    // A worker-originated needs_review still latches every later start.
+    fixture.swap(
+        &root,
+        &worker(
+            "codex",
+            "P('preparing');P('cleaning');R('needs_review','cleanup_failed','unknown',null);",
+        ),
+    );
+    let fifth = "55555555-5555-4555-8555-555555555553";
+    let review = gate_start_as(&fixture, &owner, &root, fifth);
+    assert_eq!(review.error_code.as_deref(), Some("cleanup_failed"));
+    assert_eq!(
+        go(
+            &owner,
+            &fixture,
+            &root,
+            "55555555-5555-4555-8555-555555555554"
+        )
+        .map(|_| ()),
+        Err(DENIED)
+    );
 }
 
 #[test]
@@ -3961,9 +4170,19 @@ fn a_leased_run_is_gated_the_same_way() {
     );
     assert!(operation.lease_context.is_some());
     nothing_started(&fixture, None);
-    assert!(owner
+    // The gate refusal does not latch: a second start is admitted and refused.
+    owner
         .start(leased(OTHER), root, fixture.directory.clone())
-        .is_err());
+        .unwrap();
+    let again = until(&owner, "second leased refusal", |op| {
+        op.request_id == OTHER && op.phase == Phase::Finished
+    });
+    refused(
+        &again,
+        Outcome::NeedsReview,
+        "profile_needs_review",
+        Cleanup::Unknown,
+    );
     // The same lease with a clear journal starts a worker.
     let fixture = Fixture::new();
     fixture.registry("codex");

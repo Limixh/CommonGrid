@@ -258,9 +258,9 @@ fn owner_hold_follows_every_shared_contract_fixture() {
     // Owner-scoped verdicts. Cases whose catalog-level failure concerns an entry that
     // is not an `op-{owner}-*` directory are Clear here; every other blocked case, and
     // every non-terminal journal with pending work, a held lease or active namespaces,
-    // is Review.
+    // is Review. A missing store is Review (the gate only asks for a ready binding).
+    const REVIEW_MISSING: &[&str] = &["missing_store"];
     const CLEAR: &[&str] = &[
-        "missing_store",
         "begin_process_crash",
         "begin_file_and_directory_synced",
         "lease_released_nonterminal",
@@ -288,13 +288,17 @@ fn owner_hold_follows_every_shared_contract_fixture() {
         "lease_release_pending",
     ];
     let manifest = fixture_manifest();
-    let (mut clear, mut review_needs, mut blocked) = (0, 0, 0);
+    let (mut clear, mut review_needs, mut blocked, mut missing) = (0, 0, 0, 0);
     for case in manifest["cases"].as_array().unwrap() {
         let name = case["name"].as_str().unwrap();
         let directory = journal_with(&fixture_files(&manifest, name));
         let expected = if CLEAR.contains(&name) {
             clear += 1;
             OwnerHold::Clear
+        } else if REVIEW_MISSING.contains(&name) {
+            assert_eq!(case["expected"]["status"], "unavailable", "{name}");
+            missing += 1;
+            OwnerHold::Review
         } else {
             if REVIEW_NEEDS_REVIEW.contains(&name) {
                 assert_eq!(case["expected"]["status"], "available", "{name}");
@@ -309,6 +313,7 @@ fn owner_hold_follows_every_shared_contract_fixture() {
     }
     assert_eq!(clear, CLEAR.len());
     assert_eq!(review_needs, REVIEW_NEEDS_REVIEW.len());
+    assert_eq!(missing, REVIEW_MISSING.len());
     assert!(blocked > 50);
 }
 
@@ -344,11 +349,20 @@ fn owner_hold_distinguishes_unresolved_from_resolved_prefixes() {
 }
 
 #[test]
-fn owner_hold_missing_root_is_clear_and_unusable_roots_are_review() {
+fn owner_hold_missing_root_or_ancestor_is_review_and_empty_root_is_clear() {
     let root = Temporary::new();
+    // The gate is asked only for ready bindings: removed journals fail closed.
     assert_eq!(
         owner_hold(&root.0.join("missing"), FIXTURE_OWNER, FIXTURE_PROVIDER),
-        OwnerHold::Clear
+        OwnerHold::Review
+    );
+    assert_eq!(
+        owner_hold(
+            &root.0.join("missing").join("deeper"),
+            FIXTURE_OWNER,
+            FIXTURE_PROVIDER
+        ),
+        OwnerHold::Review
     );
     assert_eq!(
         owner_hold(&root.0, FIXTURE_OWNER, FIXTURE_PROVIDER),
@@ -529,10 +543,8 @@ fn owner_hold_corrupt_hash_broken_and_non_canonical_journals_are_review() {
         "synthetic".to_owned(),
     ));
     assert_eq!(hold(&journal_with(&extra)), OwnerHold::Review);
-    // Empty journal directory.
-    let empty = Temporary::new();
-    fs::create_dir_all(empty.0.join("journal").join(FIXTURE_OPERATION_DIRECTORY)).unwrap();
-    assert_eq!(hold(&empty), OwnerHold::Review);
+    // An empty directory (crash before the first publish) is Clear; see
+    // owner_hold_directory_without_a_published_record_is_clear.
 }
 
 #[test]
@@ -624,29 +636,171 @@ fn owner_hold_junctioned_operation_or_root_is_review() {
 }
 
 #[test]
-fn owner_hold_entry_cap_fails_closed_and_is_owner_scoped() {
+fn owner_hold_total_entry_bound_fails_closed_and_foreign_entries_do_not_use_the_owner_cap() {
     let root = Temporary::new();
     for i in 0..4 {
         root.write(&format!("unrelated-{i}"), "synthetic");
     }
-    // Exactly at the cap is fine; one more entry examined fails closed.
+    // Exactly at the hard bound is fine; one more entry listed fails closed.
     assert_eq!(
-        owner_hold_bounded(&root.0, FIXTURE_OWNER, FIXTURE_PROVIDER, 4),
+        owner_hold_bounded(&root.0, FIXTURE_OWNER, FIXTURE_PROVIDER, 4, 1),
         OwnerHold::Clear
     );
     assert_eq!(
-        owner_hold_bounded(&root.0, FIXTURE_OWNER, FIXTURE_PROVIDER, 3),
+        owner_hold_bounded(&root.0, FIXTURE_OWNER, FIXTURE_PROVIDER, 3, 1),
         OwnerHold::Review
     );
-    // The owner scan cap is independent of (and larger than) the catalog cap.
-    assert!(OWNER_SCAN_ENTRY_CAP > MAX_OPERATIONS);
+    assert_eq!(OWNER_SCAN_ENTRY_CAP, 65536);
+    assert_eq!(OWNER_MATCH_CAP, 4096);
+    // Other owners' entries beyond both the catalog and the per-owner cap do not
+    // block this owner, and do not make it Overflow.
     let many = Temporary::new();
-    for i in 0..=MAX_OPERATIONS {
-        many.write(&format!("entry-{i}"), "synthetic");
+    for i in 0..=OWNER_MATCH_CAP + MAX_OPERATIONS {
+        many.write(&format!("op-{OTHER_OWNER}-entry-{i}"), "synthetic");
     }
     assert_eq!(
         owner_hold(&many.0, FIXTURE_OWNER, FIXTURE_PROVIDER),
         OwnerHold::Clear,
-        "unrelated entries beyond the catalog cap do not block the owner"
+        "other owners' entries do not count toward the owner cap"
     );
+}
+
+fn empty_operation_directory(root: &Path, owner: &str, index: u8) {
+    fs::create_dir(root.join(format!(
+        "op-{owner}-00000000-0000-4000-8000-0000000000{index:02}"
+    )))
+    .unwrap();
+}
+
+#[test]
+fn owner_hold_per_owner_match_cap_blocks_with_review() {
+    let root = Temporary::new();
+    for index in 0..3 {
+        empty_operation_directory(&root.0, FIXTURE_OWNER, index);
+    }
+    // Other owners accumulate freely.
+    for index in 0..10 {
+        empty_operation_directory(&root.0, OTHER_OWNER, index);
+    }
+    assert_eq!(
+        owner_hold_bounded(&root.0, FIXTURE_OWNER, FIXTURE_PROVIDER, 100, 3),
+        OwnerHold::Clear
+    );
+    assert_eq!(
+        owner_hold_bounded(&root.0, FIXTURE_OWNER, FIXTURE_PROVIDER, 100, 2),
+        OwnerHold::Review
+    );
+    assert_eq!(
+        owner_hold_bounded(&root.0, OTHER_OWNER, FIXTURE_PROVIDER, 100, 10),
+        OwnerHold::Clear
+    );
+}
+
+fn last_record(files: &[(String, String)]) -> &(String, String) {
+    files
+        .iter()
+        .max_by_key(|(path, _)| path.rsplit('/').next().unwrap().to_owned())
+        .unwrap()
+}
+const PENDING_NAME: &str = ".pending-5b9b8f43-6d1a-4c27-8f11-0123456789ab";
+
+#[test]
+fn owner_hold_directory_without_a_published_record_is_clear() {
+    // Crash between mkdir and the first publish.
+    let empty = Temporary::new();
+    fs::create_dir_all(empty.0.join("journal").join(FIXTURE_OPERATION_DIRECTORY)).unwrap();
+    assert_eq!(hold(&empty), OwnerHold::Clear);
+    // Crash before link: only the temp file exists, whatever its bytes.
+    for contents in ["", "partial", "{\"schema\":1}"] {
+        let pending_only = Temporary::new();
+        pending_only.write(
+            &format!("journal/{FIXTURE_OPERATION_DIRECTORY}/{PENDING_NAME}"),
+            contents,
+        );
+        assert_eq!(hold(&pending_only), OwnerHold::Clear, "{contents:?}");
+    }
+    // The read-only catalog still treats such a directory as invalid.
+    let catalog = Temporary::new();
+    fs::create_dir(catalog.0.join(operation())).unwrap();
+    blocked(&catalog, "operation_journal_invalid");
+}
+
+#[test]
+fn owner_hold_unexpected_entries_without_a_record_are_review() {
+    for name in [
+        "000001.json.tmp",
+        ".pending-not-a-uuid",
+        ".pending-",
+        "stray",
+        ".PENDING-5b9b8f43-6d1a-4c27-8f11-0123456789ab",
+    ] {
+        let directory = Temporary::new();
+        directory.write(
+            &format!("journal/{FIXTURE_OPERATION_DIRECTORY}/{name}"),
+            "x",
+        );
+        assert_eq!(hold(&directory), OwnerHold::Review, "{name}");
+    }
+    // A `.pending-<uuid>` that is a directory is not a leftover temp file.
+    let directory = Temporary::new();
+    fs::create_dir_all(
+        directory
+            .0
+            .join("journal")
+            .join(FIXTURE_OPERATION_DIRECTORY)
+            .join(PENDING_NAME),
+    )
+    .unwrap();
+    assert_eq!(hold(&directory), OwnerHold::Review);
+}
+
+#[test]
+fn owner_hold_pending_beside_records_must_equal_the_latest_record() {
+    let manifest = fixture_manifest();
+    for (case, count, resolved) in [
+        ("lease_released_nonterminal", 6, OwnerHold::Clear),
+        ("lease_acquired_process_crash", 4, OwnerHold::Review),
+    ] {
+        let files = prefix(&manifest, case, count);
+        // Crash between link and unlink: the temp file duplicates the latest record.
+        let mut duplicate = files.clone();
+        let latest = last_record(&files).1.clone();
+        duplicate.push((
+            format!("{FIXTURE_OPERATION_DIRECTORY}/{PENDING_NAME}"),
+            latest,
+        ));
+        assert_eq!(
+            hold(&journal_with(&duplicate)),
+            resolved,
+            "{case} duplicate"
+        );
+        // Anything else beside published records fails closed: an earlier record,
+        // a truncated copy, an empty file.
+        for other in [
+            files[0].1.clone(),
+            last_record(&files).1[..40].to_owned(),
+            String::new(),
+        ] {
+            let mut mismatched = files.clone();
+            mismatched.push((
+                format!("{FIXTURE_OPERATION_DIRECTORY}/{PENDING_NAME}"),
+                other,
+            ));
+            assert_eq!(
+                hold(&journal_with(&mismatched)),
+                OwnerHold::Review,
+                "{case}"
+            );
+        }
+    }
+    // The catalog panel reader is unchanged: leftover files make it blocked.
+    let files = prefix(&manifest, "lease_released_nonterminal", 6);
+    let mut with_pending = files.clone();
+    with_pending.push((
+        format!("{FIXTURE_OPERATION_DIRECTORY}/{PENDING_NAME}"),
+        last_record(&files).1.clone(),
+    ));
+    let directory = journal_with(&with_pending);
+    let status = serde_json::to_value(read_operation_status(directory.0.join("journal"))).unwrap();
+    assert_eq!(status["status"], "blocked");
 }

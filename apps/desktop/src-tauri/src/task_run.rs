@@ -129,6 +129,8 @@ struct Limits {
     // The cleanup grace is independent of the operation deadline.
     grace: Duration,
 }
+// How long the supervisor waits for a terminated worker to exit.
+const STOP_WAIT: Duration = Duration::from_secs(2);
 const LIMITS: Limits = Limits {
     deadline: Duration::from_secs(1200),
     grace: Duration::from_secs(35),
@@ -256,14 +258,52 @@ fn hash(value: &str) -> bool {
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 // A unified diff of the task's single writable file: printable UTF-8 text
-// without NUL, bidi controls or carriage returns, beginning with its header.
+// without control, format or invisible characters, beginning with its header.
+// Mirrors the TS/Go unsafe-text set: C0/C1 controls (and DEL) except tab and
+// newline, every Unicode Cf format character (explicit ranges, no Unicode
+// crate), U+2028/2029, variation selectors, Mongolian selectors, the combining
+// grapheme joiner and the Hangul fillers.
+fn invisible(c: char) -> bool {
+    matches!(
+        c,
+        '\u{0}'..='\u{8}'
+            | '\u{b}'..='\u{1f}'
+            | '\u{7f}'..='\u{9f}'
+            | '\u{ad}'
+            | '\u{34f}'
+            | '\u{600}'..='\u{605}'
+            | '\u{61c}'
+            | '\u{6dd}'
+            | '\u{70f}'
+            | '\u{890}'..='\u{891}'
+            | '\u{8e2}'
+            | '\u{115f}'
+            | '\u{1160}'
+            | '\u{180b}'..='\u{180f}'
+            | '\u{200b}'..='\u{200f}'
+            | '\u{2028}'..='\u{202e}'
+            | '\u{2060}'..='\u{2064}'
+            | '\u{2066}'..='\u{206f}'
+            | '\u{3164}'
+            | '\u{fe00}'..='\u{fe0f}'
+            | '\u{feff}'
+            | '\u{ffa0}'
+            | '\u{fff9}'..='\u{fffb}'
+            | '\u{110bd}'
+            | '\u{110cd}'
+            | '\u{13430}'..='\u{1343f}'
+            | '\u{1bca0}'..='\u{1bca3}'
+            | '\u{1d173}'..='\u{1d17a}'
+            | '\u{e0001}'
+            | '\u{e0020}'..='\u{e007f}'
+            | '\u{e0100}'..='\u{e01ef}'
+    )
+}
 fn valid_patch(value: &str, task: &str) -> bool {
     !value.is_empty()
         && value.len() <= MAX_PATCH_BYTES
         && patch_header(task).is_some_and(|header| value.starts_with(&header))
-        && !value
-            .chars()
-            .any(|c| matches!(c, '\0' | '\r' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}'))
+        && !value.chars().any(invisible)
 }
 impl TaskResult {
     fn valid(&self, outcome: Outcome, task: &str) -> bool {
@@ -489,6 +529,11 @@ struct Inner {
     // Time held in the native run-limits ledger; settled before the run's
     // terminal state is published.
     reservation: Option<run_limits::Reservation>,
+    // The request whose terminal needs_review came from the native start gate
+    // rather than a worker. Never serialized and never part of the public
+    // status: it only stops that refusal from latching later starts, because
+    // the gate re-reads the durable state on every start.
+    gate_refused: Option<String>,
 }
 pub(crate) struct TaskRun {
     inner: Mutex<Inner>,
@@ -513,6 +558,7 @@ impl Default for TaskRun {
                 shutting_down: false,
                 requests: HashSet::new(),
                 reservation: None,
+                gate_refused: None,
             }),
         }
     }
@@ -703,7 +749,11 @@ impl TaskRun {
                     Err(DENIED)
                 };
             }
-            if operation.phase != Phase::Finished || operation.outcome == Some(Outcome::NeedsReview)
+            // A worker-originated needs_review latches until restart; a start
+            // gate refusal does not, since the gate decides again on each start.
+            if operation.phase != Phase::Finished
+                || (operation.outcome == Some(Outcome::NeedsReview)
+                    && inner.gate_refused.as_deref() != Some(operation.request_id.as_str()))
             {
                 return Err(DENIED);
             }
@@ -751,6 +801,7 @@ impl TaskRun {
         };
         let (tx, rx) = mpsc::sync_channel(1);
         inner.requests.insert(operation.request_id.clone());
+        inner.gate_refused = None;
         inner.cancel = Some(tx);
         inner.cancel_requested = false;
         inner.worker_observation = Some(operation.clone());
@@ -805,14 +856,29 @@ impl TaskRun {
             .unwrap_or(true)
     }
     pub fn force_review(&self) {
-        if let Ok(mut inner) = self.inner.try_lock() {
-            Self::settle(&mut inner, None);
-            if let Some(operation) = &mut inner.status.operation {
-                if operation.phase != Phase::Finished {
-                    Self::terminal(operation, End::review("cleanup_failed"));
+        // Take the reservation under the lock but settle its file IO outside
+        // it, then publish: the settle still precedes the terminal state.
+        let Ok(mut inner) = self.inner.try_lock() else {
+            return;
+        };
+        let held = Self::take_reservation(&mut inner, None);
+        drop(inner);
+        if let Some(held) = held {
+            run_limits::settle(held, run_limits::now_ms().unwrap_or(0));
+        }
+        for attempt in 0..100 {
+            if let Ok(mut inner) = self.inner.try_lock() {
+                if let Some(operation) = &mut inner.status.operation {
+                    if operation.phase != Phase::Finished {
+                        Self::terminal(operation, End::review("cleanup_failed"));
+                    }
                 }
+                inner.cancel = None;
+                return;
             }
-            inner.cancel = None;
+            if attempt < 99 {
+                thread::sleep(Duration::from_millis(10));
+            }
         }
     }
     fn terminal(operation: &mut Operation, end: End) {
@@ -823,22 +889,35 @@ impl TaskRun {
         operation.cleanup = end.cleanup;
         operation.result = end.result;
     }
-    // Settle the run's reservation (when it belongs to this request) before
-    // any terminal state becomes visible. Best effort and never fatal.
-    fn settle(inner: &mut Inner, id: Option<&str>) {
+    // Take the run's reservation out of the shared state when it belongs to
+    // this request (any request for None). The caller settles it after
+    // releasing the lock and before any terminal state becomes visible.
+    fn take_reservation(inner: &mut Inner, id: Option<&str>) -> Option<run_limits::Reservation> {
         if inner
             .reservation
             .as_ref()
             .is_some_and(|held| id.is_none_or(|id| held.request_id() == id))
         {
-            if let Some(held) = inner.reservation.take() {
-                run_limits::settle(held, run_limits::now_ms().unwrap_or(0));
-            }
+            inner.reservation.take()
+        } else {
+            None
         }
     }
-    fn finish(&self, id: &str, mut end: End) {
+    fn finish(&self, id: &str, end: End) {
+        self.finish_as(id, end, false);
+    }
+    // `gate` marks a refusal by the native start gate (see Inner::gate_refused).
+    fn finish_as(&self, id: &str, mut end: End, gate: bool) {
+        // Settle (file IO) without holding the shared state, then publish.
+        let held = self
+            .inner
+            .lock()
+            .ok()
+            .and_then(|mut inner| Self::take_reservation(&mut inner, Some(id)));
+        if let Some(held) = held {
+            run_limits::settle(held, run_limits::now_ms().unwrap_or(0));
+        }
         if let Ok(mut inner) = self.inner.lock() {
-            Self::settle(&mut inner, Some(id));
             // A requested cancellation outranks anything but a deadline, and
             // never leaves a result of the cancelled run visible.
             if inner.cancel_requested
@@ -847,6 +926,7 @@ impl TaskRun {
             {
                 end = End::cancelled();
             }
+            let mut published = false;
             if let Some(operation) = &mut inner.status.operation {
                 if operation.request_id == id && operation.phase != Phase::Finished {
                     let mut next = operation.clone();
@@ -857,13 +937,21 @@ impl TaskRun {
                         Self::terminal(&mut next, End::review("worker_failed"));
                     }
                     *operation = next;
-                    if operation.outcome != Some(Outcome::Passed)
-                        || operation.cleanup != Cleanup::Verified
-                    {
-                        inner.artifact = None;
-                    }
-                    inner.cancel = None;
+                    published = true;
                 }
+            }
+            if published {
+                let passed = inner.status.operation.as_ref().is_some_and(|operation| {
+                    operation.outcome == Some(Outcome::Passed)
+                        && operation.cleanup == Cleanup::Verified
+                });
+                if !passed {
+                    inner.artifact = None;
+                }
+                if gate {
+                    inner.gate_refused = Some(id.into());
+                }
+                inner.cancel = None;
             }
         }
     }
@@ -1000,7 +1088,7 @@ impl TaskRun {
         // owner has unresolved or unreadable durable operations never starts,
         // whichever process or restart left them behind.
         if let Some(end) = start_gate(&store, &operation) {
-            self.finish(id, end);
+            self.finish_as(id, end, true);
             return;
         }
         // Hold the run's time in the native ledger before anything else: an
@@ -1009,10 +1097,17 @@ impl TaskRun {
             .ok_or("local_budget_unavailable")
             .and_then(|now| run_limits::reserve(&store, now, id, limits.deadline))
         {
-            Ok((allowed, held)) => {
-                if let Ok(mut inner) = self.inner.lock() {
-                    inner.reservation = Some(held);
-                }
+            Ok((allowed, mut held)) => {
+                // Cleanup past the deadline (grace and stop wait) is real run
+                // time the ledger charges. The reservation settles itself on
+                // drop, so a lost lock cannot strand it open.
+                held.allow_overrun(limits.grace + STOP_WAIT);
+                let previous = self
+                    .inner
+                    .lock()
+                    .ok()
+                    .and_then(|mut inner| inner.reservation.replace(held));
+                drop(previous);
                 allowed
             }
             Err(code) => {
@@ -1175,7 +1270,7 @@ impl TaskRun {
             }
         }
         worker.terminate();
-        let stop_deadline = Instant::now() + Duration::from_secs(2);
+        let stop_deadline = Instant::now() + STOP_WAIT;
         while Instant::now() < stop_deadline {
             if !matches!(worker.poll(), Ok(None)) {
                 break;

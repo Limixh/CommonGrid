@@ -50,6 +50,8 @@ const MAX_TIME_MS: u64 = 9_007_199_254_740_991;
 // A merged entry saturates here; far above any daily cap, so it still means
 // "exhausted" while keeping the sums comfortably inside u64.
 const MAX_USED_MS: u64 = 10_000_000_000;
+// Upper bound on the cleanup time a reservation may be charged beyond itself.
+const MAX_OVERRUN_MS: u64 = 600_000;
 
 static LEDGER: Mutex<()> = Mutex::new(());
 static TEMP_SEQUENCE: AtomicUsize = AtomicUsize::new(0);
@@ -132,10 +134,16 @@ impl Ledger {
             });
         }
     }
-    // Drop what left the window, order by end, and bound the entry count by
-    // merging the two oldest into one that ends (so expires) later: the merge
-    // can only over-count, never forget usage.
+    // Clamp every end to `now_ms` (a run cannot have ended after the present;
+    // an entry stamped later came from a clock that was ahead and would
+    // otherwise stay in the window for as long as the skew lasts), drop what
+    // left the window, order by end, and bound the entry count by merging the
+    // two oldest into one that ends (so expires) later: the merge can only
+    // over-count, never forget usage. The clamp is persisted by the caller.
     fn prune(&mut self, now_ms: u64) {
+        for entry in &mut self.entries {
+            entry.end_ms = entry.end_ms.min(now_ms);
+        }
         self.entries.retain(|entry| in_window(entry.end_ms, now_ms));
         self.entries.sort_by_key(|entry| entry.end_ms);
         while self.entries.len() > MAX_ENTRIES {
@@ -155,18 +163,41 @@ impl Ledger {
     }
 }
 
-/// The time a started run holds. Settled exactly once when the run ends.
+/// The time a started run holds. Settled exactly once when the run ends; a
+/// reservation dropped unsettled (a lost lock, a panic) settles itself on drop
+/// so it never strands an open record.
 #[derive(Debug)]
 pub(crate) struct Reservation {
     store: PathBuf,
     request_id: String,
     started_ms: u64,
     reserved_ms: u64,
+    // Cleanup time a run may legitimately use past its reservation (the
+    // supervisor's grace and stop wait); charged, but never more than this.
+    overrun_ms: u64,
     started: Instant,
+    open: bool,
 }
 impl Reservation {
     pub(crate) fn request_id(&self) -> &str {
         &self.request_id
+    }
+    /// Declare the cleanup time the run may take beyond its reservation.
+    pub(crate) fn allow_overrun(&mut self, overrun: Duration) {
+        self.overrun_ms = u64::try_from(overrun.as_millis())
+            .unwrap_or(u64::MAX)
+            .min(MAX_OVERRUN_MS);
+    }
+    fn bound_ms(&self) -> u64 {
+        self.reserved_ms.saturating_add(self.overrun_ms)
+    }
+}
+impl Drop for Reservation {
+    fn drop(&mut self) {
+        if self.open {
+            self.open = false;
+            settle_held(self, now_ms().unwrap_or(self.started_ms));
+        }
     }
 }
 
@@ -340,7 +371,9 @@ pub(crate) fn reserve(
             request_id: request_id.into(),
             started_ms: now_ms,
             reserved_ms,
+            overrun_ms: 0,
             started: Instant::now(),
+            open: true,
         },
     ))
 }
@@ -348,18 +381,26 @@ pub(crate) fn reserve(
 /// Replace the open reservation with what the run actually used: elapsed time
 /// (the larger of the wall-clock and the monotonic measurement, so a clock set
 /// back cannot hide usage) rounded up to whole seconds, at least one second and
-/// at most the reservation. Best effort: it never panics and never fails the
-/// run; if the ledger became unreadable the next reservation fails closed.
-pub(crate) fn settle(reservation: Reservation, now_ms: u64) {
+/// at most the reservation plus the declared cleanup overrun (the supervisor's
+/// grace and stop wait, which a run really spends). Best effort: it never
+/// panics and never fails the run; if the ledger became unreadable the next
+/// reservation fails closed.
+pub(crate) fn settle(mut reservation: Reservation, now_ms: u64) {
+    reservation.open = false;
+    settle_held(&reservation, now_ms);
+}
+fn settle_held(reservation: &Reservation, now_ms: u64) {
     let _gate = lock();
     let Ok(mut ledger) = read(&reservation.store) else {
         return;
     };
+    let bound = reservation.bound_ms();
     let wall = now_ms.saturating_sub(reservation.started_ms);
     let monotonic = u64::try_from(reservation.started.elapsed().as_millis()).unwrap_or(u64::MAX);
-    let used_ms = (ceil_sec(wall.max(monotonic).min(reservation.reserved_ms)) * 1000)
+    let used_ms = (ceil_sec(wall.max(monotonic).min(bound)) * 1000)
         .max(1000)
-        .min(reservation.reserved_ms);
+        .min(bound)
+        .min(MAX_USED_MS);
     if ledger
         .open
         .as_ref()
@@ -367,7 +408,13 @@ pub(crate) fn settle(reservation: Reservation, now_ms: u64) {
     {
         ledger.open = None;
     }
-    let end_ms = now_ms.max(reservation.started_ms).min(MAX_TIME_MS);
+    // A run cannot end after its reservation and cleanup allowance ran out, so
+    // a wall clock that jumped forward mid-run cannot move the end (and with it
+    // the pruning horizon) past that point and drop real history.
+    let end_ms = now_ms
+        .min(reservation.started_ms.saturating_add(bound))
+        .max(reservation.started_ms)
+        .min(MAX_TIME_MS);
     ledger.entries.push(Entry { end_ms, used_ms });
     ledger.prune(end_ms);
     let _ = publish(&reservation.store, &ledger);

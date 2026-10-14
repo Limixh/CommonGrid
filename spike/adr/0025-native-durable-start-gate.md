@@ -20,6 +20,17 @@ Native supervisor giriş, durum ve çıkış işlemlerinde de worker başlatmada
 
 Çözülmemiş işlem şunlardan biridir: bekleyen niyet (`pending intents`), serbest bırakılmamış edinilmiş lease veya etkin namespace kaydı. Zararsız, terminal olmayan günlükler engellemez: yalnız `begin` yazıp çöken, lease alınmadan reddedilen ve lease bırakıldıktan sonra çöken işlemler. Koşulun dar tutulmasının nedeni kendini sürdüren ret döngüsünden kaçınmaktır: uygulama içinde temizleme yolu olmadığından, zararsız bir yarım kayıt da profili sonsuza dek kilitlerse yalnız elle günlük düzenleyerek çıkılabilirdi. Yalnız kaynak sızdırmış olabilecek durumlar engeller.
 
+## Ret kilitlenmez (latch yok)
+
+Profil oturum denetçisinde kapı reddi (`start_gate`) bellekte işaretlenir (serileştirilmeyen `gate_refusal` istek kimliği). İşaretli bir `needs_review` sonraki başlatmaları engellemez: A profili için ret, B profilinin girişini veya A'nın günlüğü çözüldükten sonra A'nın yeniden denemesini yeniden başlatmadan engellemez. Worker kaynaklı `needs_review` (protokol ihlali, temizlik belirsizliği) önceki gibi kilitler.
+
+## Günlük taraması sınırları ve geçici kalıntılar
+
+- Yalnız `op-{owner}-*` girdileri sahip sınırına sayılır; başka sahiplerin girdileri bu sınıra sayılmaz. Kök dizinde listelenen toplam girdi için geniş bir üst sınır (65536) vardır; aşılırsa fail closed. Sahip başına eşleşme sınırı 4096'dır.
+- Terminal günlükler henüz budanmaz; **saklama/budama (retention) ayrı bir izleme işidir**. Sahip başına 4096 sınırına ulaşmak bilinen bir sınırdır ve inceleme (`Review`) ile engeller.
+- Yalnız sahip taramasında: hiç girdisi olmayan `op-{owner}-*` dizini (mkdir ile ilk yayım arasında çökme) veya yalnız `.pending-<uuid>` dosyaları olan dizin (link öncesi çökme) yayımlanmış kayıt olmadığından `Clear` sayılır. Yayımlanmış kayıtların yanındaki bir `.pending-<uuid>` dosyası yalnız baytları son yayımlanmış kayıtla aynıysa (link ile unlink arasında çökme) yok sayılır; aksi halde `Review`. Salt okunur katalog (`read_state`, günlük paneli) değişmedi ve bu dizinleri geçersiz sayar.
+- Kapı yalnız `ready` bağlama için sorulur; bu yüzden eksik günlük kökü (veya üst dizini) günlüklerin silindiği anlamına gelir ve `Review` verir (eskiden `Clear`).
+
 ## Fail closed
 
 Hiçbir günlük okunamıyor, geçersiz veya şeması bozuksa; dizin adı `op-{owner}-*` biçiminde olup içeriği doğrulanamıyorsa; bağlama dosyası bozuk ya da okunamıyorsa çalıştırma başlamaz. Sessizce "temiz" varsayılmaz. Okuma hatası bağlama bozukluğu olarak `profile_invalid`, günlük bozukluğu olarak `profile_needs_review` ile sonuçlanır.

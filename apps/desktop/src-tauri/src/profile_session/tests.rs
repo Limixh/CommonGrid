@@ -753,6 +753,8 @@ fn bind(fixture: &Fixture, state: &str, owner: &str) {
     let root = fixture.directory.join("managed-profile-sessions");
     fs::create_dir_all(&root).unwrap();
     fs::write(root.join(format!("{PROFILE}.json")), json!({"schema_version":"1.0", "profile_id":PROFILE, "provider":"codex", "owner":owner, "state":state}).to_string()).unwrap();
+    // A ready binding implies the journal root exists; a missing root is a refusal.
+    fs::create_dir_all(fixture.directory.join("managed-operation-journal")).unwrap();
 }
 // Writes one shared contract journal case (owner ...0001, provider codex)
 // exactly as the native journal reader's own fixtures do.
@@ -858,15 +860,8 @@ fn an_unresolved_owner_journal_refuses_every_action_across_restarts() {
                 Cleanup::Unknown,
             );
             nothing_started(&fixture);
-            // In memory a needs_review operation denies any further start, and
-            // replaying the same request is idempotent.
-            assert!(owner
-                .start(
-                    request("55555555-5555-4555-8555-555555555555", action),
-                    root.clone(),
-                    fixture.directory.clone()
-                )
-                .is_err());
+            // A gate refusal does not latch: replaying the same request is
+            // idempotent and a new request is admitted (and refused again).
             assert_eq!(
                 owner
                     .start(request(id, action), root.clone(), fixture.directory.clone())
@@ -876,6 +871,23 @@ fn an_unresolved_owner_journal_refuses_every_action_across_restarts() {
                     .request_id,
                 id
             );
+            let next = "55555555-5555-4555-8555-555555555555";
+            let again = gate_start(&fixture, &owner, &root, next, action);
+            assert_eq!(again.request_id, next);
+            refused(
+                &again,
+                Outcome::NeedsReview,
+                "profile_needs_review",
+                Cleanup::Unknown,
+            );
+            nothing_started(&fixture);
+            assert!(owner
+                .start(
+                    request(next, action),
+                    root.clone(),
+                    fixture.directory.clone()
+                )
+                .is_ok());
         }
         nothing_started(&fixture);
     }
@@ -1023,9 +1035,11 @@ fn a_reserved_binding_needs_review_before_anything_starts() {
             Cleanup::Unknown,
         );
         nothing_started(&fixture);
+        // Gate refusals do not latch later starts.
         assert!(owner
             .start(request(OTHER, action), root, fixture.directory.clone())
-            .is_err());
+            .is_ok());
+        wait(&owner, Phase::Finished);
     }
 }
 
@@ -1048,4 +1062,124 @@ fn the_gate_runs_before_resources_so_missing_assets_do_not_mask_it() {
         "profile_needs_review",
         Cleanup::Unknown,
     );
+}
+
+fn other_profile(fixture: &Fixture) -> &'static str {
+    // A second codex profile whose binding is absent (a first login).
+    const SECOND: &str = "44444444-4444-4444-8444-444444444444";
+    let root = fixture.directory.join("managed-profiles");
+    fs::write(root.join("profiles.json"), json!({"schema_version":"1.0", "revision":3, "profiles":[{"profile_id":PROFILE, "provider":"codex", "name":"Fixture"}, {"profile_id":SECOND, "provider":"codex", "name":"Second"}], "selected_profile_id":PROFILE}).to_string()).unwrap();
+    SECOND
+}
+fn select(fixture: &Fixture, profile: &str) {
+    let root = fixture.directory.join("managed-profiles");
+    let registry = fs::read_to_string(root.join("profiles.json")).unwrap();
+    let mut value: Value = serde_json::from_str(&registry).unwrap();
+    value["selected_profile_id"] = json!(profile);
+    fs::write(root.join("profiles.json"), value.to_string()).unwrap();
+}
+
+#[test]
+fn a_gate_refusal_for_one_profile_does_not_latch_another_profile() {
+    let fixture = Fixture::new();
+    fixture.registry("codex");
+    let second = other_profile(&fixture);
+    let root = fixture.resources(&marking_worker(&fixture, Action::Login));
+    bind(&fixture, "ready", GATE_OWNER);
+    journal(&fixture, "lease_intent_pending_process_crash");
+    let owner = Owner::new();
+    let first = gate_start(&fixture, &owner, &root, ID, Action::Login);
+    refused(
+        &first,
+        Outcome::NeedsReview,
+        "profile_needs_review",
+        Cleanup::Unknown,
+    );
+    nothing_started(&fixture);
+    // Login for the other profile (no binding yet) is admitted and runs.
+    select(&fixture, second);
+    owner
+        .start(
+            Start {
+                profile_id: second.into(),
+                ..request(OTHER, Action::Login)
+            },
+            root.clone(),
+            fixture.directory.clone(),
+        )
+        .unwrap();
+    let second_run = wait(&owner, Phase::Finished);
+    assert_eq!(second_run.request_id, OTHER);
+    assert_eq!(second_run.outcome, Some(Outcome::Passed));
+    assert!(marker(&fixture).exists());
+}
+
+#[test]
+fn a_refused_profile_proceeds_after_its_journal_is_resolved_without_restart() {
+    let fixture = Fixture::new();
+    fixture.registry("codex");
+    let root = fixture.resources(&marking_worker(&fixture, Action::Status));
+    bind(&fixture, "ready", GATE_OWNER);
+    journal(&fixture, "lease_intent_pending_process_crash");
+    let owner = Owner::new();
+    let first = gate_start(&fixture, &owner, &root, ID, Action::Status);
+    refused(
+        &first,
+        Outcome::NeedsReview,
+        "profile_needs_review",
+        Cleanup::Unknown,
+    );
+    // The journal is resolved by hand (removed), then the same supervisor retries.
+    fs::remove_dir_all(fixture.directory.join("managed-operation-journal")).unwrap();
+    fs::create_dir(fixture.directory.join("managed-operation-journal")).unwrap();
+    let second = gate_start(&fixture, &owner, &root, OTHER, Action::Status);
+    assert_eq!(second.request_id, OTHER);
+    assert_eq!(second.outcome, Some(Outcome::Passed));
+    assert!(marker(&fixture).exists());
+}
+
+#[test]
+fn a_removed_journal_root_for_a_ready_binding_is_refused() {
+    let fixture = Fixture::new();
+    fixture.registry("codex");
+    let root = fixture.resources(&marking_worker(&fixture, Action::Status));
+    bind(&fixture, "ready", GATE_OWNER);
+    fs::remove_dir(fixture.directory.join("managed-operation-journal")).unwrap();
+    let operation = gate_start(&fixture, &Owner::new(), &root, ID, Action::Status);
+    refused(
+        &operation,
+        Outcome::NeedsReview,
+        "profile_needs_review",
+        Cleanup::Unknown,
+    );
+    nothing_started(&fixture);
+}
+
+#[test]
+fn a_worker_originated_needs_review_still_latches_later_starts() {
+    let fixture = Fixture::new();
+    fixture.registry("codex");
+    // The worker emits a protocol violation: needs_review that is not a gate refusal.
+    let root = fixture.resources("process.stdin.once('data',()=>{console.log('PRIVATE_AUTH'.repeat(1000));setInterval(()=>{},1000);});");
+    let owner = Owner::new();
+    owner
+        .start(
+            request(ID, Action::Status),
+            root.clone(),
+            fixture.directory.clone(),
+        )
+        .unwrap();
+    let operation = wait(&owner, Phase::Finished);
+    assert_eq!(operation.outcome, Some(Outcome::NeedsReview));
+    assert_ne!(
+        operation.error_code.as_deref(),
+        Some("profile_needs_review")
+    );
+    assert!(owner
+        .start(
+            request(OTHER, Action::Status),
+            root,
+            fixture.directory.clone()
+        )
+        .is_err());
 }

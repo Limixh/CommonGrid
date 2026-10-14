@@ -230,6 +230,10 @@ struct Inner {
     code_submitted: bool,
     shutting_down: bool,
     requests: HashSet<String>,
+    // Request id of an operation the native start gate refused (never serialized).
+    // Such a `needs_review` is a refusal of one profile, not worker uncertainty, so
+    // it does not latch later starts; a worker-originated one still does.
+    gate_refusal: Option<String>,
 }
 pub(crate) struct ProfileSession {
     inner: Mutex<Inner>,
@@ -253,6 +257,7 @@ impl Default for ProfileSession {
                 code_submitted: false,
                 shutting_down: false,
                 requests: HashSet::new(),
+                gate_refusal: None,
             }),
         }
     }
@@ -472,8 +477,9 @@ impl ProfileSession {
                     Err(DENIED)
                 };
             }
-            if operation.phase != Phase::Finished || operation.outcome == Some(Outcome::NeedsReview)
-            {
+            let latched = operation.outcome == Some(Outcome::NeedsReview)
+                && inner.gate_refusal.as_deref() != Some(operation.request_id.as_str());
+            if operation.phase != Phase::Finished || latched {
                 return Err(DENIED);
             }
         }
@@ -680,6 +686,19 @@ impl ProfileSession {
         error: Option<String>,
         cleanup: Cleanup,
     ) {
+        self.finish_with(id, outcome, state, error, cleanup, false);
+    }
+    // `gate_refusal` marks the terminal write, under the same lock, as a start-gate
+    // refusal so a refused `needs_review` is not mistaken for worker uncertainty.
+    fn finish_with(
+        &self,
+        id: &str,
+        outcome: Outcome,
+        state: SessionState,
+        error: Option<String>,
+        cleanup: Cleanup,
+        gate_refusal: bool,
+    ) {
         if let Ok(mut inner) = self.inner.lock() {
             let cancelled = inner.cancel_requested
                 && cleanup == Cleanup::Verified
@@ -699,6 +718,9 @@ impl ProfileSession {
                     }
                     inner.cancel = None;
                     inner.code_input = None;
+                    if gate_refusal {
+                        inner.gate_refusal = Some(id.to_owned());
+                    }
                 }
             }
         }
@@ -792,12 +814,13 @@ impl ProfileSession {
         // unresolved or unreadable durable operations never starts any action,
         // whichever process or restart left them behind.
         if let Some((outcome, error, cleanup)) = start_gate(&store, &operation) {
-            self.finish(
+            self.finish_with(
                 id,
                 outcome,
                 SessionState::Unknown,
                 Some(error.into()),
                 cleanup,
+                true,
             );
             return;
         }

@@ -61,6 +61,13 @@ fn value(status: &Status) -> Value {
 fn secs(seconds: u64) -> Duration {
     Duration::from_secs(seconds)
 }
+// The time a reservation grants, leaving its open record on disk (a dropped
+// reservation would settle itself and clear it).
+fn granted(store: &Path, ceiling: Duration) -> Duration {
+    let (allowed, held) = reserve(store, NOW, ID, ceiling).unwrap();
+    std::mem::forget(held);
+    allowed
+}
 
 #[test]
 fn missing_ledger_means_defaults_and_reading_creates_nothing() {
@@ -158,7 +165,7 @@ fn reserve_then_settle_records_elapsed_whole_seconds() {
     // A clock set back cannot produce a negative or zero cost.
     let (_, held) = reserve(&fixture.0, NOW + 300_000, OTHER, secs(1200)).unwrap();
     settle(held, NOW);
-    assert_eq!(fixture.ledger()["entries"][2]["used_ms"], 1000);
+    assert_eq!(fixture.ledger()["entries"][3]["used_ms"], 1000);
     // Only the reservation's own request clears the open slot.
     let (_, first) = reserve(&fixture.0, NOW + 400_000, ID, secs(1200)).unwrap();
     let (_, second) = reserve(&fixture.0, NOW + 500_000, OTHER, secs(1200)).unwrap();
@@ -166,6 +173,126 @@ fn reserve_then_settle_records_elapsed_whole_seconds() {
     assert_eq!(fixture.ledger()["open"]["request_id"], OTHER);
     settle(second, NOW + 520_000);
     assert!(fixture.ledger()["open"].is_null());
+}
+
+#[test]
+fn declared_cleanup_overrun_is_charged_but_bounded() {
+    let fixture = Fixture::new();
+    // Grace plus stop wait is real run time: 60 s reserved, 37 s allowed on top.
+    let (_, mut held) = reserve(&fixture.0, NOW, ID, secs(60)).unwrap();
+    held.allow_overrun(secs(37));
+    settle(held, NOW + 80_000);
+    assert_eq!(
+        fixture.ledger()["entries"],
+        json!([{"end_ms": NOW + 80_000, "used_ms": 80_000}])
+    );
+    // Still bounded: reservation plus the allowance, however late it settles.
+    let (_, mut held) = reserve(&fixture.0, NOW + 100_000, OTHER, secs(60)).unwrap();
+    held.allow_overrun(secs(37));
+    settle(held, NOW + 100_000 + 10 * HOUR);
+    assert_eq!(
+        fixture.ledger()["entries"][1],
+        json!({"end_ms": NOW + 100_000 + 97_000, "used_ms": 97_000})
+    );
+    // Without an allowance the reservation stays the cap.
+    let (_, held) = reserve(&fixture.0, NOW + 300_000, ID, secs(60)).unwrap();
+    settle(held, NOW + 300_000 + 90_000);
+    assert_eq!(fixture.ledger()["entries"][2]["used_ms"], 60_000);
+    // The allowance itself is capped, and the budget now counts the overrun.
+    let (_, mut held) = reserve(&fixture.0, NOW + 500_000, OTHER, secs(60)).unwrap();
+    held.allow_overrun(Duration::from_secs(u64::MAX / 4));
+    settle(held, NOW + 500_000 + 10 * HOUR);
+    assert_eq!(
+        fixture.ledger()["entries"][3]["used_ms"],
+        60_000 + MAX_OVERRUN_MS
+    );
+    assert_eq!(
+        status(&fixture.0, NOW + 500_000 + 10 * HOUR).usage.used_sec,
+        80 + 97 + 60 + 60 + MAX_OVERRUN_MS / 1000
+    );
+}
+
+#[test]
+fn a_dropped_reservation_settles_itself_instead_of_staying_open() {
+    let fixture = Fixture::new();
+    let (_, held) = reserve(&fixture.0, now_ms().unwrap(), ID, secs(120)).unwrap();
+    assert_eq!(fixture.ledger()["open"]["request_id"], ID);
+    drop(held);
+    let written = fixture.ledger();
+    assert!(written["open"].is_null());
+    assert_eq!(written["entries"].as_array().unwrap().len(), 1);
+    assert_eq!(written["entries"][0]["used_ms"], 1000);
+    // A settled reservation is not settled a second time on drop.
+    let (_, held) = reserve(&fixture.0, now_ms().unwrap(), OTHER, secs(120)).unwrap();
+    settle(held, now_ms().unwrap());
+    assert_eq!(fixture.ledger()["entries"].as_array().unwrap().len(), 2);
+}
+
+#[test]
+fn entries_from_a_clock_that_was_ahead_are_clamped_and_persisted() {
+    let fixture = Fixture::new();
+    fixture.write(ledger(
+        1800,
+        7200,
+        json!([
+            {"end_ms": NOW + 5 * HOUR, "used_ms": 1_000_000},
+            {"end_ms": NOW - HOUR, "used_ms": 500_000},
+        ]),
+        Value::Null,
+    ));
+    let (_, held) = reserve(&fixture.0, NOW, ID, secs(120)).unwrap();
+    assert_eq!(
+        fixture.ledger()["entries"],
+        json!([
+            {"end_ms": NOW - HOUR, "used_ms": 500_000},
+            {"end_ms": NOW, "used_ms": 1_000_000},
+        ])
+    );
+    // Without the clamp the future entry would count until NOW + 5 h + 24 h.
+    assert_eq!(status(&fixture.0, NOW + WINDOW_MS - 1).usage.used_sec, 1000);
+    assert_eq!(status(&fixture.0, NOW + WINDOW_MS).usage.used_sec, 0);
+    settle(held, NOW + 5000);
+    // Saving prunes (and so clamps) too.
+    fixture.write(ledger(
+        1800,
+        7200,
+        json!([{"end_ms": NOW + 9 * HOUR, "used_ms": 2_000_000}]),
+        Value::Null,
+    ));
+    save(&fixture.0, 600, 3600, NOW).unwrap();
+    assert_eq!(
+        fixture.ledger()["entries"],
+        json!([{"end_ms": NOW, "used_ms": 2_000_000}])
+    );
+}
+
+#[test]
+fn a_clock_jumping_forward_during_a_run_does_not_drop_real_history() {
+    let fixture = Fixture::new();
+    let old = json!({"end_ms": NOW - 2 * HOUR, "used_ms": 3_000_000});
+    fixture.write(ledger(1800, 7200, json!([old]), Value::Null));
+    let (_, held) = reserve(&fixture.0, NOW, ID, secs(1200)).unwrap();
+    // Settled three days "later" by the wall clock: the run cannot have ended
+    // after its reservation, so that is where its end (and the pruning
+    // horizon) stays.
+    settle(held, NOW + 72 * HOUR);
+    let written = fixture.ledger();
+    assert_eq!(
+        written["entries"],
+        json!([old, {"end_ms": NOW + 1_200_000, "used_ms": 1_200_000}])
+    );
+    // The clock returns to normal: the history still counts.
+    assert_eq!(status(&fixture.0, NOW + 1_300_000).usage.used_sec, 4200);
+    // A clock set back after the fact cannot hide or duplicate it either:
+    // everything ending "in the future" is clamped to the present.
+    let (_, held) = reserve(&fixture.0, NOW - HOUR, OTHER, secs(1200)).unwrap();
+    settle(held, NOW - HOUR + 2000);
+    let entries = fixture.ledger()["entries"].as_array().unwrap().clone();
+    assert!(entries
+        .iter()
+        .all(|e| e["end_ms"].as_u64().unwrap() <= NOW - HOUR + 2000));
+    let total: u64 = entries.iter().map(|e| e["used_ms"].as_u64().unwrap()).sum();
+    assert_eq!(total, 3_000_000 + 1_200_000 + 2000);
 }
 
 #[test]
@@ -336,22 +463,13 @@ fn a_budget_below_one_minute_is_exhausted_but_a_short_ceiling_is_not() {
         json!([{"end_ms": NOW, "used_ms": 7_140_000}]),
         Value::Null,
     ));
-    assert_eq!(
-        reserve(&fixture.0, NOW, ID, secs(1200)).unwrap().0,
-        secs(60)
-    );
+    assert_eq!(granted(&fixture.0, secs(1200)), secs(60));
     fixture.write(ledger(1800, 7200, json!([]), Value::Null));
-    assert_eq!(reserve(&fixture.0, NOW, ID, secs(30)).unwrap().0, secs(30));
-    assert_eq!(
-        reserve(&fixture.0, NOW, ID, Duration::ZERO).unwrap().0,
-        secs(0)
-    );
+    assert_eq!(granted(&fixture.0, secs(30)), secs(30));
+    assert_eq!(granted(&fixture.0, Duration::ZERO), secs(0));
     // The attempt cap narrows the ceiling.
     fixture.write(ledger(60, 7200, json!([]), Value::Null));
-    assert_eq!(
-        reserve(&fixture.0, NOW, ID, secs(1200)).unwrap().0,
-        secs(60)
-    );
+    assert_eq!(granted(&fixture.0, secs(1200)), secs(60));
     assert_eq!(fixture.ledger()["open"]["reserved_ms"], 60_000);
 }
 
