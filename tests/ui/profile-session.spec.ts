@@ -433,11 +433,25 @@ test("native device opening rejects anything except true and clears the code", a
 
 test("unknown cleanup prevents every new operation until reviewed", async ({page}) => {
   await mockNative(page, envelope({...waiting, revision: 4, phase: "finished", outcome: "needs_review", challenge: null, error_code: "cleanup_failed", cleanup: "unknown"})); const panel = await open(page);
-  await expect(panel).toContainText("inceleme gerekli");
+  await expect(panel).toContainText("İnceleme gerekli; bu profilde yeni hesap işlemi başlatılmaz.");
   for (const name of ["CLI hesabını kontrol et", "Codex hesabını bağla", "CLI hesabından çıkış yap"])
     await expect(panel.getByRole("button", {name, exact: true})).toBeDisabled();
   await expect(panel.getByTestId("profile-session-code")).toHaveCount(0);
 });
+
+for (const language of ["tr", "en"] as const) {
+  test(`a durable profile_needs_review refusal points to the Yerel işlem günlüğü panel and shows no login code (${language})`, async ({page}) => {
+    await mockNative(page, envelope({...waiting, revision: 1, phase: "finished", outcome: "needs_review", challenge: null, error_code: "profile_needs_review", cleanup: "unknown", session_state: "unknown"})); const panel = await open(page);
+    if (language === "en") await page.getByRole("button", {name: "Change language", exact: true}).click();
+    await expect(panel).toContainText(language === "tr" ? "Yerel işlem günlüğü" : "Local operation journal");
+    await expect(panel).toContainText(language === "tr" ? "önceki bir işlem kapanmadı veya doğrulanamadı" : "An earlier operation on this profile was not closed");
+    await expect(panel).not.toContainText("profile_needs_review");
+    for (const name of language === "tr" ? ["CLI hesabını kontrol et", "Codex hesabını bağla", "CLI hesabından çıkış yap"] : ["Check CLI account", "Connect Codex account", "Sign out of CLI account"])
+      await expect(panel.getByRole("button", {name, exact: true})).toBeDisabled();
+    await expect(panel.getByTestId("profile-session-code")).toHaveCount(0);
+    await expect(panel.getByLabel(language === "tr" ? "Claude geçici giriş kodu" : "Claude temporary sign-in code")).toHaveCount(0);
+  });
+}
 
 test("login observation expires after twelve minutes, clears the code, and does not invent completion", async ({page}) => {
   await freezeClock(page); await mockNative(page, envelope(waiting)); const panel = await open(page);

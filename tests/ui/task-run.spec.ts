@@ -269,7 +269,7 @@ test("a rejected run shows the verifier summary and no diff or patch hash", asyn
 
 test("needs_review blocks every new start until reviewed", async ({page}) => {
   await freezeClock(page); await mockNative(page, needsReview); const panel = await open(page);
-  await expect(panel).toContainText("inceleme gerekli");
+  await expect(panel).toContainText("İnceleme gerekli; yeni görev başlatılmaz.");
   await expect(panel.getByRole("checkbox")).toBeDisabled(); await expect(start(panel)).toBeDisabled();
   await expect(panel.getByTestId("task-run-diff")).toHaveCount(0);
 });

@@ -62,7 +62,7 @@ const words: Record<"tr" | "en", Words> = {
     phases: {starting: "Görev başlatılıyor…", preparing: "İzole ortam hazırlanıyor…", running: "Ajan çalışıyor…", verifying: "Bağımsız doğrulayıcı çalışıyor…", cleaning: "Ortam temizleniyor…"},
     outcomes: {
       passed: "Görev doğrulandı", rejected: "Aday doğrulayıcı tarafından reddedildi; diff gösterilmiyor.", cancelled: "Görev iptal edildi",
-      failed: "Görev tamamlanamadı", needs_review: "Görev ortamının kapanması doğrulanamadı; inceleme gerekli.",
+      failed: "Görev tamamlanamadı", needs_review: "İnceleme gerekli; yeni görev başlatılmaz.",
     },
     errors: model => ({
       asset_missing: "Gerekli CLI dosyaları bulunamadı.", asset_invalid: "CLI dosyaları doğrulanamadı.", docker_unavailable: "Docker'a erişilemiyor. Docker'ı başlatıp tekrar dene.",
@@ -121,7 +121,7 @@ const words: Record<"tr" | "en", Words> = {
     phases: {starting: "Starting task…", preparing: "Preparing isolated environment…", running: "Agent is working…", verifying: "Independent verifier is running…", cleaning: "Cleaning up environment…"},
     outcomes: {
       passed: "Task verified", rejected: "The verifier rejected the candidate; no diff is shown.", cancelled: "Task cancelled",
-      failed: "The task could not complete", needs_review: "The task environment could not be confirmed closed; review is required.",
+      failed: "The task could not complete", needs_review: "Review required; no new task starts.",
     },
     errors: model => ({
       asset_missing: "Required CLI files were not found.", asset_invalid: "CLI files could not be verified.", docker_unavailable: "Docker is unavailable. Start Docker and try again.",

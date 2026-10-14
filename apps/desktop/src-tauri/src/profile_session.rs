@@ -4,6 +4,8 @@
 use crate::{
     launcher::{node_name, resources, uuid},
     launcher_process::OwnedWorker,
+    operation_journal::{self, OwnerHold},
+    profile_binding::{self, Binding},
     profile_store::{self, Provider},
     task_run::TaskRun,
 };
@@ -376,6 +378,38 @@ fn progress(current: Phase, next: Phase) -> bool {
         (current, next),
         (Phase::Starting, Phase::Preparing) | (Phase::Preparing, Phase::Checking)
     ) || (next == Phase::Cleaning && !matches!(current, Phase::Cleaning | Phase::Finished))
+}
+// The refusal a profile's durable state imposes before any session action:
+// failed/verified for an invalid binding, needs_review/unknown otherwise. The
+// mapping matches the task-run gate; both satisfy `valid_result`.
+fn start_gate(
+    store: &std::path::Path,
+    operation: &Operation,
+) -> Option<(Outcome, &'static str, Cleanup)> {
+    let review = (
+        Outcome::NeedsReview,
+        "profile_needs_review",
+        Cleanup::Unknown,
+    );
+    match profile_binding::read(store, &operation.profile_id, operation.provider) {
+        // A first login (or the worker's own status/logout handling) proceeds.
+        Binding::Absent => None,
+        Binding::Invalid => Some((Outcome::Failed, "profile_invalid", Cleanup::Verified)),
+        Binding::Reserved => Some(review),
+        Binding::Ready(owner) => {
+            let provider = match operation.provider {
+                Provider::Claude => "claude",
+                Provider::Codex => "codex",
+            };
+            // Same journal root the worker receives in its boot frame.
+            (operation_journal::owner_hold(
+                &store.join("managed-operation-journal"),
+                &owner,
+                provider,
+            ) != OwnerHold::Clear)
+                .then_some(review)
+        }
+    }
 }
 impl ProfileSession {
     fn start_slot(self: &Arc<Self>) -> Option<StartSlot> {
@@ -753,6 +787,20 @@ impl ProfileSession {
         codes: mpsc::Receiver<String>,
     ) {
         let id = operation.request_id.as_str();
+        // Native durable start gate (ADR 0025): decided before resources, a
+        // worker or any boot frame exist. A binding whose runtime owner has
+        // unresolved or unreadable durable operations never starts any action,
+        // whichever process or restart left them behind.
+        if let Some((outcome, error, cleanup)) = start_gate(&store, &operation) {
+            self.finish(
+                id,
+                outcome,
+                SessionState::Unknown,
+                Some(error.into()),
+                cleanup,
+            );
+            return;
+        }
         let deadline = Instant::now()
             + Duration::from_secs(if operation.action == Action::Login {
                 660
